@@ -1,0 +1,615 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Wolfram 14.3' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       154,          7]
+NotebookDataLength[     24952,        607]
+NotebookOptionsPosition[     21329,        539]
+NotebookOutlinePosition[     21781,        556]
+CellTagsIndexPosition[     21738,        553]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+
+Cell[CellGroupData[{
+Cell["\:0424\:0443\:043d\:043a\:0446\:0438\:0438 \:0430\:0432\:0442\:043e\
+\:0437\:0430\:0433\:0440\:0443\:0437\:043a\:0438", "Text",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ CellChangeTimes->{{3.9736418890947495`*^9, 
+  3.9736419059795685`*^9}},ExpressionUUID->"f6456d93-a9c7-444d-806d-\
+ca4df0990e2e"],
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{
+  "$QEDPath", 
+   "=", "\"\<C:\\\\Users\\\\rudia\\\\git\\\\qed\\\\src\\\\QED.wl\>\""}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{
+  "$QEDSrcDir", "=", "\"\<C:\\\\Users\\\\rudia\\\\git\\\\qed\\\\src\>\""}], 
+  ";"}]}], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ InitializationCell->True,
+ CellChangeTimes->{{3.9736412860466633`*^9, 3.9736412952257385`*^9}, {
+   3.9736414517275066`*^9, 3.9736415379931393`*^9}, {3.9736415680888863`*^9, 
+   3.97364156938118*^9}, 3.973641905980568*^9},
+ CellLabel->"In[24]:=",ExpressionUUID->"815c384e-e42c-ce43-8f3a-f1445d6b76ef"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{
+   "\:0444\:0443\:043d\:043a\:0446\:0438\:044f", " ", 
+    "\:043f\:0435\:0440\:0435\:0437\:0430\:0433\:0440\:0443\:0437\:043a\:0438\
+"}], "*)"}], "\[IndentingNewLine]", 
+  RowBox[{
+   RowBox[{
+    RowBox[{"reloadQED", "[", "]"}], ":=", 
+    RowBox[{"Module", "[", 
+     RowBox[{
+      RowBox[{"{", "}"}], ",", 
+      RowBox[{
+       RowBox[{"Remove", "[", "\"\<QED`*\>\"", "]"}], ";", 
+       "\[IndentingNewLine]", 
+       RowBox[{"Get", "[", "$QEDPath", "]"}], ";", "\[IndentingNewLine]", 
+       RowBox[{
+       "Print", 
+        "[", "\"\<\[Checkmark] \:041f\:0430\:043a\:0435\:0442 QED \
+\:043f\:0435\:0440\:0435\:0437\:0430\:0433\:0440\:0443\:0436\:0435\:043d!\>\"",
+         "]"}], ";", "\[IndentingNewLine]", 
+       RowBox[{"Print", "[", 
+        RowBox[{"\"\<\:0412\:0440\:0435\:043c\:044f: \>\"", ",", 
+         RowBox[{"DateString", "[", 
+          RowBox[{"Now", ",", "\"\<Time\>\""}], "]"}]}], "]"}], ";"}]}], 
+     "]"}]}], ";"}]}]], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ InitializationCell->True,
+ CellChangeTimes->{{3.9736416109312305`*^9, 3.9736416379740963`*^9}, {
+   3.9736416883367596`*^9, 3.973641694779217*^9}, 3.973641905980568*^9, 
+   3.97364215900486*^9},ExpressionUUID->"69b587eb-1ebf-cb4f-bd53-\
+710ba6ac9956"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{
+   "\:0414\:0438\:043d\:0430\:043c\:0438\:0447\:0435\:0441\:043a\:0438\:0439",
+     " ", "\:043c\:043e\:043d\:0438\:0442\:043e\:0440", " ", 
+    RowBox[{"(", 
+     RowBox[{
+     "\:0434\:043b\:044f", " ", "\:0432\:0441\:0435\:0445", " ", 
+      "\:0432\:0435\:0440\:0441\:0438\:0439", " ", "\:043d\:043e", " ", 
+      "\:043d\:0435", " ", 
+      "\:0440\:0430\:0431\:043e\:0442\:0430\:0435\:0442"}], ")"}]}], "*)"}], 
+  "\[IndentingNewLine]", 
+  RowBox[{
+   RowBox[{
+    RowBox[{
+     RowBox[{"startDynamicMonitor", "[", "]"}], ":=", 
+     RowBox[{"Module", "[", 
+      RowBox[{
+       RowBox[{"{", "}"}], ",", 
+       RowBox[{
+        RowBox[{"$lastModTimeQED", "=", 
+         RowBox[{"FileDate", "[", "$QEDPath", "]"}]}], ";", 
+        "\[IndentingNewLine]", 
+        RowBox[{"$dynamicMonitorQED", "=", 
+         RowBox[{"Dynamic", "[", 
+          RowBox[{
+           RowBox[{"If", "[", 
+            RowBox[{
+             RowBox[{
+              RowBox[{"FileDate", "[", "$QEDPath", "]"}], ">", 
+              "$lastModTimeQED"}], ",", 
+             RowBox[{"(", 
+              RowBox[{
+               RowBox[{"$lastModTimeQED", "=", 
+                RowBox[{"FileDate", "[", "$QEDPath", "]"}]}], ";", 
+               "\[IndentingNewLine]", 
+               RowBox[{"Remove", "[", "\"\<QED`*\>\"", "]"}], ";", 
+               "\[IndentingNewLine]", 
+               RowBox[{"Get", "[", "$QEDPath", "]"}], ";", 
+               "\[IndentingNewLine]", 
+               RowBox[{
+               "Print", 
+                "[", "\"\<\[Checkmark] Dynamic Monitor: \:043f\:0430\:043a\
+\:0435\:0442 \:043f\:0435\:0440\:0435\:0437\:0437\:0430\:0433\:0440\:0443\
+\:0436\:0435\:043d!\>\"", "]"}], ";"}], ")"}]}], "]"}], ";", 
+           "\[IndentingNewLine]", 
+           RowBox[{"DateString", "[", 
+            RowBox[{"Now", ",", "\"\<Time\>\""}], "]"}]}], "]"}]}], ";"}]}], 
+      "]"}]}], ";"}], "\[IndentingNewLine]", "\n", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"stopDynamicMonitor", "[", "]"}], ":=", 
+     RowBox[{"(", 
+      RowBox[{
+       RowBox[{"$lastModTimeQED", "=."}], ";", "\[IndentingNewLine]", 
+       RowBox[{"$dynamicMonitorQED", "=."}], ";", "\[IndentingNewLine]", 
+       RowBox[{
+       "Print", 
+        "[", "\"\<\[Checkmark] Dynamic Monitor \:043e\:0441\:0442\:0430\:043d\
+\:043e\:0432\:043b\:0435\:043d\>\"", "]"}], ";"}], ")"}]}], 
+    ";"}]}]}]], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ InitializationCell->True,
+ CellChangeTimes->{{3.973641647869932*^9, 3.9736416755788746`*^9}, 
+   3.973641905980568*^9, {3.9736431132330837`*^9, 3.9736431137752056`*^9}, 
+   3.973643234604067*^9, {3.973643290810442*^9, 3.97364329154661*^9}, {
+   3.973643545596281*^9, 
+   3.9736435543472595`*^9}},ExpressionUUID->"7fdad6df-3f41-7d4f-b712-\
+2dab7d3d99f8"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", "FileSystemMonitor", "*)"}], "\[IndentingNewLine]", 
+  RowBox[{
+   RowBox[{
+    RowBox[{
+     RowBox[{"startFileSystemMonitor", "[", "]"}], ":=", 
+     RowBox[{"Module", "[", 
+      RowBox[{
+       RowBox[{"{", "}"}], ",", 
+       RowBox[{
+        RowBox[{"If", "[", 
+         RowBox[{
+          RowBox[{"ValueQ", "[", "$watchHandle", "]"}], ",", 
+          RowBox[{
+           RowBox[{
+           "Print", 
+            "[", "\"\<\:26a0 \:041c\:043e\:043d\:0438\:0442\:043e\:0440 \
+\:0443\:0436\:0435 \:0437\:0430\:043f\:0443\:0449\:0435\:043d. \:041e\:0441\
+\:0442\:0430\:043d\:043e\:0432\:0438 \:0441\:0442\:0430\:0440\:044b\:0439: \
+stopFileSystemMonitor[]\>\"", "]"}], ";", "\[IndentingNewLine]", 
+           RowBox[{"Return", "[", "]"}], ";"}]}], "]"}], ";", 
+        "\[IndentingNewLine]", 
+        RowBox[{"$watchHandle", "=", 
+         RowBox[{"FileSystemMonitor", "[", 
+          RowBox[{"$QEDSrcDir", ",", 
+           RowBox[{"{", 
+            RowBox[{
+             RowBox[{"FileNameJoin", "[", 
+              RowBox[{"{", 
+               RowBox[{"#", ",", "\"\<*.wl\>\""}], "}"}], "]"}], ":>", 
+             RowBox[{"(", 
+              RowBox[{
+               RowBox[{"Remove", "[", "\"\<QED`*\>\"", "]"}], ";", 
+               "\[IndentingNewLine]", 
+               RowBox[{"Get", "[", "$QEDPath", "]"}], ";", 
+               "\[IndentingNewLine]", 
+               RowBox[{
+               "Print", 
+                "[", "\"\<\[Checkmark] FileSystemMonitor: \:043f\:0430\:043a\
+\:0435\:0442 \:043f\:0435\:0440\:0435\:0437\:0437\:0430\:0433\:0440\:0443\
+\:0436\:0435\:043d!\>\"", "]"}], ";", "\[IndentingNewLine]", 
+               RowBox[{"Print", "[", 
+                RowBox[{"\"\<\:0412\:0440\:0435\:043c\:044f: \>\"", ",", 
+                 RowBox[{"DateString", "[", 
+                  RowBox[{"Now", ",", "\"\<Time\>\""}], "]"}]}], "]"}], ";", 
+               "\[IndentingNewLine]", 
+               RowBox[{"Print", "[", 
+                RowBox[{"\"\<\:0424\:0430\:0439\:043b: \>\"", ",", 
+                 RowBox[{"Last", "@", 
+                  RowBox[{"FileNameSplit", "[", "#", "]"}]}]}], "]"}], ";"}], 
+              ")"}]}], "}"}]}], "]"}]}], ";", "\[IndentingNewLine]", 
+        RowBox[{"Print", "[", 
+         RowBox[{"\"\<\[Checkmark] FileSystemMonitor \:0437\:0430\:043f\:0443\
+\:0449\:0435\:043d \:043d\:0430 \:0434\:0438\:0440\:0435\:043a\:0442\:043e\
+\:0440\:0438\:0438: \>\"", ",", "$QEDSrcDir"}], "]"}], ";", 
+        "\[IndentingNewLine]", 
+        RowBox[{
+        "Print", 
+         "[", "\"\<\:041e\:0441\:0442\:0430\:043d\:043e\:0432\:0438: \
+stopFileSystemMonitor[]\>\"", "]"}], ";"}]}], "]"}]}], ";"}], "\n", "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"stopFileSystemMonitor", "[", "]"}], ":=", 
+     RowBox[{"Module", "[", 
+      RowBox[{
+       RowBox[{"{", "}"}], ",", 
+       RowBox[{
+        RowBox[{"If", "[", 
+         RowBox[{
+          RowBox[{"ValueQ", "[", "$watchHandle", "]"}], ",", 
+          RowBox[{
+           RowBox[{"FileSystemMonitor", "[", 
+            RowBox[{"$watchHandle", ",", "\"\<Stop\>\""}], "]"}], ";", 
+           "\[IndentingNewLine]", 
+           RowBox[{"Unset", "[", "$watchHandle", "]"}], ";", 
+           "\[IndentingNewLine]", 
+           RowBox[{
+           "Print", 
+            "[", "\"\<\[Checkmark] FileSystemMonitor \:043e\:0441\:0442\:0430\
+\:043d\:043e\:0432\:043b\:0435\:043d\>\"", "]"}], ";"}], ",", 
+          RowBox[{
+           RowBox[{
+           "Print", 
+            "[", "\"\<\:26a0 \:041c\:043e\:043d\:0438\:0442\:043e\:0440 \
+\:043d\:0435 \:0437\:0430\:043f\:0443\:0449\:0435\:043d\>\"", "]"}], ";"}]}], 
+         "]"}], ";"}]}], "]"}]}], ";"}]}]}]], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ InitializationCell->True,
+ CellChangeTimes->{{3.973641717772415*^9, 3.9736417583142414`*^9}, 
+   3.973641905980568*^9, {3.973643641099861*^9, 
+   3.973643649500759*^9}},ExpressionUUID->"efed4158-111b-a842-9c38-\
+40b69f94f162"]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell["\:0423\:0442\:0438\:043b\:0438\:0442\:044b", "Text",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ CellChangeTimes->{{3.973642048865961*^9, 3.9736420513205166`*^9}, 
+   3.973642089768545*^9},ExpressionUUID->"166b6e19-a4c2-ff47-a1b3-\
+5fc42afcd5fa"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{
+   "\:041e\:0447\:0438\:0441\:0442\:0438\:0442\:044c", " ", 
+    "\:043a\:043e\:043d\:0442\:0435\:043a\:0441\:0442", " ", 
+    "\:043f\:043e\:043b\:043d\:043e\:0441\:0442\:044c\:044e"}], "*)"}], 
+  RowBox[{
+   RowBox[{
+    RowBox[{"clearQED", "[", "]"}], ":=", 
+    RowBox[{"Module", "[", 
+     RowBox[{
+      RowBox[{"{", "}"}], ",", 
+      RowBox[{
+       RowBox[{"Remove", "[", "\"\<QED`*\>\"", "]"}], ";", 
+       "\[IndentingNewLine]", 
+       RowBox[{
+       "Print", 
+        "[", "\"\<\[Checkmark] \:041a\:043e\:043d\:0442\:0435\:043a\:0441\
+\:0442 QED \:043e\:0447\:0438\:0449\:0435\:043d\>\"", "]"}], ";"}]}], "]"}]}],
+    ";"}]}]], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ InitializationCell->True,
+ CellChangeTimes->{{3.973642057757538*^9, 3.973642057757538*^9}, 
+   3.973642089768545*^9},
+ CellLabel->"In[30]:=",ExpressionUUID->"f59f3ba5-2645-4940-8559-439693f1edc4"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{
+   "\:041f\:0440\:043e\:0432\:0435\:0440\:0438\:0442\:044c", " ", 
+    "\:0441\:0442\:0430\:0442\:0443\:0441", " ", 
+    "\:0437\:0430\:0433\:0440\:0443\:0437\:043a\:0438"}], "*)"}], 
+  RowBox[{
+   RowBox[{
+    RowBox[{"checkQED", "[", "]"}], ":=", 
+    RowBox[{"Module", "[", 
+     RowBox[{
+      RowBox[{"{", "symbols", "}"}], ",", 
+      RowBox[{
+       RowBox[{"symbols", "=", 
+        RowBox[{"Names", "[", "\"\<QED`*\>\"", "]"}]}], ";", 
+       "\[IndentingNewLine]", 
+       RowBox[{"Print", "[", 
+        RowBox[{"\"\<\:0417\:0430\:0433\:0440\:0443\:0436\:0435\:043d\:043d\
+\:044b\:0435 \:0441\:0438\:043c\:0432\:043e\:043b\:044b \:0432 QED: \>\"", ",", 
+         RowBox[{"Length", "[", "symbols", "]"}]}], "]"}], ";", 
+       "\[IndentingNewLine]", 
+       RowBox[{"Print", "[", "symbols", "]"}], ";"}]}], "]"}]}], 
+   ";"}]}]], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ InitializationCell->True,
+ CellChangeTimes->{{3.9736420634715996`*^9, 3.973642089768545*^9}},
+ CellLabel->"In[31]:=",ExpressionUUID->"e635b57b-b668-3947-b63a-783742ce0c67"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{
+   "\:041f\:0440\:043e\:0441\:043c\:043e\:0442\:0440", " ", 
+    "\:043f\:043e\:0441\:043b\:0435\:0434\:043d\:0435\:0439", " ", 
+    "\:0437\:0430\:0433\:0440\:0443\:0437\:043a\:0438"}], "*)"}], 
+  RowBox[{
+   RowBox[{
+    RowBox[{"lastLoadTime", "[", "]"}], ":=", 
+    RowBox[{"Module", "[", 
+     RowBox[{
+      RowBox[{"{", "}"}], ",", 
+      RowBox[{
+       RowBox[{"Print", "[", 
+        RowBox[{"\"\<\:041f\:043e\:0441\:043b\:0435\:0434\:043d\:0435\:0435 \
+\:0438\:0437\:043c\:0435\:043d\:0435\:043d\:0438\:0435 \:0444\:0430\:0439\
+\:043b\:0430: \>\"", ",", 
+         RowBox[{"DateString", "[", 
+          RowBox[{
+           RowBox[{"FileDate", "[", "$QEDPath", "]"}], 
+           ",", "\"\<DateTime\>\""}], "]"}]}], "]"}], ";"}]}], "]"}]}], 
+   ";"}]}]], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ InitializationCell->True,
+ CellChangeTimes->{{3.973642069122877*^9, 3.973642089768545*^9}},
+ CellLabel->"In[32]:=",ExpressionUUID->"e7daee77-80a1-6e44-8616-b1ca1ee2a30d"]
+}, Closed]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{"\:0412\:0430\:0440\:0438\:0430\:043d\:0442", " ", 
+    RowBox[{"\:0410", ":", 
+     RowBox[{
+     "\:0440\:0443\:0447\:043d\:0430\:044f", " ", 
+      "\:043f\:0435\:0440\:0435\:0437\:0430\:0433\:0440\:0443\:0437\:043a\
+\:0430", " ", 
+      RowBox[{"(", 
+       RowBox[{
+       "\:0434\:043b\:044f", " ", "\:0432\:0441\:0435\:0445", " ", 
+        "\:0432\:0435\:0440\:0441\:0438\:0439", " ", "WL"}], ")"}]}]}]}], 
+   "*)"}], "\[IndentingNewLine]", 
+  RowBox[{
+   RowBox[{"reloadQED", "[", "]"}], ";"}]}]], "Input",
+ CellChangeTimes->{{3.9736416049928875`*^9, 3.9736416270336227`*^9}, {
+  3.973641815384281*^9, 3.9736418179158535`*^9}},
+ CellLabel->"In[37]:=",ExpressionUUID->"beb0a980-a134-4942-aba8-7487205c0864"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "CreateModel", "shdw", 
+   "\"Symbol \\!\\(\\*RowBox[{\\\"\\\\\\\"CreateModel\\\\\\\"\\\"}]\\) \
+appears in multiple contexts \\!\\(\\*RowBox[{\\\"{\\\", \
+RowBox[{\\\"\\\\\\\"QED`\\\\\\\"\\\", \\\",\\\", \\\"\\\\\\\"QED`Model`\\\\\\\
+\"\\\"}], \\\"}\\\"}]\\); definitions in context \
+\\!\\(\\*RowBox[{\\\"\\\\\\\"QED`\\\\\\\"\\\"}]\\) may shadow or be shadowed \
+by other definitions.\"", 2, 37, 22, 28457242587916494007, "Local", 
+   "QED`CreateModel"},
+  "MessageTemplate2",
+  BaseStyle->"MSG"]], "Message",
+ CellChangeTimes->{3.9736421404670105`*^9, 3.9736426525820045`*^9, 
+  3.973642695340845*^9, 3.9736427637981033`*^9, 3.9736428167697506`*^9},
+ CellLabel->
+  "During evaluation of \
+In[37]:=",ExpressionUUID->"9c3ce733-7fca-114f-b468-7f35ca215b6f"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "ComputeEvolution", "shdw", 
+   "\"Symbol \\!\\(\\*RowBox[{\\\"\\\\\\\"ComputeEvolution\\\\\\\"\\\"}]\\) \
+appears in multiple contexts \\!\\(\\*RowBox[{\\\"{\\\", \
+RowBox[{\\\"\\\\\\\"QED`\\\\\\\"\\\", \\\",\\\", \\\"\\\\\\\"QED`Numeric`\\\\\
+\\\"\\\"}], \\\"}\\\"}]\\); definitions in context \
+\\!\\(\\*RowBox[{\\\"\\\\\\\"QED`\\\\\\\"\\\"}]\\) may shadow or be shadowed \
+by other definitions.\"", 2, 37, 23, 28457242587916494007, "Local", 
+   "QED`ComputeEvolution"},
+  "MessageTemplate2",
+  BaseStyle->"MSG"]], "Message",
+ CellChangeTimes->{3.9736421404670105`*^9, 3.9736426525820045`*^9, 
+  3.973642695340845*^9, 3.9736427637981033`*^9, 3.9736428167747517`*^9},
+ CellLabel->
+  "During evaluation of \
+In[37]:=",ExpressionUUID->"b016b0c8-ad97-1d43-9b48-8b3c5d725840"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "MyInteractiveModule", "shdw", 
+   "\"Symbol \
+\\!\\(\\*RowBox[{\\\"\\\\\\\"MyInteractiveModule\\\\\\\"\\\"}]\\) appears in \
+multiple contexts \\!\\(\\*RowBox[{\\\"{\\\", \
+RowBox[{\\\"\\\\\\\"QED`\\\\\\\"\\\", \\\",\\\", \\\"\\\\\\\"QED`GUI`\\\\\\\"\
+\\\"}], \\\"}\\\"}]\\); definitions in context \
+\\!\\(\\*RowBox[{\\\"\\\\\\\"QED`\\\\\\\"\\\"}]\\) may shadow or be shadowed \
+by other definitions.\"", 2, 37, 24, 28457242587916494007, "Local", 
+   "QED`MyInteractiveModule"},
+  "MessageTemplate2",
+  BaseStyle->"MSG"]], "Message",
+ CellChangeTimes->{3.9736421404670105`*^9, 3.9736426525820045`*^9, 
+  3.973642695340845*^9, 3.9736427637981033`*^9, 3.973642816777754*^9},
+ CellLabel->
+  "During evaluation of \
+In[37]:=",ExpressionUUID->"c85d685b-7fee-4341-afc7-ea89914013f7"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "MyCompareModule", "shdw", 
+   "\"Symbol \\!\\(\\*RowBox[{\\\"\\\\\\\"MyCompareModule\\\\\\\"\\\"}]\\) \
+appears in multiple contexts \\!\\(\\*RowBox[{\\\"{\\\", \
+RowBox[{\\\"\\\\\\\"QED`\\\\\\\"\\\", \\\",\\\", \\\"\\\\\\\"QED`GUI`\\\\\\\"\
+\\\"}], \\\"}\\\"}]\\); definitions in context \
+\\!\\(\\*RowBox[{\\\"\\\\\\\"QED`\\\\\\\"\\\"}]\\) may shadow or be shadowed \
+by other definitions.\"", 2, 37, 25, 28457242587916494007, "Local", 
+   "QED`MyCompareModule"},
+  "MessageTemplate2",
+  BaseStyle->"MSG"]], "Message",
+ CellChangeTimes->{3.9736421404670105`*^9, 3.9736426525820045`*^9, 
+  3.973642695340845*^9, 3.9736427637981033`*^9, 3.9736428167817535`*^9},
+ CellLabel->
+  "During evaluation of \
+In[37]:=",ExpressionUUID->"9abad7c1-a2bc-1740-92c8-ef96bdea521c"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "Set", "write", 
+   "\"Tag \\!\\(\\*RowBox[{\\\"Times\\\"}]\\) in \
+\\!\\(\\*RowBox[{\\\"\\\\\\\"\\\\\\\"\\\", \\\" \\\", \
+\\\"QED`Bootstrap`Private`dir2\\\"}]\\) is Protected.\"", 2, 37, 26, 
+   28457242587916494007, "Local"},
+  "MessageTemplate",
+  BaseStyle->"MSG"]], "Message",
+ CellChangeTimes->{3.9736421404670105`*^9, 3.9736426525820045`*^9, 
+  3.973642695340845*^9, 3.9736427637981033`*^9, 3.9736428167847557`*^9},
+ CellLabel->
+  "During evaluation of \
+In[37]:=",ExpressionUUID->"4eb63b05-cf61-fb49-8162-fa8d4af9e2dc"],
+
+Cell[CellGroupData[{
+
+Cell[BoxData["\<\"\[Checkmark] \:041f\:0430\:043a\:0435\:0442 QED \
+\:043f\:0435\:0440\:0435\:0437\:0437\:0430\:0433\:0440\:0443\:0436\:0435\:043d\
+!\"\>"], "Print",
+ CellChangeTimes->{3.9736421405860386`*^9, 3.973642652644018*^9, 
+  3.973642695356848*^9, 3.973642763812105*^9, 3.973642816787756*^9},
+ CellLabel->
+  "During evaluation of \
+In[37]:=",ExpressionUUID->"97807377-ded5-0745-9d29-92a478e30a45"],
+
+Cell[BoxData[
+ InterpretationBox[
+  RowBox[{"\<\"\:0412\:0440\:0435\:043c\:044f: \"\>", 
+   "\[InvisibleSpace]", "\<\"08:40:16\"\>"}],
+  SequenceForm["\:0412\:0440\:0435\:043c\:044f: ", "08:40:16"],
+  Editable->False]], "Print",
+ CellChangeTimes->{3.9736421405860386`*^9, 3.973642652644018*^9, 
+  3.973642695356848*^9, 3.973642763812105*^9, 3.9736428167887554`*^9},
+ CellLabel->
+  "During evaluation of \
+In[37]:=",ExpressionUUID->"ed46fb25-70df-5c40-92f1-ff1b90947a66"]
+}, Open  ]]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{"\:0412\:0430\:0440\:0438\:0430\:043d\:0442", " ", 
+    RowBox[{"\:0412", ":", 
+     RowBox[{"FileSystemMonitor", " ", 
+      RowBox[{"(", 
+       RowBox[{
+        RowBox[{"\:0442\:043e\:043b\:044c\:043a\:043e", " ", "WL"}], "\[GreaterEqual]",
+         "13"}], ")"}]}]}]}], "*)"}], 
+  RowBox[{"startFileSystemMonitor", "[", "]"}]}]], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ CellChangeTimes->{{3.9736418408940506`*^9, 3.973641844539875*^9}, 
+   3.973643161678604*^9},
+ CellLabel->"In[71]:=",ExpressionUUID->"007f97f2-46d4-8e45-85fb-6ba677eb6cfc"],
+
+Cell[BoxData[
+ InterpretationBox[
+  RowBox[{"\<\"\[Checkmark] FileSystemMonitor \:0437\:0430\:043f\:0443\:0449\
+\:0435\:043d \:043d\:0430 \:0434\:0438\:0440\:0435\:043a\:0442\:043e\:0440\
+\:0438\:0438: \"\>", 
+   "\[InvisibleSpace]", "\<\"C:\\\\Users\\\\rudia\\\\git\\\\qed\\\\src\"\>"}],
+  SequenceForm[
+  "\[Checkmark] FileSystemMonitor \:0437\:0430\:043f\:0443\:0449\:0435\:043d \
+\:043d\:0430 \:0434\:0438\:0440\:0435\:043a\:0442\:043e\:0440\:0438\:0438: ", 
+   "C:\\Users\\rudia\\git\\qed\\src"],
+  Editable->False]], "Print",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ CellChangeTimes->{{3.973643564904646*^9, 3.973643589435972*^9}, {
+  3.973643659650057*^9, 3.97364366719376*^9}},
+ CellLabel->
+  "During evaluation of \
+In[71]:=",ExpressionUUID->"ccbb75f6-0460-6747-931f-bc2eaa848f36"],
+
+Cell[BoxData["\<\"\:041e\:0441\:0442\:0430\:043d\:043e\:0432\:0438: \
+stopFileSystemMonitor[]\"\>"], "Print",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ CellChangeTimes->{{3.973643564904646*^9, 3.973643589435972*^9}, {
+  3.973643659650057*^9, 3.9736436671947613`*^9}},
+ CellLabel->
+  "During evaluation of \
+In[71]:=",ExpressionUUID->"a2e627de-cda5-3d4c-bfc6-3fa7e31b4ee9"],
+
+Cell[BoxData[
+ RowBox[{"stopFileSystemMonitor", "[", "]"}]], "Input",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ CellChangeTimes->{3.973643161678604*^9},
+ CellLabel->"In[70]:=",ExpressionUUID->"17627b5a-5cba-2840-898d-e62a2e245678"],
+
+Cell[BoxData["\<\"\[Checkmark] FileSystemMonitor \:043e\:0441\:0442\:0430\
+\:043d\:043e\:0432\:043b\:0435\:043d\"\>"], "Print",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ CellChangeTimes->{3.973643583756687*^9, 3.973643662594721*^9},
+ CellLabel->
+  "During evaluation of \
+In[70]:=",ExpressionUUID->"3491b2dd-98d2-c946-8c9c-c79ca2708085"]
+}, Open  ]],
+
+Cell[BoxData[
+ RowBox[{"ClearAll", "[", "startDynamicMonitor", "]"}]], "Input",
+ CellChangeTimes->{{3.9736434228037987`*^9, 3.973643435038563*^9}},
+ CellLabel->"In[53]:=",ExpressionUUID->"e3925d60-e1aa-8642-899b-bdcce2e1b467"]
+},
+WindowSize->{582.6, 494.4},
+WindowMargins->{{279, Automatic}, {Automatic, 40.199999999999996`}},
+ShowGroupOpener->"OutsideFrame",
+FrontEndVersion->"14.3 for Microsoft Windows (64-bit) (July 8, 2025)",
+StyleDefinitions->"Default.nb",
+ExpressionUUID->"9541d4b7-6982-8e42-b2c9-cec7b8171b8b"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[CellGroupData[{
+Cell[576, 22, 318, 5, 33, "Text",ExpressionUUID->"f6456d93-a9c7-444d-806d-ca4df0990e2e",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.}],
+Cell[897, 29, 633, 15, 63, "Input",ExpressionUUID->"815c384e-e42c-ce43-8f3a-f1445d6b76ef",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ InitializationCell->True],
+Cell[1533, 46, 1319, 32, 183, "Input",ExpressionUUID->"69b587eb-1ebf-cb4f-bd53-710ba6ac9956",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ InitializationCell->True],
+Cell[2855, 80, 2833, 69, 419, "Input",ExpressionUUID->"7fdad6df-3f41-7d4f-b712-2dab7d3d99f8",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ InitializationCell->True],
+Cell[5691, 151, 3996, 92, 745, "Input",ExpressionUUID->"efed4158-111b-a842-9c38-40b69f94f162",
+ CellGroupingRules->{"GroupTogetherGrouping", 10000.},
+ InitializationCell->True]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[9724, 248, 264, 4, 33, "Text",ExpressionUUID->"166b6e19-a4c2-ff47-a1b3-5fc42afcd5fa",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.}],
+Cell[9991, 254, 957, 25, 112, "Input",ExpressionUUID->"f59f3ba5-2645-4940-8559-439693f1edc4",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ InitializationCell->True],
+Cell[10951, 281, 1128, 27, 148, "Input",ExpressionUUID->"e635b57b-b668-3947-b63a-783742ce0c67",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ InitializationCell->True],
+Cell[12082, 310, 1051, 26, 167, "Input",ExpressionUUID->"e7daee77-80a1-6e44-8616-b1ca1ee2a30d",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.},
+ InitializationCell->True]
+}, Closed]],
+Cell[CellGroupData[{
+Cell[13170, 341, 766, 18, 43, "Input",ExpressionUUID->"beb0a980-a134-4942-aba8-7487205c0864"],
+Cell[13939, 361, 788, 16, 44, "Message",ExpressionUUID->"9c3ce733-7fca-114f-b468-7f35ca215b6f"],
+Cell[14730, 379, 805, 16, 62, "Message",ExpressionUUID->"b016b0c8-ad97-1d43-9b48-8b3c5d725840"],
+Cell[15538, 397, 810, 17, 62, "Message",ExpressionUUID->"c85d685b-7fee-4341-afc7-ea89914013f7"],
+Cell[16351, 416, 798, 16, 62, "Message",ExpressionUUID->"9abad7c1-a2bc-1740-92c8-ef96bdea521c"],
+Cell[17152, 434, 559, 13, 26, "Message",ExpressionUUID->"4eb63b05-cf61-fb49-8162-fa8d4af9e2dc"],
+Cell[CellGroupData[{
+Cell[17736, 451, 405, 7, 22, "Print",ExpressionUUID->"97807377-ded5-0745-9d29-92a478e30a45"],
+Cell[18144, 460, 470, 10, 22, "Print",ExpressionUUID->"ed46fb25-70df-5c40-92f1-ff1b90947a66"]
+}, Open  ]]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[18663, 476, 622, 14, 47, "Input",ExpressionUUID->"007f97f2-46d4-8e45-85fb-6ba677eb6cfc",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.}],
+Cell[19288, 492, 805, 16, 22, "Print",ExpressionUUID->"ccbb75f6-0460-6747-931f-bc2eaa848f36",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.}],
+Cell[20096, 510, 386, 7, 22, "Print",ExpressionUUID->"a2e627de-cda5-3d4c-bfc6-3fa7e31b4ee9",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.}],
+Cell[20485, 519, 245, 4, 28, "Input",ExpressionUUID->"17627b5a-5cba-2840-898d-e62a2e245678",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.}],
+Cell[20733, 525, 351, 6, 22, "Print",ExpressionUUID->"3491b2dd-98d2-c946-8c9c-c79ca2708085",
+ CellGroupingRules->{"GroupTogetherGrouping", 10001.}]
+}, Open  ]],
+Cell[21099, 534, 226, 3, 42, "Input",ExpressionUUID->"e3925d60-e1aa-8642-899b-bdcce2e1b467"]
+}
+]
+*)
+
