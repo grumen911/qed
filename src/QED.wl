@@ -1,0 +1,14 @@
+BeginPackage["QED`"];
+
+(* публичные функции *)
+CreateModel::usage      = "CreateModel[params] creates model structure.";
+ComputeEvolution::usage = "ComputeEvolution[model, tmax] computes numerical evolution.";
+MyInteractiveModule::usage = "MyInteractiveModule[initParams] creates interactive UI.";
+MyCompareModule::usage  = "MyCompareModule[p1, p2] compares two parameter sets.";
+
+Begin["`Private`"];
+
+QED`Bootstrap`Initialize[];
+
+End[];
+EndPackage[];
