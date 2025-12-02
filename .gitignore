@@ -1,0 +1,34 @@
+# Mathematica временные файлы
+*.nb~
+*.tmp
+*.bak
+
+# Кэш метаданных и история
+.git/
+Thumbs.db
+.DS_Store
+*.swp
+
+# Выходные файлы Mathematica
+*.pdf
+*.html
+*.cdf
+*.eps
+
+# Системные файлы
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+
+# Выходные данные (результаты)
+results/*.dat
+results/*.csv
+output/
+
+# IDE временные файлы
+.vscode/
+.idea/
+
+# Большие бинарные файлы
+*.zip
+*.tar.gz
