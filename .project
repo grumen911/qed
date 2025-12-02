@@ -5,7 +5,11 @@
 	<projects>
 	</projects>
 	<buildSpec>
+		<name>com.wolfram.eclipse.MEET.core.wolframBuilder</name>
+	    <arguments>
+	    </arguments>
 	</buildSpec>
 	<natures>
+		<nature>com.wolfram.eclipse.MEET.PackageProject</nature>
 	</natures>
 </projectDescription>
