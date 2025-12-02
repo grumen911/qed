@@ -1,6 +1,5 @@
 BeginPackage["QED`Model`"];
 
-CreateModel::usage = "CreateModel[params] creates full model structure.";
 GetSymbolic::usage = "GetSymbolic[model, key] extracts symbolic form.";
 GetNumeric::usage = "GetNumeric[model, key] extracts numeric form.";
 
