@@ -4,9 +4,14 @@ QubitDashboard::usage = "QubitDashboard[model] - интерактивная па
 
 Begin["`Private`"];
 
-QubitDashboard[model_Association] := DynamicModule[
+QubitDashboard[models:{_Association..}] := DynamicModule[
   {
-    (* Переменные состояния здесь *)
+    (* ═══ ОБЩИЕ ПЕРЕМЕННЫЕ ═══ *)
+    selectedModelIndex = 1,        (* Какая модель выбрана *)
+    currentModel,                   (* Текущая модель *)
+    
+    (* ═══ ПЕРЕМЕННЫЕ МОДЕЛИ ═══ *)
+    modelVariables = <||>           (* Параметры конкретной модели *)
   },
   
   Column[{
