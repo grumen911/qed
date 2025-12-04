@@ -1,5 +1,5 @@
 # Mathematica временные файлы
-*.nb~
+*.nb
 *.tmp
 *.bak
 
