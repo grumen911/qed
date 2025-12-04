@@ -55,8 +55,8 @@ CreateCircuitModel[topology_Association, primaryParams_Association,
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         УРОВЕНЬ 2: ANALYTICAL PARAMETERS                      ║ *)
-(* ║  (Гамильтониан, матрицы, представления - символическое)      ║ *)
+(* ║         УРОВЕНЬ 2: ANALYTICAL PARAMETERS                      	║ *)
+(* ║  (Гамильтониан, матрицы, представления - символическое)      	║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
 
@@ -109,6 +109,37 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_String] :=
     AssociationMap[compute, Union @ Flatten @ 
       graph[{"HamiltonianFull", "CapacitanceMatrix", "InductanceMatrix"}]]
   ]
+
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║         УРОВЕНЬ 3: NUMERICAL PARAMETERS                       	║ *)
+(* ║   (Численные вычисления для DynamicModule с кэшированием)     	║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
+
+
+GetNumericalParams[model_Association] := Module[{
+  analytical = model["Analytical"],
+  numerical = model["Numerical"]
+},
+  (* Проверить, нужен ли пересчёт *)
+  If[numerical["IsDirty"],
+    numerical["Cache"] = Switch[numerical["Method"],
+      "Diagonalization",
+      ComputeNumerical_Diagonalization[model],
+      
+      "HarmonicPerturbation",
+      ComputeNumerical_HarmonicPerturbation[model],
+      
+      _,
+      $Failed
+    ];
+    numerical["IsDirty"] = False;
+    numerical["ComputationTime"] = Now
+  ];
+  
+  numerical["Cache"]
+]
+
 
 End[];
 EndPackage[];
