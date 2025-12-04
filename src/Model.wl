@@ -141,5 +141,41 @@ GetNumericalParams[model_Association] := Module[{
 ]
 
 
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                  УПРАВЛЕНИЕ И КЭШИРОВАНИЕ                     	║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
+
+
+UpdatePrimaryParam[model_Association, path_List, newValue_] := 
+  Module[{updated},
+    
+    updated = model;
+    
+    (* Обновить первичный параметр *)
+    updated["Primary"] = 
+      SetAtPath[model["Primary"], path, newValue];
+    
+    (* Пересчитать аналитические параметры *)
+    updated["Analytical"] = ComputeAnalyticalParams[
+      updated["Primary"]["Topology"],
+      updated["Primary"]["Elements"],
+      updated["Numerical"]["Method"]
+    ];
+    
+    (* Отметить численный кэш как грязный *)
+    updated["Numerical"]["IsDirty"] = True;
+    
+    updated
+  ]
+  
+GetAnalyticalParams[model_Association] := model["Analytical"]
+
+(* Удобный доступ ко всем параметрам *)
+GetAllParams[model_Association] := <|
+  "Primary" -> model["Primary"],
+  "Analytical" -> model["Analytical"],
+  "Numerical" -> GetNumericalParams[model]
+|>
+
 End[];
 EndPackage[];
