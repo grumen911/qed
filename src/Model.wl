@@ -7,10 +7,12 @@ UpdatePrimaryParam::usage = "UpdatePrimaryParam[model, path, value]"
 
 Begin["`Private`"];
 
+
 (* ╔════════════════════════════════════════════════════════════════╗ *)
 (* ║         УРОВЕНЬ 1: PRIMARY PARAMETERS                         	║ *)
 (* ║    (Электрические компоненты и топология схемы)              	║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
+
 
 CreateCircuitModel[topology_Association, primaryParams_Association, 
                    method_String : "Diagonalization"] := 
@@ -51,8 +53,62 @@ CreateCircuitModel[topology_Association, primaryParams_Association,
     structure
   ]
 
-GetSymbolic[model_, key_] := model["Symbolic"][key];
-GetNumeric[model_, key_]  := model["Numeric"][key];
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║         УРОВЕНЬ 2: ANALYTICAL PARAMETERS                      ║ *)
+(* ║  (Гамильтониан, матрицы, представления - символическое)      ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
+
+
+(* Определить граф зависимостей *)
+dependencyGraph = {
+  "HamiltonianFull" -> {},
+  "CapacitanceMatrix" -> {"HamiltonianFull"},
+  "InductanceMatrix" -> {"HamiltonianFull"},
+  "Eigenvalues" -> {"HamiltonianFull"},
+  "Anharmonicity" -> {"Eigenvalues"},
+  "T1Lifetime" -> {"Anharmonicity", "CapacitanceMatrix"}
+};
+
+ComputeAnalyticalParams[topology_, primaryParams_, method_String] := 
+  Module[{cache = <||> , compute, graph = Association[dependencyGraph]},
+    
+    compute[key_] := 
+      cache[key] /; KeyExistsQ[cache, key];
+    
+    compute[key_] := (
+      (* Сначала вычислить все зависимости *)
+      Scan[compute, graph[key]];
+      
+      (* Затем вычислить сам параметр *)
+      cache[key] = Switch[key,
+        "HamiltonianFull",
+        BuildHamiltonian[topology, primaryParams],
+        
+        "CapacitanceMatrix",
+        BuildCapacitanceMatrix[primaryParams, topology, cache["HamiltonianFull"]],
+        
+        "InductanceMatrix",
+        BuildInductanceMatrix[primaryParams, topology, cache["HamiltonianFull"]],
+        
+        "Eigenvalues",
+        Eigenvalues[cache["HamiltonianFull"]],
+        
+        "Anharmonicity",
+        ComputeAnharmonicity[cache["Eigenvalues"], primaryParams],
+        
+        "T1Lifetime",
+        ComputeT1[cache["Anharmonicity"], cache["CapacitanceMatrix"]],
+        
+        _,
+        $Failed
+      ]
+    );
+    
+    (* Запросить нужные результаты *)
+    AssociationMap[compute, Union @ Flatten @ 
+      graph[{"HamiltonianFull", "CapacitanceMatrix", "InductanceMatrix"}]]
+  ]
 
 End[];
 EndPackage[];
