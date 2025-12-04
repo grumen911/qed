@@ -1,4 +1,4 @@
-BeginPackage["QED`CircuitMode`"];
+BeginPackage["QED`Model`"];
 
 CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]"
 GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
