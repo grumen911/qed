@@ -35,11 +35,39 @@ ExtractInteractiveParams[model_Association] :=
 (* ═══════════════════════════════════════════════════════════════ *)
 (* ОФОРМЛЕНИЕ *)
 (* ═══════════════════════════════════════════════════════════════ *)
+  	(*Кнопка выбора работы*)  
+	 SelectModel[modelKey_ ,model_, modelsStack_] := Module[{frontend, dynamicFig, dynamicSys},
+	 	frontend[v1_,v2_] := 
+		Row[{ Pane[SetterBar[v1, 
+			  Keys[modelsStack], 
+			  Appearance -> "Vertical"], ImageSize -> {All, 200}, 
+			 Scrollbars -> {False, True}], v2}];
+		  
+		dynamicFig :=Dynamic[modelKey,
+				      (modelKey = #;
+				       model = modelsStack[#];
+				       init[modelsStack[#]]) &
+    		];
+		dynamicSys := Dynamic[
+			Graphics[modelKey, 
+			ImageSize -> {All, 200}],
+			TrackedSymbols:>{modelKey},
+			SynchronousUpdating -> False
+		];
+		
+		frontend[dynamicFig,dynamicSys]
+	 ];
 
-QubitDashboard[ListModels_Association] := DynamicModule[
-  {modelIndex, model},
-  		1
+
+
+QubitDashboard[modelsStack : _Association] := DynamicModule[
+  {modelKey, model},
+  
+  {modelKey, model} = First@Normal[modelsStack];
+  	
+  	{SelectModel[modelKey, model, modelsStack],Dynamic[model]}
 ];
+
 
 End[];
 EndPackage[];
