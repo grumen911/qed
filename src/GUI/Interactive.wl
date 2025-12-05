@@ -16,29 +16,40 @@ ExtractInteractiveParams[model_Association] :=
         (TrueQ[assoc["Interactive"]] && KeyExistsQ[assoc, "Value"]) :> 
         {
           sym, 
-          assoc["Value"],
-          assoc["Min", 0],                    (* Значение по умолчанию 0 *)
-          assoc["Max", 10],                   (* Значение по умолчанию 10 *)
-          assoc["Step", 0.01],                 (* Значение по умолчанию 0.1 *)
-          assoc["Label", ToString[sym]]       (* Значение по умолчанию - имя символа *)
+          Lookup[assoc, "Min", 0],                    (* Значение по умолчанию 0 *)
+          Lookup[assoc, "Max", 10],                   (* Значение по умолчанию 10 *)
+          Lookup[assoc, "Step", 0.1],                 (* Значение по умолчанию 0.1 *)
+          Lookup[assoc, "Label", ToString[sym]]       (* Значение по умолчанию - имя символа *)
         },
       Infinity
     ],
     {}
   ];
 
+MakeDynamicSliderValue[sym_, currentValue_, state_] :=
+  Dynamic[
+    If[KeyExistsQ[state, sym], state[[sym]], currentValue],
+    (state[[sym]] = #) &
+  ];
 (* ═══════════════════════════════════════════════════════════════ *)
 (* ОФОРМЛЕНИЕ *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-MakeParametersPanel[params_, state_] :=
-  Column[
-    Table[
-      Row[{ToString[sym] <> ": ", Dynamic[state[sym]]}],
-      {sym, First /@ params}
+RenderSliderControl[sym_, currentValue_, minVal_, maxVal_, stepVal_, label_, state_] :=
+  Row[{
+    Style[label, Bold, 12],
+    " = ",
+    Slider[
+      MakeDynamicSliderValue[sym, currentValue, state],
+      {minVal, maxVal, stepVal}, 
+      Appearance -> "Labeled"
     ],
-    Spacings -> 1
-  ]; 
+    " ",
+    Dynamic[NumberForm[
+      If[KeyExistsQ[state, sym], state[[sym]], currentValue],
+      4
+    ]]
+  }];
    
 
 QubitDashboard[models:{_Association..}] := DynamicModule[
