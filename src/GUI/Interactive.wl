@@ -62,8 +62,6 @@ ExtractInteractiveParams[model_Association] :=
 
 QubitDashboard[modelsStack : _Association] := DynamicModule[
   {modelKey, model},
-  
-  {modelKey, model} = List @@ First@Normal@# &[modelsStack];
   	
   	{SelectModel[modelKey, model, modelsStack],Dynamic[model]}
 ];
