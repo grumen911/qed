@@ -4,6 +4,7 @@ CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]
 GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
 GetNumericalParams::usage = "GetNumericalParams[model]"
 UpdatePrimaryParam::usage = "UpdatePrimaryParam[model, path, value]"
+UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 
 Begin["`Private`"];
 
@@ -144,6 +145,20 @@ GetNumericalParams[model_Association] := Module[{
 (* ╔════════════════════════════════════════════════════════════════╗ *)
 (* ║                  УПРАВЛЕНИЕ И КЭШИРОВАНИЕ                      ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
+UpdateAnaliticalParam[model_Association, path_List, newValue_] := 
+  Module[{updated},
+    
+    updated = model;
+    
+    (* Пересчитать аналитические параметры *)
+    updated["Analytical"] = ComputeAnalyticalParams[
+      updated["Primary"]["Topology"],
+      updated["Primary"]["Elements"],
+      updated["Numerical"]["Method"]
+    ];
+    
+    updated
+  ]
 
 
 UpdatePrimaryParam[model_Association, path_List, newValue_] := 
@@ -154,13 +169,6 @@ UpdatePrimaryParam[model_Association, path_List, newValue_] :=
     (* Обновить первичный параметр *)
     updated["Primary"] = 
       SetAtPath[model["Primary"], path, newValue];
-    
-    (* Пересчитать аналитические параметры *)
-    updated["Analytical"] = ComputeAnalyticalParams[
-      updated["Primary"]["Topology"],
-      updated["Primary"]["Elements"],
-      updated["Numerical"]["Method"]
-    ];
     
     (* Отметить численный кэш как грязный *)
     updated["Numerical"]["IsDirty"] = True;
