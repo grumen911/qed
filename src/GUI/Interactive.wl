@@ -35,37 +35,36 @@ ExtractInteractiveParams[model_Association] :=
 (* ОФОРМЛЕНИЕ *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-	(*Создать слайдер*)	
-	(*MakeDynamicSlider[model_, sym_String] :=
-  	MakeDynamicSlider[model, sym, 5, {0.001, 10, 0.01}];*)
-  	
-	MakeDynamicSlider[model_, sym_, currentValue_, {min_, max_, step_}] :=
-	  With[{
-	    d = model["Primary",sym,"Value"](*Dynamic[model["Primary"][sym]["Value"], 
-	                (model["Primary"][sym]["Value"] = #) &]*)
-	  },
-	    Row[{
-	      sym <> ": ",
-	      Slider[d, {min, max, step}],
-	      InputField[d, Number, FieldSize -> {5, 1}]
-	    }]
-	  ];
+
+(*Создать слайдер*)	
+MakeDynamicSlider[model_, sym_, currentValue_, {min_, max_, step_}] :=
+  With[{
+    d = Dynamic[model["Primary"][sym]["Value"], 
+                (model["Primary"][sym]["Value"] = #) &]
+  },
+    Row[{
+      sym <> ": ",
+      Slider[d, {min, max, step}],
+      InputField[d, Number, FieldSize -> {5, 1}]
+    }]
+  ];
 		
-		
-	MakeSliderHub[model_] := Module[{params},
-		params = ExtractInteractiveParams[model];
-		  Column[{
-		    Map[
-		      Function[{paramList},
-		        MakeDynamicSlider[model, Sequence @@ paramList]
-		      ],
-		      params
-		    ]
-		  }]
-	];
+	
+(*Создает массив слайдеров*)	
+MakeSliderHub[model_] := Module[{params},
+	params = ExtractInteractiveParams[model];
+	  Column[
+	    Map[
+	      Function[{paramList},
+	        MakeDynamicSlider[Unevaluated@model, Sequence @@ paramList]
+	      ],
+	      params
+	    ]
+	  ]
+];
 
 
-  	(*Кнопка выбора работы*)  
+(*Кнопка выбора работы*)  
 SelectModel[model_, modelsStack_] :=
   Row[{
     Pane[
@@ -97,6 +96,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
   
   Column[{
    SelectModel[Unevaluated@model, modelsStack],
+   MakeDynamicSlider[Unevaluated@model, "eJ", 2, {0, 5, 0.01}],
+   MakeSliderHub[Unevaluated@model],
     Dynamic[model]
   }]
 ];
