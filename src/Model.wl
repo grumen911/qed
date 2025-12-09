@@ -147,7 +147,7 @@ GetNumericalParams[model_Association] := Module[{
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
 
-
+(* Извлечь значение из записи кэша, вычисляя если нужно *)
 GetCacheEntry[cacheEntry_Association, model_Association] := Module[
   {state, thunk},
   
@@ -165,6 +165,42 @@ GetCacheEntry[cacheEntry_Association, model_Association] := Module[
       $Failed
   ]
 ]
+
+
+(* Получить одно численное значение по ключу *)
+GetNumericalQuantity[model_Association, key_String] := Module[
+    {num, entry},
+    
+    num = model["Numerical"];
+    
+    (* Шаг 1: Если кэш грязный, сначала его пересчитать *)
+    If[num["IsDirty"],
+       num["Cache"] = Switch[num["Method"],
+           "Diagonalization",
+             ComputeNumerical_Diagonalization[model],
+           "HarmonicPerturbation",
+             ComputeNumerical_HarmonicPerturbation[model],
+           _, $Failed
+         ];
+       num["IsDirty"] = False;
+       num["ComputationTime"] = Now;
+       model["Numerical"] = num;  (* Обновить model *)
+     ];
+    
+    (* Шаг 2: Получить запрошенный ключ из кэша *)
+  entry = Lookup[num["Cache"], key, Missing["UnknownKey"]];
+    
+    (* Шаг 3: Если ключа нет выдать ошибку *)
+    If[entry === Missing["UnknownKey"],
+       Message[GetNumericalQuantity::unknown, key];
+       Return[$Failed]
+     ];
+    
+    (* Шаг 4: Использовать GetCacheEntry для получения значения *)
+    GetCacheEntry[entry, model]
+  ]
+
+GetNumericalQuantity::unknown = "Unknown key: `1`";
 
 
 UpdateAnaliticalParam[model_Association, path_List, newValue_] := 
