@@ -145,6 +145,28 @@ GetNumericalParams[model_Association] := Module[{
 (* ╔════════════════════════════════════════════════════════════════╗ *)
 (* ║                  УПРАВЛЕНИЕ И КЭШИРОВАНИЕ                      ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
+
+
+
+GetCacheEntry[cacheEntry_Association, model_Association] := Module[
+  {state, thunk},
+  
+  state = Lookup[cacheEntry, "State", "Unknown"];
+  
+  Which[
+    state === "Ready",
+      Lookup[cacheEntry, "Value", $Failed],
+    
+    state === "Lazy",
+      thunk = Lookup[cacheEntry, "Thunk", $Failed];
+      If[thunk === $Failed, $Failed, thunk[model]],
+    
+    True,
+      $Failed
+  ]
+]
+
+
 UpdateAnaliticalParam[model_Association, path_List, newValue_] := 
   Module[{updated},
     
