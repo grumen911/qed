@@ -47,7 +47,8 @@ CreateCircuitModel[topology_Association, primaryParams_Association,
         "Method" -> method,
         "Cache" -> <||>,
         "IsDirty" -> True,
-        "ComputationTime" -> Null
+        "ComputationTime" -> Null,
+        "ComputationStatus" -> <||>
       |>
     |>;
     
