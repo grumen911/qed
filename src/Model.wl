@@ -114,11 +114,72 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_String] :=
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         УРОВЕНЬ 3: NUMERICAL PARAMETERS                       	║ *)
-(* ║   (Численные вычисления для DynamicModule с кэшированием)     	║ *)
+(* ║         УРОВЕНЬ 3: NUMERICAL PARAMETERS                        ║ *)
+(* ║   (Численные вычисления для DynamicModule с кэшированием)      ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
 
+ComputeNumericalHarmonicPerturbation[model_Association] := Module[
+    {
+       analytical = model["Analytical"],
+       primary = model["Primary"],
+       cache = <||>
+     },
+    
+    (* ============================================ *)
+    (* FAST: Быстрые вычисления (вычисляем сразу) *)
+    (* ============================================ *)
+    
+    (* Собственные значения *)
+    cache["Eigenvalues"] = <|
+        "State" -> "Ready",
+        "Value" -> Eigenvalues[analytical["HamiltonianFull"]]
+      |>;
+    
+    (* T1 lifetime *)
+    cache["T1Lifetime"] = <|
+        "State" -> "Ready",
+        "Value" -> ComputeT1Fast[analytical, primary]
+      |>;
+    
+    (* ============================================ *)
+    (* LAZY: Медленные графики (откладываем) *)
+    (* ============================================ *)
+    
+    (* Спектр с высокой точностью *)
+    cache["PlotSpectrum"] = <|
+        "State" -> "Lazy",
+        "Thunk" -> Function[{m},
+            Module[{evals},
+               (* При первом вызове: 
+       			достать быстрые eigenvalues из кэша *)
+               evals = GetNumericalQuantity[m, "Eigenvalues"];
+               (* Построить граф с высокой точностью *)
+               
+       PlotSpectrumHighResolution[evals, m["Primary"]["Elements"]]
+             ]
+          ]
+      |>;
+    
+    (* График распада T1 *)
+    cache["PlotDecay"] = <|
+        "State" -> "Lazy",
+        "Thunk" -> Function[{m},
+            Module[{t1, evals},
+               t1 = GetNumericalQuantity[m, "T1Lifetime"];
+               evals = GetNumericalQuantity[m, "Eigenvalues"];
+               
+       PlotDecayHighResolution[t1, evals, m["Primary"]["Elements"]]
+             ]
+          ]
+      |>;
+    
+    cache
+  ]
+
+
+
+(*вычисляет все*)
 GetNumericalParams[model_Association] := Module[{
   analytical = model["Analytical"],
   numerical = model["Numerical"]
@@ -126,11 +187,11 @@ GetNumericalParams[model_Association] := Module[{
   (* Проверить, нужен ли пересчёт *)
   If[numerical["IsDirty"],
     numerical["Cache"] = Switch[numerical["Method"],
-      "Diagonalization",
-      ComputeNumerical_Diagonalization[model],
-      
       "HarmonicPerturbation",
-      ComputeNumerical_HarmonicPerturbation[model],
+      ComputeNumericalHarmonicPerturbation[model],
+      
+      "Diagonalization",
+      ComputeNumericalDiagonalization[model],
       
       _,
       $Failed
@@ -177,10 +238,10 @@ GetNumericalQuantity[model_Association, key_String] := Module[
     (* Шаг 1: Если кэш грязный, сначала его пересчитать *)
     If[num["IsDirty"],
        num["Cache"] = Switch[num["Method"],
-           "Diagonalization",
-             ComputeNumerical_Diagonalization[model],
            "HarmonicPerturbation",
-             ComputeNumerical_HarmonicPerturbation[model],
+             ComputeNumericalHarmonicPerturbation[model],
+           "Diagonalization",
+             ComputeNumericalDiagonalization[model],
            _, $Failed
          ];
        num["IsDirty"] = False;
