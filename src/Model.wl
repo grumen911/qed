@@ -15,22 +15,33 @@ Begin["`Private`"];
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         УРОВЕНЬ 1: PRIMARY PARAMETERS                         	║ *)
+(* ║         			PRIMARY PARAMETERS                         	║ *)
 (* ║    (Электрические компоненты и топология схемы)              	║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
-CreateCircuitModel[components_List, opts : OptionsPattern[]] := 
-  CreateCircuitModel[components, Automatic, opts];
+
+(* Объявление опций *)
+Options[CreateCircuitModel] = {
+  GroundNode -> Automatic,
+  Method -> "HarmonicPerturbation" (* или "Diagonalization" *)
+};
+
   
-CreateCircuitModel[components_List, groundNode_,
-                   method_String : "Diagonalization", opts : OptionsPattern[]] := 
-  Module[{analytical, defaultPrimary, topology},
+CreateCircuitModel[components_List, opts : OptionsPattern[]] := 
+  Module[{analytical, defaultPrimary, topology, method, gNode},
     
     (*validated = ValidatePrimary[primaryParams, topology];
     If[validated === $Failed, Return[$Failed]];*)
     
+	method = OptionValue[Method];
+	gNode = If[OptionValue[GroundNode] === Automatic, 
+	   (* берем макс. индекс узла *)
+	   Max[Flatten[components[[All, {2, 3}]]]], 
+	   OptionValue[GroundNode]
+	];    
+    
 	(* Топология *)
-	topology = CreateTopology[components, groundNode];    
+	topology = CreateTopology[components, gNode];    
     
     (**)
     defaultPrimary = GenerateDefaultParameters[topology];
@@ -119,7 +130,7 @@ GenerateDefaultParameters[topology_] :=
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         УРОВЕНЬ 2: ANALYTICAL PARAMETERS                      	║ *)
+(* ║         			ANALYTICAL PARAMETERS                      	║ *)
 (* ║  (Гамильтониан, матрицы, представления - символическое)      	║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
@@ -176,7 +187,7 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_String] :=
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         УРОВЕНЬ 3: NUMERICAL PARAMETERS                        ║ *)
+(* ║         			NUMERICAL PARAMETERS                        ║ *)
 (* ║   (Численные вычисления для DynamicModule с кэшированием)      ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
