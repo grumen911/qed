@@ -1,4 +1,4 @@
-BeginPackage["QED`CircuitTopology`"]
+BeginPackage["QED`CircuitTopology`"];
 
 (* Публичный конструктор *)
 CreateTopology::usage = "CreateTopology[components, groundNode] создаёт расширенную 

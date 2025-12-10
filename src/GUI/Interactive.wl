@@ -1,5 +1,6 @@
 ClearAll["QED`Interactive`*"]
-BeginPackage["QED`Interactive`", {"QED`Model`"}];
+(*BeginPackage["QED`Interactive`", {"QED`Model`"}];*)
+BeginPackage["QED`Interactive`"];
 
 
 QubitDashboard::usage = "QubitDashboard[model ] - интерактивная панель управления";

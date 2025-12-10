@@ -21,6 +21,9 @@ Initialize[] := Module[{},
   (* 2. Затем численные *)
   Get[FileNameJoin[{$srcDir, "Numeric.wl"}]];
   
+  (* 2.5 Интерактивный модуль (зависит от Model и GUI) *)
+  Get[FileNameJoin[{$srcDir, "CircuitTopology.wl"}]];
+  
   (* 3. Затем модель (зависит от Analytic и Numeric) *)
   Get[FileNameJoin[{$srcDir, "Model.wl"}]];
   
