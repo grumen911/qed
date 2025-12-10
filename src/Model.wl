@@ -19,35 +19,31 @@ Begin["`Private`"];
 (* ║    (Электрические компоненты и топология схемы)              	║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
-
-CreateCircuitModel[topology_Association, primaryParams_Association, 
-                   method_String : "Diagonalization"] := 
-  Module[{validated, analytical, structure},
+CreateCircuitModel[components_List, opts : OptionsPattern[]] := 
+  CreateCircuitModel[components, Automatic, opts];
+  
+CreateCircuitModel[components_List, groundNode_,
+                   method_String : "Diagonalization", opts : OptionsPattern[]] := 
+  Module[{analytical, defaultPrimary, topology},
     
-    validated = ValidatePrimary[primaryParams, topology];
-    If[validated === $Failed, Return[$Failed]];
+    (*validated = ValidatePrimary[primaryParams, topology];
+    If[validated === $Failed, Return[$Failed]];*)
+    
+	(* Топология *)
+	topology = CreateTopology[components, groundNode];    
+    
+    (**)
+    defaultPrimary = GenerateDefaultParameters[topology];
     
     (* Построить аналитические параметры (один раз) *)
     analytical = ComputeAnalyticalParams[topology, primaryParams, method];
     
-    (* Основная структура *)
-    structure = <|
-      
-      (* === УРОВЕНЬ 1: Первичные параметры (электрические) === *)
-      "Primary" -> <|
-        "Elements" -> primaryParams["Elements"],
-        "ExternalControl" -> primaryParams["ExternalControl", <||>],
-        "Topology" -> topology,
-        "Metadata" -> <|
-          "CircuitType" -> topology["Type"],
-          "CreationTime" -> Now
-        |>
-      |>,
-      
-      (* === УРОВЕНЬ 2: Аналитические параметры (символические) === *)
+    (* Сборка *)
+    <|
+    	  "ModelVersion" -> "1.1",
+    	  "topology" -> topology,
+      "Primary" -> defaultPrimary,
       "Analytical" -> analytical,
-      
-      (* === УРОВЕНЬ 3: Численные параметры (кэшируемые) === *)
       "Numerical" -> <|
         "Method" -> method,
         "Cache" -> <||>,
@@ -55,10 +51,71 @@ CreateCircuitModel[topology_Association, primaryParams_Association,
         "ComputationTime" -> Null,
         "ComputationStatus" -> <||>
       |>
-    |>;
-    
-    structure
+    |>
+
   ]
+
+
+(* Вспомогательная функция: Генерация дефолтных параметров *)
+GenerateDefaultParameters[topology_] := 
+ Module[{compList},
+  compList = topology["Components"];
+  
+  Association @ Map[
+    Function[comp,
+       Module[{type, name, params},
+         type = comp[[1]];
+         name = comp[[4]]; (* Тег/Имя компонента *)
+         
+         (* Логика выбора параметров в зависимости от типа *)
+         params = Switch[type,
+           
+           "Capacitor",
+           <|
+             "Type" -> "Capacitor",
+             "C" -> 	<|	"Value" -> 10.*^-15, 
+             		  	"Min" -> 1.*^-15, 
+             		  	"Max" -> 100.*^-15, 
+             		  	"Step" -> 1.*^-15, 
+             		  	"Interactive" -> True|>
+           |>,
+           
+           "JosephsonJunction",
+           <|
+             "Type" -> "JosephsonJunction",
+             "EJ" -> <|	"Value" -> 15.*^9, 
+             			"Min" -> 1.*^9, 
+             			"Max" -> 50.*^9, 
+             			"Step" -> 0.1*^9, 
+             			"Interactive" -> True|>,
+             "CJ" -> <|	"Value" -> 2.*^-15, 
+             			"Min" -> 0.1*^-15, 
+             			"Max" -> 10.*^-15, 
+             			"Step" -> 0.1*^-15, 
+             			"Interactive" -> True|>
+           |>,
+           
+           "Inductor",
+           <|
+             "Type" -> "Inductor",
+             "L" -> <|	"Value" -> 10.*^-9, 
+             			"Min" -> 0.1*^-9, 
+             			"Max" -> 100.*^-9, 
+             			"Step" -> 0.1*^-9, 
+             			"Interactive" -> True|>
+           |>,
+           
+           _, (* Неизвестный тип *)
+           <|"Type" -> "Generic", "Val" -> <|"Value" -> 0.|>|>
+         ];
+         
+         (* Возвращаем пару: ИмяКомпонента -> Параметры *)
+         name -> params
+       ]
+    ],
+    compList
+  ]
+ ];
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
