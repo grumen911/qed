@@ -2,6 +2,7 @@ ClearAll["QED`Interactive`*"]
 (*BeginPackage["QED`Interactive`", {"QED`Model`"}];*)
 BeginPackage["QED`Interactive`"];
 
+Needs["QED`Model`"];
 
 QubitDashboard::usage = "QubitDashboard[model ] - интерактивная панель управления";
 
@@ -89,7 +90,6 @@ SelectModel[model_, modelsStack_] :=
       TrackedSymbols :> {model}
     ]
   }];
-
 
 
 QubitDashboard[modelsStack : {Association__}] := DynamicModule[

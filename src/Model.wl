@@ -1,6 +1,10 @@
 (*BeginPackage["QED`Model`", {"QED`CircuitTopology`","QED`Numeric`","QED`Analytic`"}];*)
 BeginPackage["QED`Model`"];
 
+Needs["QED`CircuitTopology`"];
+Needs["QED`Numeric`"];
+Needs["QED`Analytic`"];
+
 CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]"
 GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
 GetNumericalParams::usage = "GetNumericalParams[model]"
