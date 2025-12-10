@@ -47,12 +47,12 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
     defaultPrimary = GenerateDefaultParameters[topology];
     
     (* Построить аналитические параметры (один раз) *)
-    analytical = ComputeAnalyticalParams[topology, primaryParams, method];
+    (*analytical = ComputeAnalyticalParams[topology, primaryParams, method];*)
     
     (* Сборка *)
     <|
     	  "ModelVersion" -> "1.1",
-    	  "topology" -> topology,
+    	  "Topology" -> topology,
       "Primary" -> defaultPrimary,
       "Analytical" -> analytical,
       "Numerical" -> <|
