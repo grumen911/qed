@@ -42,7 +42,8 @@ ExtractInteractiveParams[model_Association] :=
 MakeDynamicSlider[model_, sym_, currentValue_, {min_, max_, step_}] :=
   With[{
     d = Dynamic[model["Primary"][sym]["Value"], 
-                (model["Primary"][sym]["Value"] = #) &]
+                (model["Primary"][sym]["Value"] = #;
+                 $CurrentModel = model) &]
   },
     Row[{
       sym <> ": ",
@@ -71,7 +72,7 @@ SelectModel[model_, modelsStack_] :=
   Row[{
     Pane[
       SetterBar[
-        Dynamic[model],
+        Dynamic[model, (model = #; $CurrentModel = #) &],
         	  MapThread[#2 -> #1 &,
 		    {Query[All, "Primary", "Image"][modelsStack],
 		    	 modelsStack}

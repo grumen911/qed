@@ -10,8 +10,66 @@ GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
 GetNumericalParams::usage = "GetNumericalParams[model]"
 UpdatePrimaryParam::usage = "UpdatePrimaryParam[model, path, value]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
+SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
+
+$CurrentModel::usage = "Global reference to the active circuit model for substitution rules";
+
 
 Begin["`Private`"];
+
+
+$CurrentModel = Null;
+
+
+(* ════════════════════════════════════════════════════════════════ *)
+(* 		ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ПРАВИЛ ПОДСТАНОВКИ              *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+SetModelValue[model_Association, path_List, value_] := 
+  ($CurrentModel = ReplacePart[model, path -> value]);
+
+
+(* Рекурсивный обход ассоциации для получения всех путей *)
+getAllPaths[assoc_Association, currentPath_List : {}] := 
+  Flatten[
+    KeyValueMap[
+      Function[{key, val}, 
+        If[AssociationQ[val], 
+          getAllPaths[val, Append[currentPath, key]], 
+          {Append[currentPath, key]}
+        ]
+      ], 
+      assoc
+    ], 
+    1
+  ];
+
+(* Построение правил подстановки с отложенным вычислением *)
+BuildSubstitutionRules[primary_Association] := Module[
+  {valuePaths, rules},
+  
+  (* Найти все пути, заканчивающиеся на "Value" *)
+  valuePaths = Select[getAllPaths[primary], Last[#] === "Value" &];
+  
+  (* Построить правила: Symbol :> model["Primary"][путь к Value] *)
+  rules = Map[
+    Function[valuePath,
+      Module[{symbolPath, symbol},
+        (* Путь к Symbol: заменить "Value" на "Symbol" *)
+        symbolPath = ReplacePart[valuePath, -1 -> "Symbol"];
+        
+        (* Извлечь символ из Primary *)
+        symbol = primary[[Sequence @@ symbolPath]];
+        
+        (* Создать отложенное правило *)
+        symbol :> Part[$CurrentModel,"Primary", Sequence @@ valuePath]
+      ]
+    ],
+    valuePaths
+  ];
+  
+  rules
+];
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
@@ -28,7 +86,7 @@ Options[CreateCircuitModel] = {
 
   
 CreateCircuitModel[components_List, opts : OptionsPattern[]] := 
-  Module[{analytical, defaultPrimary, topology, method, gNode},
+  Module[{analytical, defaultPrimary, topology, method, gNode, model},
     
     (*validated = ValidatePrimary[primaryParams, topology];
     If[validated === $Failed, Return[$Failed]];*)
@@ -50,10 +108,11 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
     (*analytical = ComputeAnalyticalParams[topology, primaryParams, method];*)
     
     (* Сборка *)
-    <|
+    model = <|
     	  "ModelVersion" -> "1.1",
     	  "Topology" -> topology,
       "Primary" -> defaultPrimary,
+      "SubstitutionRules" -> {},
       "Analytical" -> analytical,
       "Numerical" -> <|
         "Method" -> method,
@@ -62,8 +121,15 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
         "ComputationTime" -> Null,
         "ComputationStatus" -> <||>
       |>
-    |>
+    |>;
 
+    (* Строим правила подстановки *)
+    model["SubstitutionRules"] = BuildSubstitutionRules[defaultPrimary];
+	
+	(* Автоматически устанавливаем как текущую модель *)
+    $CurrentModel = model;
+	
+	model
   ]
 
 
@@ -74,9 +140,10 @@ GenerateDefaultParameters[topology_] :=
   
   Association @ Map[
     Function[comp,
-       Module[{type, name, params},
+       Module[{type, name, params, symbols},
          type = comp[[1]];
          name = comp[[4]]; (* Тег/Имя компонента *)
+         symbols = If[Length[comp] >= 5, comp[[5]], <||>];
          
          (* Логика выбора параметров в зависимости от типа *)
          params = Switch[type,
@@ -85,6 +152,7 @@ GenerateDefaultParameters[topology_] :=
            <|
              "Type" -> "Capacitor",
              "C" -> 	<|	"Value" -> 10.*^-15, 
+             			"Symbol" -> Lookup[symbols, "C", C],
              		  	"Min" -> 1.*^-15, 
              		  	"Max" -> 100.*^-15, 
              		  	"Step" -> 1.*^-15, 
@@ -95,11 +163,13 @@ GenerateDefaultParameters[topology_] :=
            <|
              "Type" -> "JosephsonJunction",
              "EJ" -> <|	"Value" -> 15.*^9, 
+             			"Symbol" -> Lookup[symbols, "EJ", EJ],
              			"Min" -> 1.*^9, 
              			"Max" -> 50.*^9, 
              			"Step" -> 0.1*^9, 
              			"Interactive" -> True|>,
              "CJ" -> <|	"Value" -> 2.*^-15, 
+             			"Symbol" -> Lookup[symbols, "CJ", CJ],
              			"Min" -> 0.1*^-15, 
              			"Max" -> 10.*^-15, 
              			"Step" -> 0.1*^-15, 
@@ -110,6 +180,7 @@ GenerateDefaultParameters[topology_] :=
            <|
              "Type" -> "Inductor",
              "L" -> <|	"Value" -> 10.*^-9, 
+             			"Symbol" -> Lookup[symbols, "L", L],
              			"Min" -> 0.1*^-9, 
              			"Max" -> 100.*^-9, 
              			"Step" -> 0.1*^-9, 
