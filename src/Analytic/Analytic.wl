@@ -1,5 +1,6 @@
 BeginPackage["QED`Analytic`"];
 
+BuildLagrangian::usage = "BuildLagrangian[params] builds symbolic Lagrangian.";
 BuildHamiltonian::usage = "BuildHamiltonian[params] builds symbolic Hamiltonian.";
 DiagonalizeSymbolic::usage = "DiagonalizeSymbolic[H] diagonalizes symbolic Hamiltonian.";
 
@@ -7,7 +8,7 @@ Begin["`Private`"];
 
 
 (* Константа для магнитного потока *)
-$PhiZero = 2.067833848*^-15;  (* Φ₀ = h/(2e) в Вб *)
+phiZero = Subscript[\[CapitalPhi], 0];
 
 
 (* ════════════════════════════════════════════════════════════════ *)
@@ -37,6 +38,41 @@ ToCustomTeX[expr_] := Module[{tex},
   }];
   tex
 ];
+
+
+BuildLagrangian[topology_Association, primaryParams_Association] := 
+ Module[{components, terms},
+  
+  components = topology["Components"];
+  
+  terms = Map[
+    Module[{type, n1, n2, tag, symbols, flux, fluxDot, params}, 
+      {type, n1, n2, tag, symbols} = PadRight[#, 5, <||>];
+      flux = Subscript[\[Phi], n1] - Subscript[\[Phi], n2];
+      fluxDot = flux /. Subscript[\[Phi], n_] :> Derivative[1][Subscript[\[Phi], n]][t];
+      params = primaryParams[tag];
+      
+      Switch[type,
+        "Capacitor",
+        params["C"]["Symbol"]/2 * fluxDot^2,
+        
+        "Inductor",
+        -flux^2/(2 * params["L"]["Symbol"]),
+        
+        "JosephsonJunction",
+        params["CJ"]["Symbol"]/2 * fluxDot^2 + 
+          params["EJ"]["Symbol"] * Cos[2 Pi flux / phiZero],
+        
+        _, 0
+      ]
+    ] &,
+    components
+  ];
+  
+  Total[terms]
+ ];
+
+
 
 
 BuildHamiltonian[params_Association] := Module[{sol},
