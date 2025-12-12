@@ -170,15 +170,39 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
 
 (* Вспомогательная функция: Генерация дефолтных параметров *)
 GenerateDefaultParameters[topology_] := 
- Module[{compList},
+ Module[{compList, componentCounts},
   compList = topology["Components"];
+  
+  (* Счетчики для каждого типа компонента *)
+  componentCounts = <|"Capacitor" -> 0, "JosephsonJunction" -> 0, "Inductor" -> 0|>;
   
   Association @ Map[
     Function[comp,
-       Module[{type, name, params, symbols},
+       Module[{type, name, params, symbols, defaultSymbols, count},
          type = comp[[1]];
-         name = comp[[4]]; (* Тег/Имя компонента *)
+         name = comp[[4]];
          symbols = If[Length[comp] >= 5, comp[[5]], <||>];
+         
+         (* Увеличить счетчик для этого типа *)
+         componentCounts[type] = componentCounts[type] + 1;
+         count = componentCounts[type];
+         
+         (* Генерация дефолтных символов с индексами *)
+         defaultSymbols = Switch[type,
+           "Capacitor",
+           <|"C" -> Subscript[C, count]|>,
+           
+           "JosephsonJunction",
+           <|"EJ" -> Subscript[EJ, count], "CJ" -> Subscript[CJ, count]|>,
+           
+           "Inductor",
+           <|"L" -> Subscript[L, count]|>,
+           
+           _, <||>
+         ];
+         
+         (* Объединить пользовательские и дефолтные символы *)
+         symbols = Join[defaultSymbols, symbols];
          
          (* Логика выбора параметров в зависимости от типа *)
          params = Switch[type,
@@ -186,47 +210,54 @@ GenerateDefaultParameters[topology_] :=
            "Capacitor",
            <|
              "Type" -> "Capacitor",
-             "C" -> 	<|	"Value" -> 10.*^-15, 
-             			"Symbol" -> Lookup[symbols, "C", C],
-             		  	"Min" -> 1.*^-15, 
-             		  	"Max" -> 100.*^-15, 
-             		  	"Step" -> 1.*^-15, 
-             		  	"Interactive" -> True|>
+             "C" -> <|
+               "Value" -> 10.*^-15, 
+               "Symbol" -> symbols["C"],
+               "Min" -> 1.*^-15, 
+               "Max" -> 100.*^-15, 
+               "Step" -> 1.*^-15, 
+               "Interactive" -> True
+             |>
            |>,
            
            "JosephsonJunction",
            <|
              "Type" -> "JosephsonJunction",
-             "EJ" -> <|	"Value" -> 15.*^9, 
-             			"Symbol" -> Lookup[symbols, "EJ", EJ],
-             			"Min" -> 1.*^9, 
-             			"Max" -> 50.*^9, 
-             			"Step" -> 0.1*^9, 
-             			"Interactive" -> True|>,
-             "CJ" -> <|	"Value" -> 2.*^-15, 
-             			"Symbol" -> Lookup[symbols, "CJ", CJ],
-             			"Min" -> 0.1*^-15, 
-             			"Max" -> 10.*^-15, 
-             			"Step" -> 0.1*^-15, 
-             			"Interactive" -> True|>
+             "EJ" -> <|
+               "Value" -> 15.*^9, 
+               "Symbol" -> symbols["EJ"],
+               "Min" -> 1.*^9, 
+               "Max" -> 50.*^9, 
+               "Step" -> 0.1*^9, 
+               "Interactive" -> True
+             |>,
+             "CJ" -> <|
+               "Value" -> 2.*^-15, 
+               "Symbol" -> symbols["CJ"],
+               "Min" -> 0.1*^-15, 
+               "Max" -> 10.*^-15, 
+               "Step" -> 0.1*^-15, 
+               "Interactive" -> True
+             |>
            |>,
            
            "Inductor",
            <|
              "Type" -> "Inductor",
-             "L" -> <|	"Value" -> 10.*^-9, 
-             			"Symbol" -> Lookup[symbols, "L", L],
-             			"Min" -> 0.1*^-9, 
-             			"Max" -> 100.*^-9, 
-             			"Step" -> 0.1*^-9, 
-             			"Interactive" -> True|>
+             "L" -> <|
+               "Value" -> 10.*^-9, 
+               "Symbol" -> symbols["L"],
+               "Min" -> 0.1*^-9, 
+               "Max" -> 100.*^-9, 
+               "Step" -> 0.1*^-9, 
+               "Interactive" -> True
+             |>
            |>,
            
-           _, (* Неизвестный тип *)
+           _, 
            <|"Type" -> "Generic", "Val" -> <|"Value" -> 0.|>|>
          ];
          
-         (* Возвращаем пару: ИмяКомпонента -> Параметры *)
          name -> params
        ]
     ],
