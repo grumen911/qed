@@ -13,23 +13,18 @@ Begin["`Private`"];
 (* ЛОГИКА *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-ExtractInteractiveParams[model_Association] := 
-  If[KeyExistsQ[model, "Primary"],
-    Cases[
-      Normal[model["Primary"]],
-      (sym_ -> assoc_Association) /; 
-        (TrueQ[assoc["Interactive"]] && KeyExistsQ[assoc, "Value"]) :> 
-        {
-          sym, 
-          assoc["Value"],
-          {Lookup[assoc, "Min", 0],                    (* Значение по умолчанию 0 *)
-          Lookup[assoc, "Max", 10],                   (* Значение по умолчанию 10 *)
-          Lookup[assoc, "Step", 0.1]}                 (* Значение по умолчанию 0.1 *)
-          (*Lookup[assoc, "Label", ToString[sym]]*)       (* Значение по умолчанию - имя символа *)
-        },
-      Infinity
+ExtractInteractiveParams[model_Association] :=
+  Flatten[
+    KeyValueMap[
+      Function[{tag, params},
+        KeyValueMap[
+          {tag, #1, #2["Value"], {#2["Min"], #2["Max"], #2["Step"]}} &,
+          params
+        ]
+      ],
+      Query[All, Select[#Interactive === True &]][model["Primary"]]
     ],
-    {}
+    1
   ];
 
 
