@@ -1,6 +1,7 @@
 BeginPackage["QED`Analytic`"];
 
 BuildLagrangian::usage = "BuildLagrangian[params] builds symbolic Lagrangian.";
+BuildCapacitanceMatrix::usage = "BuildCapacitanceMatrix[params] builds symbolic Capacitance Matrix.";
 BuildHamiltonian::usage = "BuildHamiltonian[params] builds symbolic Hamiltonian.";
 DiagonalizeSymbolic::usage = "DiagonalizeSymbolic[H] diagonalizes symbolic Hamiltonian.";
 
@@ -73,6 +74,21 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
  ];
 
 
+BuildCapacitanceMatrix[lagrangian_, nodeList_List] := 
+ Module[{phiDotVars, capacitanceMatrix},
+  
+  (* Список производных узловых потоков *)
+  phiDotVars = Derivative[1][Subscript[\[Phi], #]][t] & /@ nodeList;
+  
+  (* Вычисляем матрицу: C_ij = ∂²L/(∂φ̇ᵢ ∂φ̇ⱼ) *)
+  capacitanceMatrix = Outer[
+    D[D[lagrangian, #1], #2] &,
+    phiDotVars,
+    phiDotVars
+  ];
+  
+  Simplify[capacitanceMatrix]
+ ]
 
 
 BuildHamiltonian[params_Association] := Module[{sol},
