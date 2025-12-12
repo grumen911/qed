@@ -1,46 +1,23 @@
 BeginPackage["QED`Bootstrap`"];
 
-Initialize::usage = "Initialize[] sets up the package.";
+InitQED::usage = "Initialize[] sets up the package.";
 
 Begin["`Private`"];
 
-Initialize[] := Module[{},
-  (* версионирование *)
-  $QEDVersion = "0.1.0";
-  
-  (* инициализация глобального состояния *)
-  $QEDCache = <||>;
-  $QEDDebug = False;
-  
-  (* Загрузка подсистем (порядок важен!) *)
-  $srcDir = DirectoryName[$InputFileName];
-  
-  (* Интерактивный модуль (зависит от Model и GUI) *)
-  Get[FileNameJoin[{$srcDir, "Interactive.wl"}]];
-  
-  (* модель (зависит от Analytic и Numeric) *)
-  Get[FileNameJoin[{$srcDir, "Model.wl"}]];
-  
-  (* Интерактивный модуль (зависит от Model и GUI) *)
-  Get[FileNameJoin[{$srcDir, "CircuitTopology.wl"}]];
-  
-  (* загружаем аналитические функции *)
-  Get[FileNameJoin[{$srcDir, "Analytic.wl"}]];
-  
-  (* численные *)
-  Get[FileNameJoin[{$srcDir, "Numeric.wl"}]];
-  
-  (* стиль *)
-  Get[FileNameJoin[{$srcDir, "PlotStyle.wl"}]];
-  
-  (* GUI (зависит от Model) *)
-  Get[FileNameJoin[{$srcDir, "GUI.wl"}]];
-  
+InitQED[] := Module[{srcDir},
+    srcDir = DirectoryName[$InputFileName];
+    If[!MemberQ[$Path, srcDir], PrependTo[$Path, srcDir]];
 
-  
-  (* валидация *)
-  If[! StringQ[$QEDVersion], Message[Initialize::error, "Version not set"]];
+    (* 1. Сначала загружаем базу: стили, аналитику и МОДЕЛЬ *)
+    Get[FileNameJoin[{srcDir, "PlotStyle", "PlotStyle.wl"}]];
+    Get[FileNameJoin[{srcDir, "Analytic", "Analytic.wl"}]];
+    Get[FileNameJoin[{srcDir, "Numeric", "Numeric.wl"}]]; 
+
+    Get[FileNameJoin[{srcDir, "CircuitTopology.wl"}]];
+    Get[FileNameJoin[{srcDir, "Model.wl"}]];
+
+	Get[FileNameJoin[{srcDir, "GUI", "Interactive.wl"}]];
+
 ];
-
 End[];
 EndPackage[];
