@@ -34,14 +34,17 @@ ExtractInteractiveParams[model_Association] :=
 
 
 (*Создать слайдер*)	
-MakeDynamicSlider[model_, sym_, currentValue_, {min_, max_, step_}] :=
+MakeDynamicSlider[model_, componentTag_, paramName_, currentValue_, 
+				 {min_, max_, step_}] :=
   With[{
-    d = Dynamic[model["Primary"][sym]["Value"], 
-                (model["Primary"][sym]["Value"] = #;
-                 $CurrentModel = model) &]
+    d = Dynamic[
+      model["Primary"][componentTag][paramName]["Value"], 
+      (model["Primary"][componentTag][paramName]["Value"] = #;
+       $CurrentModel = model) &
+    ]
   },
     Row[{
-      sym <> ": ",
+      componentTag <> "." <> paramName <> ": ",
       Slider[d, {min, max, step}],
       InputField[d, Number, FieldSize -> {5, 1}]
     }]
@@ -69,7 +72,7 @@ SelectModel[model_, modelsStack_] :=
       SetterBar[
         Dynamic[model, (model = #; $CurrentModel = #) &],
         	  MapThread[#2 -> #1 &,
-		    {Query[All, "Primary", "Image"][modelsStack],
+		    {Query[All, "Image"][modelsStack],
 		    	 modelsStack}
         ],
         Appearance -> "Vertical"
@@ -80,7 +83,7 @@ SelectModel[model_, modelsStack_] :=
     
     Dynamic[
       Graphics[
-        model["Primary", "Image"],
+        model["Image"],
         ImageSize -> {All, 200}
       ],
       TrackedSymbols :> {model}
@@ -93,7 +96,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
   
   Column[{
    SelectModel[Unevaluated@model, modelsStack],
-   MakeDynamicSlider[Unevaluated@model, "eJ", 2, {0, 5, 0.01}],
    MakeSliderHub[Unevaluated@model],
     Dynamic[model]
   }]
