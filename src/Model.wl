@@ -105,7 +105,7 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
     defaultPrimary = GenerateDefaultParameters[topology];
     
     (* Построить аналитические параметры (один раз) *)
-    (*analytical = ComputeAnalyticalParams[topology, primaryParams, method];*)
+    analytical = ComputeAnalyticalParams[topology, defaultPrimary, method];
     
     (* Сборка *)
     model = <|
@@ -130,7 +130,7 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
     $CurrentModel = model;
 	
 	model
-  ]
+  ];
 
 
 (* Вспомогательная функция: Генерация дефолтных параметров *)
@@ -206,55 +206,24 @@ GenerateDefaultParameters[topology_] :=
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
 
-(* Определить граф зависимостей *)
-dependencyGraph = {
-  "HamiltonianFull" -> {},
-  "CapacitanceMatrix" -> {"HamiltonianFull"},
-  "InductanceMatrix" -> {"HamiltonianFull"},
-  "Eigenvalues" -> {"HamiltonianFull"},
-  "Anharmonicity" -> {"Eigenvalues"},
-  "T1Lifetime" -> {"Anharmonicity", "CapacitanceMatrix"}
-};
-
-ComputeAnalyticalParams[topology_, primaryParams_, method_String] := 
-  Module[{cache = <||> , compute, graph = Association[dependencyGraph]},
-    
-    compute[key_] := 
-      cache[key] /; KeyExistsQ[cache, key];
-    
-    compute[key_] := (
-      (* Сначала вычислить все зависимости *)
-      Scan[compute, graph[key]];
-      
-      (* Затем вычислить сам параметр *)
-      cache[key] = Switch[key,
-        "HamiltonianFull",
-        BuildHamiltonian[topology, primaryParams],
-        
-        "CapacitanceMatrix",
-        BuildCapacitanceMatrix[primaryParams, topology, cache["HamiltonianFull"]],
-        
-        "InductanceMatrix",
-        BuildInductanceMatrix[primaryParams, topology, cache["HamiltonianFull"]],
-        
-        "Eigenvalues",
-        Eigenvalues[cache["HamiltonianFull"]],
-        
-        "Anharmonicity",
-        ComputeAnharmonicity[cache["Eigenvalues"], primaryParams],
-        
-        "T1Lifetime",
-        ComputeT1[cache["Anharmonicity"], cache["CapacitanceMatrix"]],
-        
-        _,
-        $Failed
-      ]
-    );
-    
-    (* Запросить нужные результаты *)
-    AssociationMap[compute, Union @ Flatten @ 
-      graph[{"HamiltonianFull", "CapacitanceMatrix", "InductanceMatrix"}]]
-  ]
+ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
+ Module[{lagrangian, capMatrix, hamiltonian},
+  
+  (* Строим лагранжиан (временно, не сохраняем) *)
+  lagrangian = BuildLagrangian[topology, primaryParams];
+  
+  (* Ёмкостная матрица *)
+  capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
+  
+  (* Гамильтониан *)
+  hamiltonian = BuildHamiltonian[lagrangian, capMatrix, topology];
+  
+  (* Возвращаем структуру *)
+  <|
+    "CapacitanceMatrix" -> capMatrix,
+    "Hamiltonian" -> hamiltonian
+  |>
+ ];
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
@@ -319,7 +288,7 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
       |>;
     
     cache
-  ]
+  ];
 
 
 
@@ -345,7 +314,7 @@ GetNumericalParams[model_Association] := Module[{
   ];
   
   numerical["Cache"]
-]
+];
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
@@ -370,7 +339,7 @@ GetCacheEntry[cacheEntry_Association, model_Association] := Module[
     True,
       $Failed
   ]
-]
+];
 
 
 (* Получить одно численное значение по ключу *)
@@ -404,7 +373,7 @@ GetNumericalQuantity[model_Association, key_String] := Module[
     
     (* Шаг 4: Использовать GetCacheEntry для получения значения *)
     GetCacheEntry[entry, model]
-  ]
+  ];
 
 GetNumericalQuantity::unknown = "Unknown key: `1`";
 
@@ -422,7 +391,7 @@ UpdateAnaliticalParam[model_Association, path_List, newValue_] :=
     ];
     
     updated
-  ]
+  ];
 
 
 UpdatePrimaryParam[model_Association, path_List, newValue_] := 
@@ -438,7 +407,7 @@ UpdatePrimaryParam[model_Association, path_List, newValue_] :=
     updated["Numerical"]["IsDirty"] = True;
     
     updated
-  ]
+  ];
   
 GetAnalyticalParams[model_Association] := model["Analytical"]
 
@@ -447,7 +416,7 @@ GetAllParams[model_Association] := <|
   "Primary" -> model["Primary"],
   "Analytical" -> model["Analytical"],
   "Numerical" -> GetNumericalParams[model]
-|>
+|>;
 
 End[];
 EndPackage[];
