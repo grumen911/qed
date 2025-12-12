@@ -12,6 +12,11 @@ Begin["`Private`"];
 phiZero = Subscript[\[CapitalPhi], 0];
 
 
+(* Вспомогательная функция для получения независимых узлов *)
+getIndependentNodes[topology_Association] := 
+  Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+
+
 (* ════════════════════════════════════════════════════════════════ *)
 (* ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С SUBSCRIPT                   *)
 (* ════════════════════════════════════════════════════════════════ *)
@@ -42,10 +47,11 @@ ToCustomTeX[expr_] := Module[{tex},
 
 
 BuildLagrangian[topology_Association, primaryParams_Association] := 
- Module[{components, terms},
+ Module[{components, terms, groundNode},
   
   components = topology["Components"];
-  
+  groundNode = topology["GroundNode"];
+    
   terms = Map[
     Module[{type, n1, n2, tag, symbols, flux, fluxDot, params}, 
       {type, n1, n2, tag, symbols} = PadRight[#, 5, <||>];
@@ -70,36 +76,35 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
     components
   ];
   
-  Total[terms]
+  Simplify[Total[terms] /. Subscript[\[Phi], groundNode] -> 0]
  ];
 
 
-BuildCapacitanceMatrix[lagrangian_, nodeList_List] := 
- Module[{phiDotVars, capacitanceMatrix},
-  
-  (* Список производных узловых потоков *)
-  phiDotVars = Derivative[1][Subscript[\[Phi], #]][t] & /@ nodeList;
-  
-  (* Вычисляем матрицу: C_ij = ∂²L/(∂φ̇ᵢ ∂φ̇ⱼ) *)
+BuildCapacitanceMatrix[lagrangian_, topology_Association] := 
+ Module[{nodes, phiDotVars, capacitanceMatrix},
+  nodes = getIndependentNodes[topology];
+  phiDotVars = Derivative[1][Subscript[\[Phi], #]][t] & /@ nodes;
   capacitanceMatrix = Outer[
     D[D[lagrangian, #1], #2] &,
     phiDotVars,
     phiDotVars
   ];
-  
   Simplify[capacitanceMatrix]
- ]
+ ];
 
 
-BuildHamiltonian[params_Association] := Module[{sol},
-  (* аналитика *)
-  sol
-];
-
-DiagonalizeSymbolic[H_] := Module[{sol},
-  (* символьная диагонализация *)
-  sol
-];
+BuildHamiltonian[lagrangian_, capMatrix_, topology_Association] := 
+ Module[{nodes, phiVars, phiDotVars, qVars, kineticEnergy, potentialEnergy},
+  nodes = getIndependentNodes[topology];
+  phiVars = Subscript[\[Phi], #] & /@ nodes;
+  phiDotVars = Derivative[1][Subscript[\[Phi], #]][t] & /@ nodes;
+  qVars = Subscript[q, #] & /@ nodes;
+  
+  kineticEnergy = (1/2) * qVars . Inverse[capMatrix] . qVars;
+  potentialEnergy = -lagrangian /. Thread[phiDotVars -> 0];
+  
+  Simplify[kineticEnergy + potentialEnergy]
+ ];
 
 End[];
 EndPackage[];
