@@ -98,7 +98,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
   Column[{
    SelectModel[Unevaluated@model, modelsStack],
    MakeSliderHub[Unevaluated@model],
-    Dynamic[model]
+    Dynamic[model["Analytical","CapacitanceMatrix"]/.model["SubstitutionRules"]]
   }]
 ];
 

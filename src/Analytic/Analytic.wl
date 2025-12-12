@@ -103,8 +103,10 @@ BuildHamiltonian[lagrangian_, capMatrix_, topology_Association] :=
   kineticEnergy = (1/2) * qVars . Inverse[capMatrix] . qVars;
   potentialEnergy = -lagrangian /. Thread[phiDotVars -> 0];
   
+  (*Долгая операция*)
   Simplify[kineticEnergy + potentialEnergy]
  ];
+
 
 End[];
 EndPackage[];
