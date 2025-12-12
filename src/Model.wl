@@ -72,6 +72,32 @@ BuildSubstitutionRules[primary_Association] := Module[
 ];
 
 
+(* ════════════════════════════════════════════════════════════════ *)
+(* 		ГЕНЕРАЦИЯ PLACEHOLDER ИЗОБРАЖЕНИЯ                           *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+GenerateCircuitImage[topology_Association] := Module[
+  {nComponents, nNodes},
+  
+  nComponents = Length[topology["Components"]];
+  nNodes = Length[topology["Nodes"]];
+  
+  Graphics[
+    {
+      LightGray,
+      Rectangle[{0, 0}, {2, 1.5}],
+      Black,
+      Text[Style["Circuit Diagram", 14, Bold], {1, 1}],
+      Text[Style[ToString[nComponents] <> " components", 11], {1, 0.6}],
+      Text[Style[ToString[nNodes] <> " nodes", 11], {1, 0.3}]
+    },
+    ImageSize -> 200,
+    PlotRange -> {{0, 2}, {0, 1.5}},
+    ImagePadding -> 10
+  ]
+];
+
+
 (* ╔════════════════════════════════════════════════════════════════╗ *)
 (* ║         			PRIMARY PARAMETERS                         	║ *)
 (* ║    (Электрические компоненты и топология схемы)              	║ *)
@@ -81,12 +107,14 @@ BuildSubstitutionRules[primary_Association] := Module[
 (* Объявление опций *)
 Options[CreateCircuitModel] = {
   GroundNode -> Automatic,
-  Method -> "HarmonicPerturbation" (* или "Diagonalization" *)
+  Method -> "HarmonicPerturbation" (* или "Diagonalization" *),
+  CustomImage -> Automatic
 };
 
   
 CreateCircuitModel[components_List, opts : OptionsPattern[]] := 
-  Module[{analytical, defaultPrimary, topology, method, gNode, model},
+  Module[{analytical, defaultPrimary, topology, method, gNode, 
+  		  model,circuitImage},
     
     (*validated = ValidatePrimary[primaryParams, topology];
     If[validated === $Failed, Return[$Failed]];*)
@@ -107,11 +135,18 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
     (* Построить аналитические параметры (один раз) *)
     analytical = ComputeAnalyticalParams[topology, defaultPrimary, method];
     
+    (* Изображение: либо пользовательское, либо placeholder *)
+    circuitImage = If[OptionValue[CustomImage] === Automatic,
+      GenerateCircuitImage[topology],
+      OptionValue[CustomImage]
+    ];
+    
     (* Сборка *)
     model = <|
     	  "ModelVersion" -> "1.1",
     	  "Topology" -> topology,
       "Primary" -> defaultPrimary,
+      "Image" -> circuitImage,
       "SubstitutionRules" -> {},
       "Analytical" -> analytical,
       "Numerical" -> <|

@@ -16,13 +16,14 @@ Begin["`Private`"];
 ExtractInteractiveParams[model_Association] :=
   Flatten[
     KeyValueMap[
-      Function[{tag, params},
+      Function[{tag, componentParams},
         KeyValueMap[
           {tag, #1, #2["Value"], {#2["Min"], #2["Max"], #2["Step"]}} &,
-          params
+          Select[componentParams, AssociationQ[#] && 
+          	Lookup[#, "Interactive", False] === True &]
         ]
       ],
-      Query[All, Select[#Interactive === True &]][model["Primary"]]
+      model["Primary"]
     ],
     1
   ];
