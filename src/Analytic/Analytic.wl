@@ -9,7 +9,7 @@ Begin["`Private`"];
 
 
 (* Константа для магнитного потока *)
-phiZero = Subscript[\[CapitalPhi], 0];
+phi0 = Subscript[\[CapitalPhi], 0];
 
 
 (* Вспомогательная функция для получения независимых узлов *)
@@ -47,16 +47,32 @@ ToCustomTeX[expr_] := Module[{tex},
 
 
 BuildLagrangian[topology_Association, primaryParams_Association] := 
- Module[{components, terms, groundNode},
+ Module[{components, terms, groundNode, fluxLoops},
   
   components = topology["Components"];
   groundNode = topology["GroundNode"];
+  fluxLoops = topology["GraphStructure"]["fluxLoops"];
     
   terms = Map[
-    Module[{type, n1, n2, tag, symbols, flux, fluxDot, params}, 
+    Module[{type, n1, n2, tag, symbols, flux, fluxExt, fluxTotal,
+    		 	fluxDot, params, loopData}, 
       {type, n1, n2, tag, symbols} = PadRight[#, 5, <||>];
+      
       flux = Subscript[\[Phi], n1] - Subscript[\[Phi], n2];
-      fluxDot = flux /. Subscript[\[Phi], n_] :> Derivative[1][Subscript[\[Phi], n]][t];
+      
+      (* Проверить, является ли этот компонент хордой петли *)
+      loopData = Lookup[fluxLoops, tag, Missing[]];
+      fluxExt = If[MissingQ[loopData], 
+        0,
+        loopData["ExternalFluxSymbol"]
+      ];
+      
+      (* Полный поток *)
+      fluxTotal = flux + fluxExt;
+      
+      fluxDot = flux /. Subscript[\[Phi], n_] :> 
+      					Derivative[1][Subscript[\[Phi], n]][t];
+      
       params = primaryParams[tag];
       
       Switch[type,
@@ -64,11 +80,11 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
         params["C"]["Symbol"]/2 * fluxDot^2,
         
         "Inductor",
-        -flux^2/(2 * params["L"]["Symbol"]),
+        -fluxTotal^2/(2 * params["L"]["Symbol"]),
         
         "JosephsonJunction",
         params["CJ"]["Symbol"]/2 * fluxDot^2 + 
-          params["EJ"]["Symbol"] * Cos[2 Pi flux / phiZero],
+          params["EJ"]["Symbol"] * Cos[2 Pi fluxTotal / phi0],
         
         _, 0
       ]

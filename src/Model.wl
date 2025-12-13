@@ -171,13 +171,15 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
 
 (* Вспомогательная функция: Генерация дефолтных параметров *)
 GenerateDefaultParameters[topology_] := 
- Module[{compList, componentCounts},
+ Module[{compList, componentCounts, fluxLoops, primaryParams},
+ 	
   compList = topology["Components"];
+  fluxLoops = topology["GraphStructure"]["fluxLoops"];
   
   (* Счетчики для каждого типа компонента *)
   componentCounts = <|"Capacitor" -> 0, "JosephsonJunction" -> 0, "Inductor" -> 0|>;
   
-  Association @ Map[
+  primaryParams = Association @ Map[
     Function[comp,
        Module[{type, name, params, symbols, defaultSymbols, count},
          type = comp[[1]];
@@ -263,7 +265,26 @@ GenerateDefaultParameters[topology_] :=
        ]
     ],
     compList
-  ]
+  ];
+  
+  (* Добавить параметры внешних магнитных потоков *)
+	If[fluxLoops =!= <||>,
+	  (* Создать только ОДИН параметр внешнего потока *)
+	  primaryParams["Fext"] = <|
+	    "Type" -> "ExternalFlux",
+	    "Fext" -> <|
+	      "Value" -> 0.0,
+	      "Symbol" -> Subscript[\[CapitalPhi], ext],
+	      "Min" -> -1.0,
+	      "Max" -> 1.0,
+	      "Step" -> 0.01,
+	      "Interactive" -> True,
+	      "Unit" -> "\[CapitalPhi]\[VeryThinSpace]\[Null]\[Null]\[VeryThinSpace]\[Null]₀"  (* Φ₀ *)
+	    |>
+	  |>
+	];
+
+  primaryParams
  ];
 
 
