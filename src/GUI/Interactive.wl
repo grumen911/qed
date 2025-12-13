@@ -1,4 +1,3 @@
-ClearAll["QED`Interactive`*"]
 (*BeginPackage["QED`Interactive`", {"QED`Model`"}];*)
 BeginPackage["QED`Interactive`"];
 
@@ -41,6 +40,7 @@ MakeDynamicSlider[model_, componentTag_, paramName_, currentValue_,
     d = Dynamic[
       model["Primary"][componentTag][paramName]["Value"], 
       (model["Primary"][componentTag][paramName]["Value"] = #;
+      model["Numerical"]["IsDirty"] = True;
        $CurrentModel = model) &
     ]
   },
@@ -92,13 +92,31 @@ SelectModel[model_, modelsStack_] :=
   }];
 
 
+(*s_Symbol :> Symbol[SymbolName[s]]*)
+
+
 QubitDashboard[modelsStack : {Association__}] := DynamicModule[
   {model = First@modelsStack},
   
   Column[{
    SelectModel[Unevaluated@model, modelsStack],
    MakeSliderHub[Unevaluated@model],
-    Dynamic[model["Analytical","CapacitanceMatrix"]/.model["SubstitutionRules"]]
+   
+   Dynamic[
+      Column[{
+        "Hamiltonian (numerical):",
+        GetNumericalQuantity[$CurrentModel, "HamiltonianNumerical"]
+        /. s_Symbol :> Symbol[SymbolName[s]],
+        "",
+        "InverseCapacitanceMatrix:",
+        MatrixForm@GetNumericalQuantity[$CurrentModel, "InverseCapacitanceMatrix"],
+        "",
+        
+        Style["Test Plot:", Bold, 12],
+        GetNumericalQuantity[$CurrentModel, "PlotTest"]
+      }],
+      TrackedSymbols :> {$CurrentModel}
+    ]
   }]
 ];
 

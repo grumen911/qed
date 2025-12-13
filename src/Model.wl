@@ -7,6 +7,7 @@ Needs["QED`Analytic`"];
 
 CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]"
 GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
+GetNumericalQuantity::usage = "GetNumericalQuantity[model, key]"
 GetNumericalParams::usage = "GetNumericalParams[model]"
 UpdatePrimaryParam::usage = "UpdatePrimaryParam[model, path, value]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
@@ -299,15 +300,43 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 
 ComputeNumericalHarmonicPerturbation[model_Association] := Module[
-    {
-       analytical = model["Analytical"],
-       primary = model["Primary"],
-       cache = <||>
-     },
+    {analytical, subRules, cache, capNum, hamNum},
+     
+    analytical = model["Analytical"];
+    subRules = model["SubstitutionRules"];
+    cache = <||>;
     
     (* ============================================ *)
     (* FAST: Быстрые вычисления (вычисляем сразу) *)
     (* ============================================ *)
+    
+    (* Базовые численные объекты *)
+	capNum = analytical["CapacitanceMatrix"] /. subRules;
+	hamNum = analytical["Hamiltonian"] /. subRules;
+    
+    (* Численный гамильтониан *)
+    cache["HamiltonianNumerical"] = <|
+      "State" -> "Ready",
+      "Value" -> hamNum
+    |>;
+    
+    (* Численная ёмкостная матрица *)
+    cache["CapacitanceMatrixNumerical"] = <|
+      "State" -> "Ready",
+      "Value" -> capNum
+    |>;
+    
+	(* Обратная матрица с проверкой *)
+  	If[Det[capNum] != 0,
+   	 cache["InverseCapacitanceMatrix"] = <|
+   		   "State" -> "Ready",
+   		   "Value" -> Inverse[capNum]
+   	 |>,
+  	 cache["InverseCapacitanceMatrix"] = <|
+   	   "State" -> "Failed",
+   	   "Error" -> "Singular matrix"
+   	 |>
+  	];
     
     (* Собственные значения *)
     cache["Eigenvalues"] = <|
@@ -315,15 +344,37 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
         "Value" -> Eigenvalues[analytical["HamiltonianFull"]]
       |>;
     
-    (* T1 lifetime *)
-    cache["T1Lifetime"] = <|
-        "State" -> "Ready",
-        "Value" -> ComputeT1Fast[analytical, primary]
-      |>;
-    
     (* ============================================ *)
     (* LAZY: Медленные графики (откладываем) *)
     (* ============================================ *)
+    
+	cache["PlotTest"] = <|
+	  "State" -> "Lazy",
+	  "Thunk" -> Function[{m},
+	    Module[{invC, element},
+	      (* Взять элемент обратной C-матрицы из кэша *)
+	      invC = GetNumericalQuantity[m, "InverseCapacitanceMatrix"];
+	      
+	      If[invC === $Failed,
+	        $Failed,
+	        (* Взять первый диагональный элемент как коэффициент *)
+	        element = invC[[1, 1]];
+	        
+	        Plot[
+	          element *Sin[ x ], {x, 0, 1},
+	          PlotLabel -> Row[{
+	            "Test: Sin(", 
+	            s_Symbol :> SymbolName[s],
+	            ScientificForm[element], 
+	            " × x × 10¹⁵)"
+	          }],
+	          PlotTheme -> "Scientific",
+	          ImageSize -> 400
+	        ]
+	      ]
+	    ]
+	  ]
+	|>;    
     
     (* Спектр с высокой точностью *)
     cache["PlotSpectrum"] = <|
@@ -425,20 +476,19 @@ GetNumericalQuantity[model_Association, key_String] := Module[
          ];
        num["IsDirty"] = False;
        num["ComputationTime"] = Now;
-       model["Numerical"] = num;  (* Обновить model *)
+       $CurrentModel = ReplacePart[$CurrentModel, "Numerical" -> num];  (* Обновить model *)
      ];
     
     (* Шаг 2: Получить запрошенный ключ из кэша *)
-  entry = Lookup[num["Cache"], key, Missing["UnknownKey"]];
+  	entry = Lookup[num["Cache"], key, Missing["UnknownKey"]];
     
-    (* Шаг 3: Если ключа нет выдать ошибку *)
     If[entry === Missing["UnknownKey"],
        Message[GetNumericalQuantity::unknown, key];
        Return[$Failed]
      ];
     
-    (* Шаг 4: Использовать GetCacheEntry для получения значения *)
-    GetCacheEntry[entry, model]
+    (* Шаг 3: Использовать GetCacheEntry для получения значения *)
+    GetCacheEntry[entry, $CurrentModel]
   ];
 
 GetNumericalQuantity::unknown = "Unknown key: `1`";
