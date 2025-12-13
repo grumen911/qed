@@ -3,6 +3,9 @@ BeginPackage["QED`Style`"];
 QubitPlot::usage = "QubitPlot[expr, range] plots with default styling.";
 DefaultPlotOptions::usage = "DefaultPlotOptions[key] returns plot options.";
 
+TestPlot[expr_] :=
+  Plot[Sin[expr x],{x,0,1}]
+
 Begin["`Private`"];
 
 DefaultPlotOptions["QubitTimeSeries"] := {
@@ -17,6 +20,7 @@ QubitPlot[expr_, {t_, tmin_, tmax_}, opts___] :=
     Evaluate @ DefaultPlotOptions["QubitTimeSeries"],
     opts
   ];
+
 
 End[];
 EndPackage[];

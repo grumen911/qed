@@ -9,7 +9,7 @@ InitQED[] := Module[{srcDir},
     If[!MemberQ[$Path, srcDir], PrependTo[$Path, srcDir]];
 
     (* 1. Сначала загружаем базу: стили, аналитику и МОДЕЛЬ *)
-    Get[FileNameJoin[{srcDir, "PlotStyle", "PlotStyle.wl"}]];
+    Get[FileNameJoin[{srcDir, "Plots", "PlotStyle.wl"}]];
     Get[FileNameJoin[{srcDir, "Analytic", "Analytic.wl"}]];
     Get[FileNameJoin[{srcDir, "Numeric", "Numeric.wl"}]]; 
 
