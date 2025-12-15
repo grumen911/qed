@@ -296,25 +296,21 @@ GenerateDefaultParameters[topology_] :=
 
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
- Module[{lagrangian, capMatrix, hamiltonian, harmonicHamiltonian},
+ Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian},
   
-  (* Строим лагранжиан (временно, не сохраняем) *)
   lagrangian = BuildLagrangian[topology, primaryParams];
-  
-  (* Ёмкостная матрица *)
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
-  
-  (* Гамильтониан *)
   hamiltonian = BuildHamiltonian[lagrangian, capMatrix, topology];
-
-  (* Гармоническое приближение *)
   harmonicHamiltonian = BuildHarmonicHamiltonian[hamiltonian, topology];
   
-  (* Возвращаем структуру *)
+  (* Индуктивная матрица (обратная) *)
+  indMatrix = BuildInductanceMatrix[harmonicHamiltonian, topology];
+
   <|
     "CapacitanceMatrix" -> capMatrix,
     "Hamiltonian" -> hamiltonian,
-    "HarmonicHamiltonian" -> harmonicHamiltonian
+    "HarmonicHamiltonian" -> harmonicHamiltonian,
+    "InductanceMatrix" -> indMatrix  (* L⁻¹ = const *)
   |>
  ];
 
@@ -326,7 +322,7 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 
 ComputeNumericalHarmonicPerturbation[model_Association] := Module[
-    {analytical, subRules, cache, capNum, hamNum},
+    {analytical, subRules, cache, capNum, hamNum, indNum},
      
     analytical = model["Analytical"];
     subRules = model["SubstitutionRules"];
@@ -339,7 +335,8 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     (* Базовые численные объекты *)
 	capNum = analytical["CapacitanceMatrix"] /. subRules;
 	hamNum = analytical["Hamiltonian"] /. subRules;
-    
+ 	indNum = analytical["InductanceMatrix"] /. subRules;   
+ 	
     (* Численный гамильтониан *)
     cache["HamiltonianNumerical"] = <|
       "State" -> "Ready",
@@ -363,6 +360,24 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
    	   "Error" -> "Singular matrix"
    	 |>
   	];
+
+    (* Численная индуктивная матрица (обратная) *)
+    cache["InductanceMatrixInverseNumerical"] = <|
+      "State" -> "Ready",
+      "Value" -> indNum
+    |>;
+    
+    (* Прямая индуктивная матрица (если определитель ≠ 0) *)
+    If[Det[indNum] != 0,
+      cache["InductanceMatrixNumerical"] = <|
+        "State" -> "Ready",
+        "Value" -> Inverse[indNum]
+      |>,
+      cache["InductanceMatrixNumerical"] = <|
+        "State" -> "Failed",
+        "Error" -> "Singular inductance matrix"
+      |>
+    ];
     
     (* Собственные значения *)
     cache["Eigenvalues"] = <|

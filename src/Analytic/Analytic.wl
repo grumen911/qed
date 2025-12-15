@@ -4,7 +4,7 @@ BuildLagrangian::usage = "BuildLagrangian[topology, primaryParams] builds symbol
 BuildCapacitanceMatrix::usage = "BuildCapacitanceMatrix[lagrangian, topology] builds symbolic capacitance matrix.";
 BuildHamiltonian::usage = "BuildHamiltonian[lagrangian, capMatrix, topology] builds symbolic Hamiltonian.";
 BuildHarmonicHamiltonian::usage = "BuildHarmonicHamiltonian[hamiltonian, topology] expands the Hamiltonian to second order around the potential minimum \[Phi]_min.";
-
+BuildInductanceMatrix::usage = "BuildInductanceMatrix[lagrangian, topology] builds symbolic inductance matrix.";
 
 Begin["`Private`"];
 
@@ -107,6 +107,36 @@ BuildCapacitanceMatrix[lagrangian_, topology_Association] :=
     phiDotVars
   ];
   capacitanceMatrix
+ ];
+
+
+(*
+  Physics: Inverse inductance matrix L⁻¹ (stiffness matrix) from harmonic Hamiltonian.
+  
+  For harmonic approximation:
+  H = (1/2) qᵀ C⁻¹ q + (1/2) φᵀ L⁻¹ φ
+  
+  where L⁻¹ᵢⱼ = ∂²U/∂φᵢ∂φⱼ|_min is the Hessian of potential energy.
+  
+  This is the linearized inductance around equilibrium φ_min.
+  
+  Reference: Devoret lectures, Les Houches (2004), Section 3.2
+*)
+
+BuildInductanceMatrix[hamiltonian_, topology_Association] := 
+ Module[{nodes, phiVars, inductanceMatrixInv},
+  
+  nodes = getIndependentNodes[topology];
+  phiVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  
+  (* L⁻¹ = ∂²H/∂φᵢ∂φⱼ *)
+  inductanceMatrixInv = Outer[
+    D[D[hamiltonian, #1], #2] &,
+    phiVars,
+    phiVars
+  ];
+  
+  Simplify[inductanceMatrixInv]
  ];
 
 
