@@ -169,52 +169,6 @@ BuildHarmonicHamiltonian[hamiltonian_, topology_Association] :=
   Collect[result, Join[fluxVars, chargeVars], Simplify]
  ];
  
- 
- BuildHarmonicHamiltonian2[hamiltonian_, topology_Association] := 
- Module[{nodes, fluxVars, chargeVars, minSymbols, series, degree, terms, 
-         filteredTerms, result},
-  
-  nodes = getIndependentNodes[topology];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
-  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
-  
-  series = Normal @ Series[
-    hamiltonian,
-    Sequence @@ MapThread[{#1, #2, 2} &, {fluxVars, minSymbols}]
-  ] // Expand;
-  
-  degree[term_] := Total @ Exponent[term, fluxVars];
-  
-  terms = If[Head[series] === Plus, List @@ series, {series}];
-  
-  (* Отладка *)
-  Print["=== DEBUG INFO ==="];
-  Print["Total terms after Expand: ", Length[terms]];
-  
-  (* Найти термы с φ₁² *)
-  termsWithPhi1Squared = Select[terms, !FreeQ[#, Subscript[QED`$FluxSymbol, 1]^2] &];
-  Print["Terms containing φ₁²: ", Length[termsWithPhi1Squared]];
-  Print["Example: ", First[termsWithPhi1Squared, None]];
-  
-  If[termsWithPhi1Squared =!= {},
-    Print["Degree of first φ₁² term: ", degree[First[termsWithPhi1Squared]]];
-  ];
-  
-  (* Фильтрация *)
-  filteredTerms = Cases[terms, term_ /; degree[term] == 0 || degree[term] == 2];
-  
-  Print["Filtered terms count: ", Length[filteredTerms]];
-  
-  (* Проверить, сохранились ли φ₁² термы *)
-  filteredWithPhi1Squared = Select[filteredTerms, !FreeQ[#, Subscript[QED`$FluxSymbol, 1]^2] &];
-  Print["φ₁² terms after filter: ", Length[filteredWithPhi1Squared]];
-  
-  result = Total[filteredTerms];
-  
-  Collect[result, Join[fluxVars, chargeVars], Simplify]
- ];
- 
 
 End[];
 EndPackage[];
