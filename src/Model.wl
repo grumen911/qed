@@ -191,20 +191,20 @@ GenerateDefaultParameters[topology_] :=
          count = componentCounts[type];
          
          (* Генерация дефолтных символов с индексами *)
-         defaultSymbols = Switch[type,
-           "Capacitor",
-           <|"C" -> QED`$CapacitanceSymbol|>,
-           
-           "JosephsonJunction",
-           <|"EJ" -> QED`$JosephsonEnergySymbol, 
-           	 "CJ" -> QED`$JosephsonCapacitanceSymbol|>,
-           
-           "Inductor",
-           <|"L" -> QED`$InductanceSymbol|>,
-           
-           _, <||>
-         ];
-         
+		 defaultSymbols = Switch[type,
+		   "Capacitor",
+		   <|"C" -> Subscript[QED`$CapacitanceSymbol, count]|>,
+		  
+		   "JosephsonJunction",
+		   <|"EJ" -> Subscript[QED`$JosephsonEnergySymbol, count],
+		    "CJ" -> Subscript[QED`$JosephsonCapacitanceSymbol, count]|>,
+		  
+		   "Inductor",
+		   <|"L" -> Subscript[QED`$InductanceSymbol, count]|>,
+		  
+		    _, <||>
+		 ];
+		         
          (* Объединить пользовательские и дефолтные символы *)
          symbols = Join[defaultSymbols, symbols];
          

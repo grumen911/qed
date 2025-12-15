@@ -4,7 +4,6 @@ BeginPackage["QED`CircuitTopology`"];
 CreateTopology::usage = "CreateTopology[components, groundNode] создаёт расширенную 
 						топологическую структуру для Model.wl";
 
-\[CapitalPhi]ext::usage = "External magnetic flux symbol Φext";
 
 Begin["`Private`"] (* Begin Private Context *) 
 
