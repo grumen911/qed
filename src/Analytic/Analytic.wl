@@ -1,15 +1,14 @@
 BeginPackage["QED`Analytic`"];
 
-BuildLagrangian::usage = "BuildLagrangian[params] builds symbolic Lagrangian.";
-BuildCapacitanceMatrix::usage = "BuildCapacitanceMatrix[params] builds symbolic Capacitance Matrix.";
-BuildHamiltonian::usage = "BuildHamiltonian[params] builds symbolic Hamiltonian.";
-DiagonalizeSymbolic::usage = "DiagonalizeSymbolic[H] diagonalizes symbolic Hamiltonian.";
+BuildLagrangian::usage = "BuildLagrangian[topology, primaryParams] builds symbolic Lagrangian.";
+BuildCapacitanceMatrix::usage = "BuildCapacitanceMatrix[lagrangian, topology] builds symbolic capacitance matrix.";
+BuildHamiltonian::usage = "BuildHamiltonian[lagrangian, capMatrix, topology] builds symbolic Hamiltonian.";
 
 Begin["`Private`"];
 
 
-(* Константа для магнитного потока *)
-phi0 = Subscript[\[CapitalPhi], 0];
+(* Используем глобальные константы из QED` *)
+phi0 = QED`$Phi0;  
 
 
 (* Вспомогательная функция для получения независимых узлов *)
@@ -58,7 +57,7 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
     		 	fluxDot, params, loopData}, 
       {type, n1, n2, tag, symbols} = PadRight[#, 5, <||>];
       
-      flux = Subscript[\[Phi], n1] - Subscript[\[Phi], n2];
+      flux = Subscript[QED`$FluxSymbol, n1] - Subscript[QED`$FluxSymbol, n2];
       
       (* Проверить, является ли этот компонент хордой петли *)
       loopData = Lookup[fluxLoops, tag, Missing[]];
@@ -70,8 +69,8 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
       (* Полный поток *)
       fluxTotal = flux + fluxExt;
       
-      fluxDot = flux /. Subscript[\[Phi], n_] :> 
-      					Derivative[1][Subscript[\[Phi], n]][t];
+      fluxDot = flux /. Subscript[QED`$FluxSymbol, n_] :> 
+      					Derivative[1][Subscript[QED`$FluxSymbol, n]][t];
       
       params = primaryParams[tag];
       
@@ -92,14 +91,14 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
     components
   ];
   
-  Simplify[Total[terms] /. Subscript[\[Phi], groundNode] -> 0]
+  Simplify[Total[terms] /. Subscript[QED`$FluxSymbol, groundNode] -> 0]
  ];
 
 
 BuildCapacitanceMatrix[lagrangian_, topology_Association] := 
  Module[{nodes, phiDotVars, capacitanceMatrix},
   nodes = getIndependentNodes[topology];
-  phiDotVars = Derivative[1][Subscript[\[Phi], #]][t] & /@ nodes;
+  phiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ nodes;
   capacitanceMatrix = Outer[
     D[D[lagrangian, #1], #2] &,
     phiDotVars,
@@ -112,9 +111,9 @@ BuildCapacitanceMatrix[lagrangian_, topology_Association] :=
 BuildHamiltonian[lagrangian_, capMatrix_, topology_Association] := 
  Module[{nodes, phiVars, phiDotVars, qVars, kineticEnergy, potentialEnergy},
   nodes = getIndependentNodes[topology];
-  phiVars = Subscript[\[Phi], #] & /@ nodes;
-  phiDotVars = Derivative[1][Subscript[\[Phi], #]][t] & /@ nodes;
-  qVars = Subscript[q, #] & /@ nodes;
+  phiVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  phiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ nodes;
+  qVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
   
   kineticEnergy = (1/2) * qVars . Inverse[capMatrix] . qVars;
   potentialEnergy = -lagrangian /. Thread[phiDotVars -> 0];

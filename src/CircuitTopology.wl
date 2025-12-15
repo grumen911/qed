@@ -84,7 +84,7 @@ CreateTopology[components_List, groundNode_Integer] :=
                   "ChordElement" -> chord[[4]],
                   "LoopComponents" -> loopComponents,
                   "ExternalFluxVariable" -> "Fext",
-                  "ExternalFluxSymbol" -> \[CapitalPhi]ext
+                  "ExternalFluxSymbol" -> QED`$PhiExt
                 |>
              ]
            ]

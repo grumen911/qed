@@ -193,13 +193,14 @@ GenerateDefaultParameters[topology_] :=
          (* Генерация дефолтных символов с индексами *)
          defaultSymbols = Switch[type,
            "Capacitor",
-           <|"C" -> Subscript[C, count]|>,
+           <|"C" -> QED`$CapacitanceSymbol|>,
            
            "JosephsonJunction",
-           <|"EJ" -> Subscript[EJ, count], "CJ" -> Subscript[CJ, count]|>,
+           <|"EJ" -> QED`$JosephsonEnergySymbol, 
+           	 "CJ" -> QED`$JosephsonCapacitanceSymbol|>,
            
            "Inductor",
-           <|"L" -> Subscript[L, count]|>,
+           <|"L" -> QED`$InductanceSymbol|>,
            
            _, <||>
          ];
@@ -274,12 +275,12 @@ GenerateDefaultParameters[topology_] :=
 	    "Type" -> "ExternalFlux",
 	    "Fext" -> <|
 	      "Value" -> 0.0,
-	      "Symbol" -> Subscript[\[CapitalPhi], ext],
+	      "Symbol" -> QED`$PhiExt,
 	      "Min" -> -1.0,
 	      "Max" -> 1.0,
 	      "Step" -> 0.01,
 	      "Interactive" -> True,
-	      "Unit" -> "\[CapitalPhi]\[VeryThinSpace]\[Null]\[Null]\[VeryThinSpace]\[Null]₀"  (* Φ₀ *)
+	      "Unit" -> "Φ₀"  (* Φ₀ *)
 	    |>
 	  |>
 	];
