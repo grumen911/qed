@@ -106,7 +106,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
       Column[{
         "Hamiltonian (numerical):",
         GetNumericalQuantity[$CurrentModel, "HamiltonianNumerical"]
-        /. s_Symbol :> Symbol[SymbolName[s]],
+        (*/. s_Symbol :> Symbol[SymbolName[s]]*),
         "",
         "InverseCapacitanceMatrix:",
         MatrixForm@GetNumericalQuantity[$CurrentModel, "InverseCapacitanceMatrix"],

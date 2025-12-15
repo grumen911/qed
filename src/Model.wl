@@ -296,7 +296,7 @@ GenerateDefaultParameters[topology_] :=
 
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
- Module[{lagrangian, capMatrix, hamiltonian},
+ Module[{lagrangian, capMatrix, hamiltonian, harmonicHamiltonian},
   
   (* Строим лагранжиан (временно, не сохраняем) *)
   lagrangian = BuildLagrangian[topology, primaryParams];
@@ -306,11 +306,15 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
   
   (* Гамильтониан *)
   hamiltonian = BuildHamiltonian[lagrangian, capMatrix, topology];
+
+  (* Гармоническое приближение *)
+  harmonicHamiltonian = BuildHarmonicHamiltonian[hamiltonian, topology];
   
   (* Возвращаем структуру *)
   <|
     "CapacitanceMatrix" -> capMatrix,
-    "Hamiltonian" -> hamiltonian
+    "Hamiltonian" -> hamiltonian,
+    "HarmonicHamiltonian" -> harmonicHamiltonian
   |>
  ];
 

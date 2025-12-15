@@ -3,6 +3,8 @@ BeginPackage["QED`Analytic`"];
 BuildLagrangian::usage = "BuildLagrangian[topology, primaryParams] builds symbolic Lagrangian.";
 BuildCapacitanceMatrix::usage = "BuildCapacitanceMatrix[lagrangian, topology] builds symbolic capacitance matrix.";
 BuildHamiltonian::usage = "BuildHamiltonian[lagrangian, capMatrix, topology] builds symbolic Hamiltonian.";
+BuildHarmonicHamiltonian::usage = "BuildHarmonicHamiltonian[hamiltonian, topology] expands the Hamiltonian to second order around the potential minimum \[Phi]_min.";
+
 
 Begin["`Private`"];
 
@@ -104,7 +106,7 @@ BuildCapacitanceMatrix[lagrangian_, topology_Association] :=
     phiDotVars,
     phiDotVars
   ];
-  Simplify[capacitanceMatrix]
+  capacitanceMatrix
  ];
 
 
@@ -119,9 +121,100 @@ BuildHamiltonian[lagrangian_, capMatrix_, topology_Association] :=
   potentialEnergy = -lagrangian /. Thread[phiDotVars -> 0];
   
   (*Долгая операция*)
-  Simplify[kineticEnergy + potentialEnergy]
+  Collect[kineticEnergy + potentialEnergy, Join[phiVars, qVars], Simplify]
  ];
 
+
+(* ════════════════════════════════════════════════════════════════ *)
+(*                 HARMONIC APPROXIMATION                           *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+(*
+  Physics: Expand Hamiltonian to quadratic order around equilibrium.
+  
+  H(φ) ≈ H(φ_min) + (1/2) ∑ᵢⱼ Kᵢⱼ (φᵢ - φᵢ,min)(φⱼ - φⱼ,min)
+  
+  where Kᵢⱼ = ∂²H/∂φᵢ∂φⱼ|_min is the Hessian matrix.
+  
+  For Josephson junctions:
+  -E_J Cos[2πφ/Φ₀] ≈ -E_J + E_J(π/Φ₀)²(φ - φ_min)²
+  
+  Reference: Koch et al., PRA 76, 042319 (2007), Eq. (6-8)
+*)
+
+BuildHarmonicHamiltonian[hamiltonian_, topology_Association] := 
+ Module[{nodes, fluxVars, chargeVars, minSymbols, series, degree, result},
+  
+  nodes = getIndependentNodes[topology];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  
+  (* Series expansion to O(φ²) around φ_min *)
+  series = Normal @ Series[
+    hamiltonian,
+    Sequence @@ MapThread[{#1, #2, 2} &, {fluxVars, minSymbols}]
+  ] // Expand;
+  
+  (* Helper: total polynomial degree in flux variables *)
+  degree[term_] := Total @ Exponent[term, fluxVars];
+  
+  (* Keep only constant (degree 0) and quadratic (degree 2) terms *)
+  result = Total @ Cases[
+    If[Head[series] === Plus, List @@ series, {series}],
+    term_ /; degree[term] == 0 || degree[term] == 2
+  ];
+  
+  (* Collect by physical variables for readability, simplify coefficients *)
+  Collect[result, Join[fluxVars, chargeVars], Simplify]
+ ];
+ 
+ 
+ BuildHarmonicHamiltonian2[hamiltonian_, topology_Association] := 
+ Module[{nodes, fluxVars, chargeVars, minSymbols, series, degree, terms, 
+         filteredTerms, result},
+  
+  nodes = getIndependentNodes[topology];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  
+  series = Normal @ Series[
+    hamiltonian,
+    Sequence @@ MapThread[{#1, #2, 2} &, {fluxVars, minSymbols}]
+  ] // Expand;
+  
+  degree[term_] := Total @ Exponent[term, fluxVars];
+  
+  terms = If[Head[series] === Plus, List @@ series, {series}];
+  
+  (* Отладка *)
+  Print["=== DEBUG INFO ==="];
+  Print["Total terms after Expand: ", Length[terms]];
+  
+  (* Найти термы с φ₁² *)
+  termsWithPhi1Squared = Select[terms, !FreeQ[#, Subscript[QED`$FluxSymbol, 1]^2] &];
+  Print["Terms containing φ₁²: ", Length[termsWithPhi1Squared]];
+  Print["Example: ", First[termsWithPhi1Squared, None]];
+  
+  If[termsWithPhi1Squared =!= {},
+    Print["Degree of first φ₁² term: ", degree[First[termsWithPhi1Squared]]];
+  ];
+  
+  (* Фильтрация *)
+  filteredTerms = Cases[terms, term_ /; degree[term] == 0 || degree[term] == 2];
+  
+  Print["Filtered terms count: ", Length[filteredTerms]];
+  
+  (* Проверить, сохранились ли φ₁² термы *)
+  filteredWithPhi1Squared = Select[filteredTerms, !FreeQ[#, Subscript[QED`$FluxSymbol, 1]^2] &];
+  Print["φ₁² terms after filter: ", Length[filteredWithPhi1Squared]];
+  
+  result = Total[filteredTerms];
+  
+  Collect[result, Join[fluxVars, chargeVars], Simplify]
+ ];
+ 
 
 End[];
 EndPackage[];
