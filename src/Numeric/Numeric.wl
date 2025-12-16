@@ -86,9 +86,7 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
       Simplify@potentialRescaled,
       startingPointList,
       Method -> "PrincipalAxis",
-      MaxIterations -> 1,
-      AccuracyGoal -> 1,
-      PrecisionGoal -> 1
+      MaxIterations -> 500
     ],
     {FindMinimum::cvmit, FindMinimum::lstol, FindMinimum::sdprec}
   ];
