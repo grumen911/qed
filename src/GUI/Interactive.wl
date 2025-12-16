@@ -102,7 +102,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
    SelectModel[Unevaluated@model, modelsStack],
    MakeSliderHub[Unevaluated@model],
    
-   1
+   
    Dynamic[
       Column[{
         "Hamiltonian (numerical):",

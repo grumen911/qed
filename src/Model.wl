@@ -229,11 +229,11 @@ GenerateDefaultParameters[topology_] :=
            <|
              "Type" -> "JosephsonJunction",
              "EJ" -> <|
-               "Value" -> 15.*^9, 
+               "Value" -> 9.94*^-24, 
                "Symbol" -> symbols["EJ"],
-               "Min" -> 1.*^9, 
-               "Max" -> 50.*^9, 
-               "Step" -> 0.1*^9, 
+               "Min" -> 1.*^-24, 
+               "Max" -> 50.*^-24, 
+               "Step" -> 0.1*^-24, 
                "Interactive" -> True
              |>,
              "CJ" -> <|
@@ -324,70 +324,58 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     {analytical, topology, subRules, cache, capNum, hamNum, indNum,
-     equilibriumFluxes, t1, t2, t3, t4, t5},
+     equilibriumFluxes},
      
     analytical = model["Analytical"];
     subRules = model["SubstitutionRules"];
     topology = model["Topology"];
     cache = <||>;
     
-    (* ════════════════════════════════════════════════════════ *)
-    (* ПРОФИЛИРОВАНИЕ: Измерение времени каждой операции        *)
-    (* ════════════════════════════════════════════════════════ *)
+    (* ════════════════════════════════════════════════════════════ *)
+    (* Численная подстановка параметров                            *)
+    (* ════════════════════════════════════════════════════════════ *)
     
-    Print["=== Profiling ComputeNumericalHarmonicPerturbation ==="];
+    {capNum, hamNum, indNum} = {
+      analytical["CapacitanceMatrix"] /. subRules,
+      analytical["Hamiltonian"] /. subRules,
+      analytical["InductanceMatrix"] /. subRules
+    };
     
-    (* 1. ReplaceAll для матриц *)
-    {t1, {capNum, hamNum, indNum}} = AbsoluteTiming[
-      {
-        analytical["CapacitanceMatrix"] /. subRules,
-        analytical["Hamiltonian"] /. subRules,
-        analytical["InductanceMatrix"] /. subRules
-      }
-    ];
-    Print["  [1] ReplaceAll (3 matrices): ", t1, " sec"];
-    
-    (* 2. Кэширование базовых объектов *)
     cache["HamiltonianNumerical"] = <|"State" -> "Ready", "Value" -> hamNum|>;
     cache["CapacitanceMatrixNumerical"] = <|"State" -> "Ready", "Value" -> capNum|>;
     cache["InductanceMatrixInverseNumerical"] = <|"State" -> "Ready", "Value" -> indNum|>;
     
-    (* 3. Inverse для capNum *)
-    {t2, _} = AbsoluteTiming[
-      If[Det[capNum] != 0,
-        cache["InverseCapacitanceMatrix"] = <|"State" -> "Ready", "Value" -> Inverse[capNum]|>,
-        cache["InverseCapacitanceMatrix"] = <|"State" -> "Failed", "Error" -> "Singular matrix"|>
-      ]
-    ];
-    Print["  [2] Det + Inverse (capNum): ", t2, " sec"];
+    (* ════════════════════════════════════════════════════════════ *)
+    (* Обратные матрицы                                             *)
+    (* ════════════════════════════════════════════════════════════ *)
     
-    (* 4. Inverse для indNum *)
-    {t3, _} = AbsoluteTiming[
-      If[Det[indNum] != 0,
-        cache["InductanceMatrixNumerical"] = <|"State" -> "Ready", "Value" -> Inverse[indNum]|>,
-        cache["InductanceMatrixNumerical"] = <|"State" -> "Failed", "Error" -> "Singular inductance matrix"|>
-      ]
+    If[Det[capNum] != 0,
+      cache["InverseCapacitanceMatrix"] = <|"State" -> "Ready", "Value" -> Inverse[capNum]|>,
+      cache["InverseCapacitanceMatrix"] = <|"State" -> "Failed", "Error" -> "Singular matrix"|>
     ];
-    Print["  [3] Det + Inverse (indNum): ", t3, " sec"];
     
-    (* 5. Eigenvalues (заглушка) *)
-    {t4, _} = AbsoluteTiming[
-      cache["Eigenvalues"] = <|"State" -> "Ready", "Value" -> 0|>
+    If[Det[indNum] != 0,
+      cache["InductanceMatrixNumerical"] = <|"State" -> "Ready", "Value" -> Inverse[indNum]|>,
+      cache["InductanceMatrixNumerical"] = <|"State" -> "Failed", "Error" -> "Singular inductance matrix"|>
     ];
-    Print["  [4] Eigenvalues (stub): ", t4, " sec"];
     
-    (* 6. FindPotentialMinimum *)
-    {t5, equilibriumFluxes} = AbsoluteTiming[
-      FindPotentialMinimum[hamNum, topology, subRules]
-    ];
-    Print["  [5] FindPotentialMinimum: ", t5, " sec"];
+    (* ════════════════════════════════════════════════════════════ *)
+    (* Собственные значения (заглушка)                              *)
+    (* ════════════════════════════════════════════════════════════ *)
     
+    cache["Eigenvalues"] = <|"State" -> "Ready", "Value" -> 0|>;
+    
+    (* ════════════════════════════════════════════════════════════ *)
+    (* Равновесные потоки                                           *)
+    (* ════════════════════════════════════════════════════════════ *)
+    
+    equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
     cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
     
-    Print["  TOTAL: ", t1 + t2 + t3 + t4 + t5, " sec"];
-    Print["========================================"];
+    (* ════════════════════════════════════════════════════════════ *)
+    (* Lazy кэш (пример для PlotTest)                              *)
+    (* ════════════════════════════════════════════════════════════ *)
     
-    (* Lazy кэш *)
     cache["PlotTest"] = <|
       "State" -> "Lazy",
       "Thunk" -> Function[{m},
