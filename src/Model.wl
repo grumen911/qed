@@ -322,10 +322,12 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 
 ComputeNumericalHarmonicPerturbation[model_Association] := Module[
-    {analytical, subRules, cache, capNum, hamNum, indNum},
+    {analytical, topology, subRules, cache, capNum, hamNum, indNum,
+    	 equilibriumFluxes},
      
     analytical = model["Analytical"];
     subRules = model["SubstitutionRules"];
+    topology = model["Topology"];
     cache = <||>;
     
     (* ============================================ *)
@@ -384,6 +386,18 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
         "State" -> "Ready",
         "Value" -> Eigenvalues[analytical["HamiltonianFull"]]
       |>;
+
+    (* ============================================ *)
+    (* EQUILIBRIUM: Численный поиск минимума       *)
+    (* ============================================ *)
+    
+    (* Найти равновесные значения *)
+    equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
+    
+    cache["EquilibriumFluxes"] = <|
+      "State" -> "Ready",
+      "Value" -> equilibriumFluxes
+    |>;
     
     (* ============================================ *)
     (* LAZY: Медленные графики (откладываем) *)

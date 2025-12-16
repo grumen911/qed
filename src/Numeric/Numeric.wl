@@ -39,37 +39,38 @@ Begin["`Private`"];
   Reference: Manucharyan et al., Science 326, 113 (2009), Fig. 2
 *)
 
-FindPotentialMinimum[hamiltonian_, fluxVars_List, substitutionRules_List] := 
- Module[{potential, potentialNumeric, φext, constraints, result, minValues},
+FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List] := 
+ Module[{nodes, fluxVars, potential, potentialNumeric, externalFlux, 
+         constraints, result, minValues, phi0Value},
   
-  (* Extract potential energy: set all charges q_i = 0 *)
+  nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  
   potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
   
-  (* Apply numerical substitutions *)
-  potentialNumeric = potential /. substitutionRules;
+  (* Численное значение Φ₀ *)
+  phi0Value = QED`$Phi0Value;
   
-  (* Get external flux value (default = 0 if not present) *)
-  φext = QED`$PhiExt /. substitutionRules /. QED`$PhiExt -> 0;
+  potentialNumeric = potential /. substitutionRules /. QED`$Phi0 -> phi0Value;
   
-  (* Search in local vicinity around φ_ext *)
-  (* For pure Josephson: φ_min ≈ φ_ext *)
-  (* With inductors: small correction within ±2 *)
-  constraints = Thread[φext - 2 < fluxVars < φext + 2];
+  externalFlux = QED`$PhiExt /. substitutionRules /. QED`$PhiExt -> 0;
   
-  (* Minimize potential energy *)
+  (* Constraints в единицах Φ₀: φ ∈ [-Φ₀/2, Φ₀/2] для одного периода *)
+  constraints = Thread[
+    (externalFlux - 0.5) * phi0Value < fluxVars < 
+    (externalFlux + 0.5) * phi0Value
+  ];
+  
   result = Quiet[
     NMinimize[{potentialNumeric, constraints}, fluxVars, 
       Method -> "DifferentialEvolution",
       MaxIterations -> 500],
     {NMinimize::cvmit, NMinimize::nosat}
   ];
-  
-  (* Extract minimum values or use fallback *)
+
   If[result === $Failed || !NumericQ[result[[1]]],
-    (* Fallback: assume φ_min ≈ φ_ext *)
     Print["Warning: Potential minimization failed. Using φ_min ≈ φ_ext."];
-    minValues = Thread[fluxVars -> φext],
-    (* Success: extract solution *)
+    minValues = Thread[fluxVars -> externalFlux * phi0Value],
     minValues = result[[2]]
   ];
   
