@@ -63,7 +63,8 @@ BuildSubstitutionRules[primary_Association] := Module[
         symbol = primary[[Sequence @@ symbolPath]];
         
         (* Создать отложенное правило *)
-        symbol :> Part[$CurrentModel,"Primary", Sequence @@ valuePath]
+        symbol :> (Part[$CurrentModel,"Primary", Sequence @@ valuePath] * 
+           If[symbol === QED`$PhiExt, QED`$Phi0Value, 1])			
       ]
     ],
     valuePaths
