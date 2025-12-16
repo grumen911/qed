@@ -16,7 +16,7 @@ $Phi0::usage = "Subscript[\[CapitalPhi], 0] - magnetic flux quantum (h/2e ≈ 2.
 $Phi0 = Subscript[Symbol["\[CapitalPhi]"], 0];
 
 $Phi0Value::usage = "Numerical value of magnetic flux quantum in Wb.";
-$Phi0Value = 2.067833848 * 10^-15;
+$Phi0Value = 2.067833848 * 10.^-15;
 
 (* Символ внешнего магнитного потока *)
 $PhiExt::usage = "Subscript[\[CapitalPhi], ext] - external magnetic flux threading superconducting loops.";

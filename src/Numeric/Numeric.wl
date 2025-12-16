@@ -50,7 +50,7 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
   phi0Value = QED`$Phi0Value;
   
   potentialNumeric = potential /. substitutionRules /. QED`$Phi0 -> phi0Value;
-  externalFlux = QED`$PhiExt /. substitutionRules /. QED`$PhiExt -> 0;
+  externalFlux = QED`$PhiExt /. substitutionRules;
   
   constraints = Thread[
     (externalFlux - 0.5) * phi0Value < fluxVars < 

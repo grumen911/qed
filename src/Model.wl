@@ -323,141 +323,86 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     {analytical, topology, subRules, cache, capNum, hamNum, indNum,
-    	 equilibriumFluxes},
+     equilibriumFluxes, t1, t2, t3, t4, t5},
      
     analytical = model["Analytical"];
     subRules = model["SubstitutionRules"];
     topology = model["Topology"];
     cache = <||>;
     
-    (* ============================================ *)
-    (* FAST: Быстрые вычисления (вычисляем сразу) *)
-    (* ============================================ *)
+    (* ════════════════════════════════════════════════════════ *)
+    (* ПРОФИЛИРОВАНИЕ: Измерение времени каждой операции        *)
+    (* ════════════════════════════════════════════════════════ *)
     
-    (* Базовые численные объекты *)
-	capNum = analytical["CapacitanceMatrix"] /. subRules;
-	hamNum = analytical["Hamiltonian"] /. subRules;
- 	indNum = analytical["InductanceMatrix"] /. subRules;   
- 	
-    (* Численный гамильтониан *)
-    cache["HamiltonianNumerical"] = <|
-      "State" -> "Ready",
-      "Value" -> hamNum
-    |>;
+    Print["=== Profiling ComputeNumericalHarmonicPerturbation ==="];
     
-    (* Численная ёмкостная матрица *)
-    cache["CapacitanceMatrixNumerical"] = <|
-      "State" -> "Ready",
-      "Value" -> capNum
-    |>;
-    
-	(* Обратная матрица с проверкой *)
-  	If[Det[capNum] != 0,
-   	 cache["InverseCapacitanceMatrix"] = <|
-   		   "State" -> "Ready",
-   		   "Value" -> Inverse[capNum]
-   	 |>,
-  	 cache["InverseCapacitanceMatrix"] = <|
-   	   "State" -> "Failed",
-   	   "Error" -> "Singular matrix"
-   	 |>
-  	];
-
-    (* Численная индуктивная матрица (обратная) *)
-    cache["InductanceMatrixInverseNumerical"] = <|
-      "State" -> "Ready",
-      "Value" -> indNum
-    |>;
-    
-    (* Прямая индуктивная матрица (если определитель ≠ 0) *)
-    If[Det[indNum] != 0,
-      cache["InductanceMatrixNumerical"] = <|
-        "State" -> "Ready",
-        "Value" -> Inverse[indNum]
-      |>,
-      cache["InductanceMatrixNumerical"] = <|
-        "State" -> "Failed",
-        "Error" -> "Singular inductance matrix"
-      |>
+    (* 1. ReplaceAll для матриц *)
+    {t1, {capNum, hamNum, indNum}} = AbsoluteTiming[
+      {
+        analytical["CapacitanceMatrix"] /. subRules,
+        analytical["Hamiltonian"] /. subRules,
+        analytical["InductanceMatrix"] /. subRules
+      }
     ];
+    Print["  [1] ReplaceAll (3 matrices): ", t1, " sec"];
     
-    (* Собственные значения *)
-    cache["Eigenvalues"] = <|
-        "State" -> "Ready",
-        "Value" -> 0
-      |>;
-
-    (* ============================================ *)
-    (* EQUILIBRIUM: Численный поиск минимума       *)
-    (* ============================================ *)
+    (* 2. Кэширование базовых объектов *)
+    cache["HamiltonianNumerical"] = <|"State" -> "Ready", "Value" -> hamNum|>;
+    cache["CapacitanceMatrixNumerical"] = <|"State" -> "Ready", "Value" -> capNum|>;
+    cache["InductanceMatrixInverseNumerical"] = <|"State" -> "Ready", "Value" -> indNum|>;
     
-    (* Найти равновесные значения *)
-    equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
+    (* 3. Inverse для capNum *)
+    {t2, _} = AbsoluteTiming[
+      If[Det[capNum] != 0,
+        cache["InverseCapacitanceMatrix"] = <|"State" -> "Ready", "Value" -> Inverse[capNum]|>,
+        cache["InverseCapacitanceMatrix"] = <|"State" -> "Failed", "Error" -> "Singular matrix"|>
+      ]
+    ];
+    Print["  [2] Det + Inverse (capNum): ", t2, " sec"];
     
-    cache["EquilibriumFluxes"] = <|
-      "State" -> "Ready",
-      "Value" -> equilibriumFluxes
+    (* 4. Inverse для indNum *)
+    {t3, _} = AbsoluteTiming[
+      If[Det[indNum] != 0,
+        cache["InductanceMatrixNumerical"] = <|"State" -> "Ready", "Value" -> Inverse[indNum]|>,
+        cache["InductanceMatrixNumerical"] = <|"State" -> "Failed", "Error" -> "Singular inductance matrix"|>
+      ]
+    ];
+    Print["  [3] Det + Inverse (indNum): ", t3, " sec"];
+    
+    (* 5. Eigenvalues (заглушка) *)
+    {t4, _} = AbsoluteTiming[
+      cache["Eigenvalues"] = <|"State" -> "Ready", "Value" -> 0|>
+    ];
+    Print["  [4] Eigenvalues (stub): ", t4, " sec"];
+    
+    (* 6. FindPotentialMinimum *)
+    {t5, equilibriumFluxes} = AbsoluteTiming[
+      FindPotentialMinimum[hamNum, topology, subRules]
+    ];
+    Print["  [5] FindPotentialMinimum: ", t5, " sec"];
+    
+    cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
+    
+    Print["  TOTAL: ", t1 + t2 + t3 + t4 + t5, " sec"];
+    Print["========================================"];
+    
+    (* Lazy кэш *)
+    cache["PlotTest"] = <|
+      "State" -> "Lazy",
+      "Thunk" -> Function[{m},
+        Module[{invC, element},
+          invC = GetNumericalQuantity[m, "InverseCapacitanceMatrix"];
+          If[invC === $Failed, $Failed,
+            element = invC[[1, 1]];
+            Plot[element * Sin[x], {x, 0, 1},
+              PlotLabel -> Row[{"Test: Sin(", ScientificForm[element], " × x × 10¹⁵)"}],
+              PlotTheme -> "Scientific",
+              ImageSize -> 400
+            ]
+          ]
+        ]
+      ]
     |>;
-    
-    (* ============================================ *)
-    (* LAZY: Медленные графики (откладываем) *)
-    (* ============================================ *)
-    
-	cache["PlotTest"] = <|
-	  "State" -> "Lazy",
-	  "Thunk" -> Function[{m},
-	    Module[{invC, element},
-	      (* Взять элемент обратной C-матрицы из кэша *)
-	      invC = GetNumericalQuantity[m, "InverseCapacitanceMatrix"];
-	      
-	      If[invC === $Failed,
-	        $Failed,
-	        (* Взять первый диагональный элемент как коэффициент *)
-	        element = invC[[1, 1]];
-	        
-	        Plot[
-	          element *Sin[ x ], {x, 0, 1},
-	          PlotLabel -> Row[{
-	            "Test: Sin(", 
-	            s_Symbol :> SymbolName[s],
-	            ScientificForm[element], 
-	            " × x × 10¹⁵)"
-	          }],
-	          PlotTheme -> "Scientific",
-	          ImageSize -> 400
-	        ]
-	      ]
-	    ]
-	  ]
-	|>;    
-    
-    (* Спектр с высокой точностью *)
-    cache["PlotSpectrum"] = <|
-        "State" -> "Lazy",
-        "Thunk" -> Function[{m},
-            Module[{evals},
-               (* При первом вызове: 
-       			достать быстрые eigenvalues из кэша *)
-               evals = GetNumericalQuantity[m, "Eigenvalues"];
-               (* Построить граф с высокой точностью *)
-               
-       PlotSpectrumHighResolution[evals, m["Primary"]["Elements"]]
-             ]
-          ]
-      |>;
-    
-    (* График распада T1 *)
-    cache["PlotDecay"] = <|
-        "State" -> "Lazy",
-        "Thunk" -> Function[{m},
-            Module[{t1, evals},
-               t1 = GetNumericalQuantity[m, "T1Lifetime"];
-               evals = GetNumericalQuantity[m, "Eigenvalues"];
-               
-       PlotDecayHighResolution[t1, evals, m["Primary"]["Elements"]]
-             ]
-          ]
-      |>;
     
     cache
   ];

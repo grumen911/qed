@@ -102,6 +102,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
    SelectModel[Unevaluated@model, modelsStack],
    MakeSliderHub[Unevaluated@model],
    
+   1
    Dynamic[
       Column[{
         "Hamiltonian (numerical):",
@@ -112,10 +113,11 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         MatrixForm@GetNumericalQuantity[$CurrentModel, "InverseCapacitanceMatrix"],
         "",
         
-        Style["Test Plot:", Bold, 12],
-        GetNumericalQuantity[$CurrentModel, "PlotTest"]
+        Style["Test Plot:", Bold, 12](*,
+        GetNumericalQuantity[$CurrentModel, "PlotTest"]*)
       }],
-      TrackedSymbols :> {$CurrentModel}
+      TrackedSymbols :> {$CurrentModel},
+      ContinuousAction -> False
     ]
   }]
 ];
