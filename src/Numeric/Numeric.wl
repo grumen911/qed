@@ -47,35 +47,37 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   
   potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
-  
-  (* Численное значение Φ₀ *)
   phi0Value = QED`$Phi0Value;
   
   potentialNumeric = potential /. substitutionRules /. QED`$Phi0 -> phi0Value;
-  
   externalFlux = QED`$PhiExt /. substitutionRules /. QED`$PhiExt -> 0;
   
-  (* Constraints в единицах Φ₀: φ ∈ [-Φ₀/2, Φ₀/2] для одного периода *)
   constraints = Thread[
     (externalFlux - 0.5) * phi0Value < fluxVars < 
     (externalFlux + 0.5) * phi0Value
   ];
   
+  (* Простая оптимизированная версия *)
   result = Quiet[
-    NMinimize[{potentialNumeric, constraints}, fluxVars, 
-      Method -> "DifferentialEvolution",
-      MaxIterations -> 500],
+    NMinimize[
+      {potentialNumeric, constraints}, 
+      fluxVars,
+      Method -> "NelderMead",
+      MaxIterations -> 100,
+      AccuracyGoal -> 3,
+      PrecisionGoal -> 3
+    ],
     {NMinimize::cvmit, NMinimize::nosat}
   ];
-
+  
   If[result === $Failed || !NumericQ[result[[1]]],
-    Print["Warning: Potential minimization failed. Using φ_min ≈ φ_ext."];
+    Print["Warning: Minimization failed. Using φ_min ≈ φ_ext."];
     minValues = Thread[fluxVars -> externalFlux * phi0Value],
     minValues = result[[2]]
   ];
   
   minValues
- ];
+]
   
 
 PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},

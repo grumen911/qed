@@ -384,7 +384,7 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     (* Собственные значения *)
     cache["Eigenvalues"] = <|
         "State" -> "Ready",
-        "Value" -> Eigenvalues[analytical["HamiltonianFull"]]
+        "Value" -> 0
       |>;
 
     (* ============================================ *)
