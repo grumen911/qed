@@ -422,10 +422,30 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     ];
     
     (* ════════════════════════════════════════════════════════════ *)
-    (* Собственные значения (заглушка)                              *)
+    (* Плазмонные частоты (собственные моды)                        *)
     (* ════════════════════════════════════════════════════════════ *)
     
-    cache["Eigenvalues"] = <|"State" -> "Ready", "Value" -> 0|>;
+    If[cache["InverseCapacitanceMatrix"]["State"] === "Ready" && 
+       cache["InductanceMatrixNumerical"]["State"] === "Ready",
+      
+      Module[{invC, invL, result},
+        invC = cache["InverseCapacitanceMatrix"]["Value"];
+        invL = cache["InductanceMatrixInverseNumerical"]["Value"];
+        
+        result = ComputeNormalModeFrequencies[invC, invL];
+        
+        cache["PlasmonFrequencies"] = <|
+          "State" -> "Ready",
+          "Value" -> result["Frequencies"],           (* Для GetNumericalQuantity *)
+          "Frequencies" -> result["Frequencies"],      (* Явный доступ *)
+          "IsStable" -> result["IsStable"],
+          "NumUnstableModes" -> result["NumUnstableModes"]
+        |>
+      ],
+      
+      (* Если матрицы сингулярные *)
+      cache["PlasmonFrequencies"] = <|"State" -> "Failed", "Error" -> "Singular matrices"|>
+    ];
     
     (* ════════════════════════════════════════════════════════════ *)
     (* Lazy кэш (пример для PlotTest)                              *)

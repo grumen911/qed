@@ -13,7 +13,10 @@ FindEquilibriumPoints::usage = "FindEquilibriumPoints[hamiltonian, topology, sub
 finds all equilibrium flux configurations by solving ∇U = 0 on a grid of starting points. \
 Returns Association with list of solutions, energies, and residuals.";
 
-TestOptimizationMethods::usage = "1232";
+ComputeNormalModeFrequencies::usage = "ComputeNormalModeFrequencies[invCap, L] \
+computes normal mode frequencies ω_i from eigenvalues of C^(-1)·L matrix. \
+Returns frequencies in rad/s (SI units), sorted by increasing frequency.";
+
 
 Begin["`Private`"];
 
@@ -354,6 +357,40 @@ Options[FindEquilibriumPoints] = {
 
 (* Debug флаг *)
 $DebugFindEquilibriumPoints = True;
+
+
+(*
+  Physics: Normal mode frequencies from harmonic approximation.
+  
+  For quadratic Hamiltonian H = (1/2) q^T C^(-1) q + (1/2) φ^T L^(-1) φ,
+  normal modes satisfy:
+  
+  ω_i^2 = eigenvalues(C^(-1) · L^(-1))
+  
+  Returns Association with:
+  - "Frequencies": ω_i in rad/s (SI units), sorted. Complex if unstable modes exist.
+  - "IsStable": True if all ω² > 0 (stable equilibrium)
+  - "NumUnstableModes": Count of modes with ω² < 0 (saddle point indicator)
+  
+  Reference: Devoret lectures, Les Houches (2004), Section 3.3
+*)
+
+ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
+  {omega2, frequencies, threshold = 10^(-10)},
+  
+  (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
+  omega2 = Eigenvalues[invCap . invInd];
+  
+  (* Вычислить sqrt, для отрицательных → комплексные *)
+  frequencies = Sort[Sqrt[omega2 + 0. I], Re[#1] < Re[#2] &];
+  
+  (* Вернуть с диагностикой *)
+  <|
+    "Frequencies" -> frequencies,
+    "IsStable" -> AllTrue[omega2, # > threshold &],
+    "NumUnstableModes" -> Count[omega2, x_ /; x < -threshold]
+  |>
+];
   
 
 PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},
