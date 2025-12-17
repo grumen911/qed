@@ -378,13 +378,27 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
     
 	(* Равновесные точки (НОВЫЙ метод - FindRoot на сетке) *)
-	equilibriumPoints = FindEquilibriumPoints[
+	cache["EquilibriumPoints"] = <|
+	  "State" -> "Lazy",
+	  "Thunk" -> Function[{m},
+	    FindEquilibriumPoints[
+	      hamNum,                              (* Closure *)
+	      analytical["PotentialGradient"],     (* Closure *)
+	      topology,                            (* Closure *)
+	      subRules                             (* Closure *)
+	    ]
+	  ]
+	|>; 
+	
+	(*equilibriumPoints = FindEquilibriumPoints[
 	  hamNum, 
 	  analytical["PotentialGradient"],
 	  topology, 
 	  subRules
 	];
-	cache["EquilibriumPoints"] = <|"State" -> "Ready", "Value" -> equilibriumPoints|>;
+	cache["EquilibriumPoints"] = <|"State" -> "Ready", "Value" -> equilibriumPoints|>;*)
+    
+    
     
     (* ════════════════════════════════════════════════════════════ *)
     (* Lazy кэш (пример для PlotTest)                              *)
