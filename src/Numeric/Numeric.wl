@@ -291,6 +291,45 @@ FindEquilibriumPoints[hamiltonian_, gradient_List, topology_Association,
     {i, Length[validSolutions]}
   ];
   
+  
+If[$DebugFindEquilibriumPoints === True,
+  Print["=== EQUILIBRIUM ANALYSIS ==="];
+  
+  (* Энергии всех решений *)
+  Module[{energies, Emin, Emax, dE},
+    energies = Sort[#["Energy"] & /@ solutions];
+    Emin = First[energies];
+    Emax = Last[energies];
+    dE = Emax - Emin;
+    
+    Print["Energy range: [", ScientificForm[Emin, 3], ", ", 
+          ScientificForm[Emax, 3], "], ΔE = ", ScientificForm[dE, 3]];
+    Print["Ground state: E₀ = ", ScientificForm[Emin, 4]];
+    Print["Barrier: Umax - E₀ = ", ScientificForm[dE, 3]];
+  ];
+  
+  (* Группировка по энергиям (вырожденность) - НЕ округлять! *)
+  Module[{grouped, degeneracies},
+    grouped = GroupBy[solutions, Round[#["Energy"], 10^-25] &];  (* <-- FIX *)
+    degeneracies = Sort[Tally[Length /@ Values[grouped]][[All, 1]], Greater];
+    Print["Degeneracies: ", Take[degeneracies, UpTo[5]], " solutions per level"];
+  ];
+  
+  (* Топ-3 минимума *)
+  Module[{top3},
+    top3 = Take[SortBy[solutions, #["Energy"] &], UpTo[3]];
+    Print["=== TOP 3 MINIMA ==="];
+    MapIndexed[
+      Print["#", #2[[1]], ": E = ", ScientificForm[#1["Energy"], 4], 
+            ", φ = ", Round[Values[#1["Fluxes"]] / phi0Value, 0.001]] &,
+      top3
+    ];
+  ];
+  
+  Print["Compute time: ", AbsoluteTime[] - startTime, " sec"];  (* <-- FIX *)
+];
+
+  
   (* ════════════════════════════════════════════════════════════════ *)
   (* ФИНАЛЬНЫЙ РЕЗУЛЬТАТ                                              *)
   (* ════════════════════════════════════════════════════════════════ *)
