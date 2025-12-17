@@ -277,8 +277,8 @@ GenerateDefaultParameters[topology_] :=
 	    "Fext" -> <|
 	      "Value" -> 0.0,
 	      "Symbol" -> QED`$PhiExt,
-	      "Min" -> -1.0,
-	      "Max" -> 1.0,
+	      "Min" -> -0.5,
+	      "Max" -> 0.5,
 	      "Step" -> 0.01,
 	      "Interactive" -> True,
 	      "Unit" -> "Φ₀"  (* Φ₀ *)
