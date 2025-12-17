@@ -92,14 +92,14 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
       fluxVars,
       Method -> {
         "RandomSearch", 
-        "SearchPoints" -> 30,        (* 30 случайных стартовых точек *)
+        "SearchPoints" -> 10,        (* 30 случайных стартовых точек *)
         "RandomSeed" -> 12345,       (* воспроизводимость *)
         "PostProcess" -> {           (* локальная доводка *)
           "FindMinimum",
           Method -> "QuasiNewton"
         }
       },
-      MaxIterations -> 100,
+      MaxIterations -> 3,
       AccuracyGoal -> 6,
       PrecisionGoal -> 6
     ],
