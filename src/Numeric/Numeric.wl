@@ -39,7 +39,7 @@ Begin["`Private`"];
 FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List] := 
  Module[{nodes, fluxVars, potential, potentialNumeric, externalFlux, 
          energyScale, potentialRescaled, externalFluxRescaled,
-         constraints, result, minValues, phi0Value},
+         constraints, result, minValues, phi0Value, minSymbols},
   
   nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
@@ -139,13 +139,16 @@ If[$DebugFindPotentialMinimum === True,
   (* ОБРАТНОЕ МАСШТАБИРОВАНИЕ: φ̃ → φ                                 *)
   (* ════════════════════════════════════════════════════════════════ *)
   
+  (* Создать символы для минимума: Subscript[φ, "min", i] *)
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  
   If[result === $Failed || !NumericQ[result[[1]]],
     (* Fallback: использовать внешний поток как приближение *)
     Print["Warning: Minimization failed. Using φ_min ≈ φ_ext."];
-    minValues = Thread[fluxVars -> externalFlux],
+    minValues = Thread[minSymbols -> externalFlux],
     
     (* Успех: конвертировать обратно в Weber *)
-    minValues = Thread[fluxVars -> (fluxVars /. result[[2]]) * phi0Value]
+    minValues = Thread[minSymbols -> (fluxVars /. result[[2]]) * phi0Value]
   ];
   
   minValues
