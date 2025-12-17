@@ -46,23 +46,23 @@ getAllPaths[assoc_Association, currentPath_List : {}] :=
   ];
 
 (* Построение правил подстановки с отложенным вычислением *)
-BuildSubstitutionRules[primary_Association] := Module[
-  {valuePaths, rules},
+BuildSubstitutionRules[primary_Association, topology_Association] := Module[
+  {valuePaths, primaryRules, constantRules, equilibriumRules, nodes, minSymbols},
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* PRIMARY PARAMETERS (C, EJ, L, Φₑₓₜ)                              *)
+  (* ════════════════════════════════════════════════════════════════ *)
   
   (* Найти все пути, заканчивающиеся на "Value" *)
   valuePaths = Select[getAllPaths[primary], Last[#] === "Value" &];
   
   (* Построить правила: Symbol :> model["Primary"][путь к Value] *)
-  rules = Map[
+  primaryRules = Map[
     Function[valuePath,
       Module[{symbolPath, symbol},
-        (* Путь к Symbol: заменить "Value" на "Symbol" *)
         symbolPath = ReplacePart[valuePath, -1 -> "Symbol"];
-        
-        (* Извлечь символ из Primary *)
         symbol = primary[[Sequence @@ symbolPath]];
         
-        (* Создать отложенное правило *)
         symbol :> (Part[$CurrentModel,"Primary", Sequence @@ valuePath] * 
            If[symbol === QED`$PhiExt, QED`$Phi0Value, 1])			
       ]
@@ -70,7 +70,36 @@ BuildSubstitutionRules[primary_Association] := Module[
     valuePaths
   ];
   
-  rules
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* PHYSICAL CONSTANTS (Φ₀, ℏ, e, kB, ...)                          *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  constantRules = {
+    QED`$Phi0 :> QED`$Phi0Value
+  };
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* EQUILIBRIUM FLUXES (φ_min)                                       *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  (* Получить узлы из переданной topology *)
+  nodes = Cases[
+    topology["Nodes"], 
+    Except[topology["GroundNode"]]
+  ];
+  
+  (* Создать символы φ_min *)
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  
+  (* Отложенные правила: φ_min :> значение из кэша *)
+  equilibriumRules = Table[
+    With[{idx = i},
+      minSymbols[[idx]] :> Part[$CurrentModel, "Numerical", "Cache", "EquilibriumFluxes", "Value", idx, 2]
+    ],
+    {i, Length[minSymbols]}
+  ];
+  
+  Join[primaryRules, constantRules, equilibriumRules]
 ];
 
 
@@ -161,7 +190,7 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
     |>;
 
     (* Строим правила подстановки *)
-    model["SubstitutionRules"] = BuildSubstitutionRules[defaultPrimary];
+    model["SubstitutionRules"] = BuildSubstitutionRules[defaultPrimary, topology];
 	
 	(* Автоматически устанавливаем как текущую модель *)
     $CurrentModel = model;
@@ -337,16 +366,44 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     cache = <||>;
     
     (* ════════════════════════════════════════════════════════════ *)
-    (* Численная подстановка параметров                            *)
+    (* Шаг 1: Численный гамильтониан (для поиска минимума)         *)
     (* ════════════════════════════════════════════════════════════ *)
     
-    {capNum, hamNum, indNum} = {
+    hamNum = analytical["Hamiltonian"] /. subRules;
+    cache["HamiltonianNumerical"] = <|"State" -> "Ready", "Value" -> hamNum|>;
+    
+    (* ════════════════════════════════════════════════════════════ *)
+    (* Шаг 2: Равновесные потоки (ПЕРЕНЕСЛИ СЮДА!)                 *)
+    (* ════════════════════════════════════════════════════════════ *)
+    
+    equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
+    cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
+    
+    (* ОБНОВИТЬ $CurrentModel чтобы правила подстановки работали! *)
+	$CurrentModel = ReplacePart[$CurrentModel, {"Numerical", "Cache"} -> cache];
+    
+    (* Равновесные точки (LAZY) *)
+    cache["EquilibriumPoints"] = <|
+      "State" -> "Lazy",
+      "Thunk" -> Function[{m},
+        FindEquilibriumPoints[
+          hamNum,
+          analytical["PotentialGradient"],
+          topology,
+          subRules
+        ]
+      ]
+    |>;
+    
+    (* ════════════════════════════════════════════════════════════ *)
+    (* Шаг 3: Остальные матрицы (ТЕПЕРЬ с φ_min!)                   *)
+    (* ════════════════════════════════════════════════════════════ *)
+    
+    {capNum, indNum} = {
       analytical["CapacitanceMatrix"] /. subRules,
-      analytical["Hamiltonian"] /. subRules,
       analytical["InductanceMatrix"] /. subRules
     };
     
-    cache["HamiltonianNumerical"] = <|"State" -> "Ready", "Value" -> hamNum|>;
     cache["CapacitanceMatrixNumerical"] = <|"State" -> "Ready", "Value" -> capNum|>;
     cache["InductanceMatrixInverseNumerical"] = <|"State" -> "Ready", "Value" -> indNum|>;
     
@@ -369,36 +426,6 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     (* ════════════════════════════════════════════════════════════ *)
     
     cache["Eigenvalues"] = <|"State" -> "Ready", "Value" -> 0|>;
-    
-    (* ════════════════════════════════════════════════════════════ *)
-    (* Равновесные потоки                                           *)
-    (* ════════════════════════════════════════════════════════════ *)
-    
-    equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
-    cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
-    
-	(* Равновесные точки (НОВЫЙ метод - FindRoot на сетке) *)
-	cache["EquilibriumPoints"] = <|
-	  "State" -> "Lazy",
-	  "Thunk" -> Function[{m},
-	    FindEquilibriumPoints[
-	      hamNum,                              (* Closure *)
-	      analytical["PotentialGradient"],     (* Closure *)
-	      topology,                            (* Closure *)
-	      subRules                             (* Closure *)
-	    ]
-	  ]
-	|>; 
-	
-	(*equilibriumPoints = FindEquilibriumPoints[
-	  hamNum, 
-	  analytical["PotentialGradient"],
-	  topology, 
-	  subRules
-	];
-	cache["EquilibriumPoints"] = <|"State" -> "Ready", "Value" -> equilibriumPoints|>;*)
-    
-    
     
     (* ════════════════════════════════════════════════════════════ *)
     (* Lazy кэш (пример для PlotTest)                              *)
