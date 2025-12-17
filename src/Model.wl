@@ -329,7 +329,7 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     {analytical, topology, subRules, cache, capNum, hamNum, indNum,
-     equilibriumFluxes},
+     equilibriumFluxes, equilibriumPoints},
      
     analytical = model["Analytical"];
     subRules = model["SubstitutionRules"];
@@ -376,6 +376,15 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     
     equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
     cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
+    
+	(* Равновесные точки (НОВЫЙ метод - FindRoot на сетке) *)
+	equilibriumPoints = FindEquilibriumPoints[
+	  hamNum, 
+	  analytical["PotentialGradient"],
+	  topology, 
+	  subRules
+	];
+	cache["EquilibriumPoints"] = <|"State" -> "Ready", "Value" -> equilibriumPoints|>;
     
     (* ════════════════════════════════════════════════════════════ *)
     (* Lazy кэш (пример для PlotTest)                              *)

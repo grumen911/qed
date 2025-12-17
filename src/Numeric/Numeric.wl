@@ -9,6 +9,10 @@ Uses PrincipalAxis method (gradient-free local optimization) starting from exter
 Optimized for smooth potentials with good initial guess (~0.002 sec). \
 Returns substitution rules: {φ₁ -> value₁, φ₂ -> value₂, ...} in Weber.";
 
+FindEquilibriumPoints::usage = "FindEquilibriumPoints[hamiltonian, topology, substitutionRules] \
+finds all equilibrium flux configurations by solving ∇U = 0 on a grid of starting points. \
+Returns Association with list of solutions, energies, and residuals.";
+
 TestOptimizationMethods::usage = "1232";
 
 Begin["`Private`"];
@@ -148,121 +152,166 @@ If[$DebugFindPotentialMinimum === True,
 ];
 
 (* Глобальная переменная для отладки *)
-$DebugFindPotentialMinimum = True;
+$DebugFindPotentialMinimum = False;
 
 
-
-TestOptimizationMethods[hamiltonian_, topology_Association, substitutionRules_List] := 
- Module[{nodes, fluxVars, potential, potentialNumeric, externalFlux, 
-         constraints, phi0Value, lowerBound, upperBound, methods, results},
+FindEquilibriumPoints[hamiltonian_, gradient_List, topology_Association, 
+  substitutionRules_List, opts:OptionsPattern[]] := 
+ Module[{nodes, fluxVars, phi0Value, externalFlux, potential, potentialNumeric,
+         potentialRescaled, gradientNumeric, gradientRescaled, equationsRescaled, 
+         gridResolution, grid1D, gridPoints, rawSolutions, validSolutions, 
+         solutions, startTime},
+  
+  startTime = AbsoluteTime[];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ПОДГОТОВКА ПЕРЕМЕННЫХ                                            *)
+  (* ════════════════════════════════════════════════════════════════ *)
   
   nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   
-  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
   phi0Value = QED`$Phi0Value;
-  potentialNumeric = potential /. substitutionRules /. QED`$Phi0 -> phi0Value;
   externalFlux = QED`$PhiExt /. substitutionRules;
   
-  lowerBound = (externalFlux - 0.5) * phi0Value;
-  upperBound = (externalFlux + 0.5) * phi0Value;
-  constraints = Thread[lowerBound < fluxVars < upperBound];
+  (* Потенциальная энергия для вычисления энергий *)
+  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
+  potentialNumeric = potential /. substitutionRules /. QED`$Phi0 -> phi0Value;
+  potentialRescaled = potentialNumeric /. Thread[fluxVars -> fluxVars * phi0Value];
   
-  Print["=== Testing Optimization Methods ==="];
-  Print["Variables: ", Length[fluxVars]];
-  Print["External flux: ", externalFlux];
-  Print[""];
-  
-  (* ════════════════════════════════════════════════════════════ *)
-  (* TEST 1: NMinimize methods                                   *)
-  (* ════════════════════════════════════════════════════════════ *)
-  
-  methods = {
-    {"NelderMead", 100},
-    {"DifferentialEvolution", 100},
-    {"SimulatedAnnealing", 100},
-    {"RandomSearch", 100}
-  };
-  
-  results = Table[
-    Module[{time, result, value, success},
-      {time, result} = AbsoluteTiming[
-        Quiet[
-          NMinimize[
-            {potentialNumeric, constraints},
-            fluxVars,
-            Method -> method[[1]],
-            MaxIterations -> method[[2]]
-          ],
-          {NMinimize::cvmit, NMinimize::nosat}
-        ]
-      ];
-      
-      success = (result =!= $Failed && NumericQ[result[[1]]]);
-      value = If[success, result[[1]], "FAILED"];
-      
-      Print[StringPadRight[method[[1]], 25], " | Time: ", 
-            NumberForm[time, {4, 4}], " sec | Min: ", 
-            If[NumericQ[value], ScientificForm[value, 3], value]];
-      
-      <|"Method" -> method[[1]], "Time" -> time, 
-        "Value" -> value, "Success" -> success|>
-    ],
-    {method, methods}
+  If[$DebugFindEquilibriumPoints === True,
+    Print["=== FindEquilibriumPoints ==="];
+    Print["Variables: ", fluxVars];
+    Print["External flux: ", externalFlux];
   ];
   
-  Print[""];
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ОБЕЗРАЗМЕРИВАНИЕ ГРАДИЕНТА                                       *)
+  (* ════════════════════════════════════════════════════════════════ *)
   
-  (* ════════════════════════════════════════════════════════════ *)
-  (* TEST 2: FindMinimum methods (local)                         *)
-  (* ════════════════════════════════════════════════════════════ *)
+  gradientNumeric = gradient /. substitutionRules /. QED`$Phi0 -> phi0Value;
+  gradientRescaled = gradientNumeric /. Thread[fluxVars -> fluxVars * phi0Value];
+  equationsRescaled = Thread[gradientRescaled == 0];
   
-(* Исправленная секция для FindMinimum *)
-Print["--- Local methods (FindMinimum) ---"];
-
-localMethods = {
-  "QuasiNewton",
-  "PrincipalAxis", 
-  "ConjugateGradient"
-};
-
-(* ПРАВИЛЬНЫЙ формат стартовой точки для FindMinimum *)
-startingPointList = Table[
-  {fluxVars[[i]], externalFlux * phi0Value},
-  {i, Length[fluxVars]}
-];
-
-Table[
-  Module[{time, result, value, success},
-    {time, result} = AbsoluteTiming[
-      Quiet[
-        FindMinimum[
-          potentialNumeric,
-          startingPointList,  (* ← Исправлено! *)
-          Method -> method,
+  If[$DebugFindEquilibriumPoints === True,
+    Print["Number of equations: ", Length[equationsRescaled]];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ГЕНЕРАЦИЯ СЕТКИ СТАРТОВЫХ ТОЧЕК                                  *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  gridResolution = OptionValue[GridResolution];
+  grid1D = Subdivide[-0.5, 0.5, gridResolution - 1];
+  gridPoints = Tuples[Table[grid1D, {Length[fluxVars]}]];
+  
+  If[$DebugFindEquilibriumPoints === True,
+    Print["Grid: ", gridResolution, "^", Length[fluxVars], 
+          " = ", Length[gridPoints], " points"];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* РЕШЕНИЕ СИСТЕМЫ ОТ КАЖДОЙ СТАРТОВОЙ ТОЧКИ                        *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  rawSolutions = Table[
+    Quiet[
+      Check[
+        FindRoot[
+          equationsRescaled,
+          Thread[{fluxVars, gridPoints[[i]]}],
+          Method -> OptionValue[Method],
           MaxIterations -> 50
         ],
-        {FindMinimum::cvmit, FindMinimum::lstol, FindMinimum::sdprec}
+        $Failed,
+        {FindRoot::cvmit, FindRoot::lstol}
       ]
-    ];
-    
-    success = (result =!= $Failed && NumericQ[result[[1]]]);
-    value = If[success, result[[1]], "FAILED"];
-    
-    Print[StringPadRight[method, 25], " | Time: ", 
-          NumberForm[time, {4, 4}], " sec | Min: ", 
-          If[NumericQ[value], ScientificForm[value, 3], value]];
-  ],
-  {method, localMethods}
-];
+    ],
+    {i, Length[gridPoints]}
+  ];
   
-  Print[""];
-  Print["=== Best method: ", 
-    First[SortBy[Select[results, #["Success"] &], #["Time"] &]]["Method"]];
-  Print["====================================="];
+  If[$DebugFindEquilibriumPoints === True,
+    Print["Raw solutions: ", Count[rawSolutions, Except[$Failed]], "/", Length[gridPoints]];
+  ];
   
-  results
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ФИЛЬТРАЦИЯ: отбросить $Failed и проверить невязки               *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  validSolutions = Select[rawSolutions, # =!= $Failed &];
+  
+  (* Проверить невязки |∇U| < threshold *)
+  validSolutions = Select[validSolutions,
+    Module[{residual},
+      residual = Norm[gradientRescaled /. #];
+      residual < OptionValue[MaxResidual]
+    ] &
+  ];
+  
+  If[$DebugFindEquilibriumPoints === True,
+    Print["Valid solutions after residual check: ", Length[validSolutions]];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* НОРМАЛИЗАЦИЯ И УДАЛЕНИЕ ДУБЛИКАТОВ                              *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  (* Шаг 1: Нормализовать безразмерные решения к [-0.5, 0.5] *)
+  validSolutions = validSolutions /. 
+    Rule[var_, val_] :> Rule[var, Mod[val + 0.5, 1.0] - 0.5];
+  
+  (* Шаг 2: Удалить дубликаты (в безразмерных координатах!) *)
+  validSolutions = DeleteDuplicatesBy[validSolutions,
+    Round[Values[#], 10^-6] &
+  ];
+  
+  If[$DebugFindEquilibriumPoints === True,
+    Print["Unique solutions after normalization: ", Length[validSolutions]];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ВЫЧИСЛЕНИЕ ЭНЕРГИЙ И ФОРМИРОВАНИЕ РЕЗУЛЬТАТА                     *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  solutions = Table[
+    Module[{sol, energy, residual, fluxesPhysical},
+      sol = validSolutions[[i]];
+      energy = potentialRescaled /. sol;
+      residual = Norm[gradientRescaled /. sol];
+      
+      (* Конвертировать безразмерные решения в физические единицы Weber *)
+      fluxesPhysical = Thread[fluxVars -> (fluxVars /. sol) * phi0Value];
+      
+      <|
+        "Fluxes" -> fluxesPhysical,
+        "Energy" -> energy,
+        "Residual" -> residual
+      |>
+    ],
+    {i, Length[validSolutions]}
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ФИНАЛЬНЫЙ РЕЗУЛЬТАТ                                              *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  <|
+    "Solutions" -> solutions,
+    "GridSize" -> gridResolution,
+    "NumSolutions" -> Length[solutions],
+    "ComputationTime" -> AbsoluteTime[] - startTime
+  |>
 ];
+
+(* Опции *)
+Options[FindEquilibriumPoints] = {
+  GridResolution -> 5,
+  MaxResidual -> 10^-5,
+  Method -> "Newton"
+};
+
+(* Debug флаг *)
+$DebugFindEquilibriumPoints = True;
   
 
 PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},
