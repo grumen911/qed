@@ -13,7 +13,6 @@ TestOptimizationMethods::usage = "1232";
 
 Begin["`Private`"];
 
-
 (*
   Physics: Find equilibrium positions φ_min where ∂U/∂φ = 0.
   
@@ -24,11 +23,11 @@ Begin["`Private`"];
   1. Extract potential energy U(φ) by setting all charges q_i = 0
   2. Rescale energy by EJ: Ũ = U/EJ (dimensionless)
   3. Rescale fluxes by Φ₀: φ̃ = φ/Φ₀ (dimensionless)
-  4. Minimize Ũ(φ̃) using PrincipalAxis method
+  4. Minimize Ũ(φ̃) using global RandomSearch + local QuasiNewton
   5. Convert back: φ = φ̃ * Φ₀
   
-  Rescaling improves numerical stability by factor ~10⁸ and ensures
-  convergence from arbitrary starting points.
+  UPDATE: Replaced FindMinimum (local) with NMinimize/RandomSearch (global)
+  for multi-well potentials (e.g., bridge flux qubit at Φext ~ 0.5Φ₀).
   
   Reference: Manucharyan et al., Science 326, 113 (2009), Fig. 2
 *)
@@ -36,7 +35,7 @@ Begin["`Private`"];
 FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List] := 
  Module[{nodes, fluxVars, potential, potentialNumeric, externalFlux, 
          energyScale, potentialRescaled, externalFluxRescaled,
-         result, minValues, phi0Value, startingPointList},
+         constraints, result, minValues, phi0Value},
   
   nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
@@ -61,7 +60,7 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
   ];
   
   If[!NumericQ[energyScale] || energyScale == 0,
-    Print["Warning: Cannot extract energy scale."];
+    Print["Warning: Cannot extract energy scale. Using 1."];
     energyScale = 1;
   ];
   
@@ -70,38 +69,86 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
     Thread[fluxVars -> fluxVars * phi0Value];
   externalFluxRescaled = externalFlux / phi0Value;
   
-  Print[Simplify@potentialRescaled];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* Минимизация в безразмерных координатах                          *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  startingPointList = Table[
-    {fluxVars[[i]], externalFluxRescaled},
-    {i, Length[fluxVars]}
+  (* Отладочный вывод *)
+  If[$DebugFindPotentialMinimum === True,
+    Print["Rescaled potential: ", Simplify[potentialRescaled]];
+    Print["External flux (rescaled): ", externalFluxRescaled];
   ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ГЛОБАЛЬНАЯ минимизация: RandomSearch + QuasiNewton              *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  (* Ограничения: поиск в области [-0.5, 0.5] для безразмерных фаз *)
+  constraints = Thread[-0.5 < fluxVars < 0.5];
   
   result = Quiet[
-    FindMinimum[
-      Simplify@potentialRescaled,
-      startingPointList,
-      Method -> "PrincipalAxis",
-      MaxIterations -> 500
+    NMinimize[
+      {potentialRescaled, constraints},
+      fluxVars,
+      Method -> {
+        "RandomSearch", 
+        "SearchPoints" -> 30,        (* 30 случайных стартовых точек *)
+        "RandomSeed" -> 12345,       (* воспроизводимость *)
+        "PostProcess" -> {           (* локальная доводка *)
+          "FindMinimum",
+          Method -> "QuasiNewton"
+        }
+      },
+      MaxIterations -> 100,
+      AccuracyGoal -> 6,
+      PrecisionGoal -> 6
     ],
-    {FindMinimum::cvmit, FindMinimum::lstol, FindMinimum::sdprec}
+    {NMinimize::cvmit, NMinimize::nosat, FindMinimum::lstol, FindMinimum::sdprec}
   ];
   
-  Print[		Simplify[potentialRescaled/.result[[2]]]		];
+  (* Отладочный вывод *)
+  If[$DebugFindPotentialMinimum === True,
+    If[result =!= $Failed && NumericQ[result[[1]]],
+      Print["Minimum energy (rescaled): ", result[[1]]];
+      Print["Minimum energy (physical): ", result[[1]] * energyScale, " J"];
+    ];
+  ];
   
-  (* Обратное масштабирование: φ̃ → φ *)
+(* DEBUG: два минимума *)
+If[$DebugFindPotentialMinimum === True,
+  Module[{res1, res2, E1, E2, phi1, phi2},
+    res1 = NMinimize[{potentialRescaled, constraints}, fluxVars, 
+      Method -> {"RandomSearch", "SearchPoints" -> 10}];
+    res2 = NMinimize[{potentialRescaled, constraints}, fluxVars, 
+      Method -> {"RandomSearch", "SearchPoints" -> 10, "RandomSeed" -> 999}];
+    E1 = res1[[1]]; phi1 = res1[[2]];
+    E2 = res2[[1]]; phi2 = res2[[2]];
+    Print["E1 = ", ScientificForm[E1, 3], " at φ = ", fluxVars /. phi1];
+    Print["E2 = ", ScientificForm[E2, 3], " at φ = ", fluxVars /. phi2];
+    Print["ΔE = ", ScientificForm[Abs[E1-E2], 2]];
+  ];
+];
+
+  
+  (* DEBUG: градиент в минимуме *)
+  If[$DebugFindPotentialMinimum === True && result =!= $Failed,
+    Print["∇U = ", D[potentialRescaled, #] & /@ fluxVars /. result[[2]]];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ОБРАТНОЕ МАСШТАБИРОВАНИЕ: φ̃ → φ                                 *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
   If[result === $Failed || !NumericQ[result[[1]]],
+    (* Fallback: использовать внешний поток как приближение *)
     Print["Warning: Minimization failed. Using φ_min ≈ φ_ext."];
     minValues = Thread[fluxVars -> externalFlux],
+    
+    (* Успех: конвертировать обратно в Weber *)
     minValues = Thread[fluxVars -> (fluxVars /. result[[2]]) * phi0Value]
   ];
   
   minValues
 ];
+
+(* Глобальная переменная для отладки *)
+$DebugFindPotentialMinimum = True;
 
 
 
