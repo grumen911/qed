@@ -6,6 +6,10 @@ BuildHamiltonian::usage = "BuildHamiltonian[lagrangian, capMatrix, topology] bui
 BuildHarmonicHamiltonian::usage = "BuildHarmonicHamiltonian[hamiltonian, topology] expands the Hamiltonian to second order around the potential minimum \[Phi]_min.";
 BuildInductanceMatrix::usage = "BuildInductanceMatrix[lagrangian, topology] builds symbolic inductance matrix.";
 
+BuildPotentialGradient::usage = "BuildPotentialGradient[hamiltonian, topology] \
+builds symbolic gradient ∇U of potential energy U(φ) = H(q=0, φ). \
+Returns list of partial derivatives {∂U/∂φ₁, ∂U/∂φ₂, ...} for equilibrium analysis.";
+
 Begin["`Private`"];
 
 
@@ -152,6 +156,38 @@ BuildHamiltonian[lagrangian_, capMatrix_, topology_Association] :=
   
   (*Долгая операция*)
   Collect[kineticEnergy + potentialEnergy, Join[phiVars, qVars], Simplify]
+ ];
+
+
+(*
+  Physics: Gradient of potential energy for equilibrium conditions.
+  
+  Equilibrium fluxes satisfy ∇U = 0, where U(φ) is the potential energy.
+  For Josephson circuits:
+  
+  ∂U/∂φᵢ = ∑ⱼ (EJ/Φ₀) sin(2π(φᵢ - φⱼ)/Φ₀ + δᵢⱼ)
+  
+  where δᵢⱼ accounts for external flux in loops.
+  
+  This gradient is used in FindRoot-based numerical minimization to find
+  all equilibrium points (minima, maxima, saddles) by solving ∇U = 0.
+  
+  Reference: Devoret lectures (2004), Section 2.3
+*)
+
+BuildPotentialGradient[hamiltonian_, topology_Association] := 
+ Module[{nodes, fluxVars, potential, gradient},
+  
+  nodes = getIndependentNodes[topology];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  
+  (* Потенциальная энергия: U(φ) = H(q=0, φ) *)
+  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
+  
+  (* Градиент: ∇U = {∂U/∂φ₁, ∂U/∂φ₂, ∂U/∂φ₃} *)
+  gradient = D[potential, #] & /@ fluxVars;
+  
+  Simplify[gradient]
  ];
 
 

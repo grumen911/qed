@@ -297,7 +297,8 @@ GenerateDefaultParameters[topology_] :=
 
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
- Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian},
+ Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
+ 		 potentialGradient},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -306,12 +307,16 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
   
   (* Индуктивная матрица (обратная) *)
   indMatrix = BuildInductanceMatrix[harmonicHamiltonian, topology];
+  
+  (*Градиент потенциала для поиска равновесия *)
+  potentialGradient = BuildPotentialGradient[hamiltonian, topology];
 
   <|
     "CapacitanceMatrix" -> capMatrix,
     "Hamiltonian" -> hamiltonian,
     "HarmonicHamiltonian" -> harmonicHamiltonian,
-    "InductanceMatrix" -> indMatrix  (* L⁻¹ = const *)
+    "InductanceMatrix" -> indMatrix,
+    "PotentialGradient" -> potentialGradient
   |>
  ];
 
