@@ -476,7 +476,7 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     cache["PlotPotentialSlices3D"] = <|
       "State" -> "Lazy",
       "Thunk" -> Function[{m},
-        PlotPotentialSlices3D[m]
+        PlotPotentialSlices3D[m(*, SliceType -> "CenterPlanes"*)]
       ]
     |>;
     

@@ -138,12 +138,12 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
     Alignment -> Top  (* Выравнивание по верху *)
     ],
     
-    Spacer[10]  (* Пробел перед данными *)
+    Spacer[10],  (* Пробел перед данными *)
     
     (* ═══════════════════════════════════════════════════════════ *)
     (* НИЖНЯЯ СЕКЦИЯ: Hamiltonian и Equilibrium Fluxes            *)
     (* ═══════════════════════════════════════════════════════════ *)
-    (*Dynamic[
+    Dynamic[
       Column[{
         "Hamiltonian (numerical):",
         GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
@@ -152,7 +152,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
           (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15))
       }],
       TrackedSymbols :> {$CurrentModel}
-    ]*)
+    ]
   }]
 ];
 
