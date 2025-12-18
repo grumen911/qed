@@ -1,4 +1,6 @@
-BeginPackage["QED`Numeric`", {"QED`Model`"}];
+BeginPackage["QED`Numeric`", {"QED`Numeric`HarmonicOscillator`"}];
+
+Needs["QED`Numeric`HarmonicOscillator`"];
 
 PrepareNumericModel::usage = "PrepareNumericModel[symModel, params] prepares numeric functions.";
 ComputeEvolution::usage = "ComputeEvolution[model, tmax] computes NDSolve solution.";

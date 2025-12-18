@@ -18,6 +18,13 @@ $Phi0 = Subscript[Symbol["\[CapitalPhi]"], 0];
 $Phi0Value::usage = "Numerical value of magnetic flux quantum in Wb.";
 $Phi0Value = 2.067833848 * 10.^-15;
 
+(* Константа Планка (приведённая) *)
+$hbar::usage = "\[HBar] - reduced Planck constant (ℏ = h/2π ≈ 1.055×10⁻³⁴ J·s).";
+$hbar = Symbol["\[HBar]"];
+
+$hbarValue::usage = "Numerical value of reduced Planck constant in J·s.";
+$hbarValue = 1.054571817 * 10.^-34;
+
 (* Символ внешнего магнитного потока *)
 $PhiExt::usage = "Subscript[\[CapitalPhi], ext] - external magnetic flux threading superconducting loops.";
 $PhiExt = Subscript[Symbol["\[CapitalPhi]"], "ext"];

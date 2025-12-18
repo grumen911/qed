@@ -448,6 +448,32 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
       cache["PlasmonFrequencies"] = <|"State" -> "Failed", "Error" -> "Singular matrices"|>
     ];
     
+	(* ════════════════════════════════════════════════════════════════ *)
+	(* Harmonic mode diagonalization (READY)                            *)
+	(* ════════════════════════════════════════════════════════════════ *)
+	
+	If[cache["InverseCapacitanceMatrix"]["State"] === "Ready" && 
+	   cache["InductanceMatrixInverseNumerical"]["State"] === "Ready",
+	  
+	  Module[{invC, invL, diag},
+	    invC = cache["InverseCapacitanceMatrix"]["Value"];
+	    invL = cache["InductanceMatrixInverseNumerical"]["Value"];
+	    
+	    diag = DiagonalizeHarmonicHamiltonian[invC, invL];
+	    
+	    cache["HarmonicDiagonalization"] = <|
+	      "State" -> "Ready",
+	      "Value" -> diag
+	    |>
+	  ],
+	  
+	  (* Если матрицы Failed *)
+	  cache["HarmonicDiagonalization"] = <|
+	    "State" -> "Failed", 
+	    "Error" -> "Capacitance or inductance matrix unavailable"
+	  |>
+	];
+    
     (* ════════════════════════════════════════════════════════════ *)
     (* Lazy кэш (пример для PlotTest)                              *)
     (* ════════════════════════════════════════════════════════════ *)
