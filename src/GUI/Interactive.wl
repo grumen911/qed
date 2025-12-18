@@ -96,35 +96,63 @@ SelectModel[model_, modelsStack_] :=
 
 
 QubitDashboard[modelsStack : {Association__}] := DynamicModule[
-  {model = First@modelsStack},
+  {model = First@modelsStack, needsUpdate = False},
   
   Column[{
-  	Row[{
-  		Column[{
-		   SelectModel[Unevaluated@model, modelsStack],
-		   MakeSliderHub[Unevaluated@model],
-		Dynamic[
-			GetNumericalQuantity[$CurrentModel, "PlotPotentialSlices3D"], 
-			ContinuousAction -> False,
-			SynchronousUpdating -> False,
-      		UpdateInterval -> Infinity
-      	]
-		}]
-  	}],
-  	
-	Dynamic[
-	  Column[{
-	    "Hamiltonian (numerical):",
-	    GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
-	    "Equilibrium Fluxes:",
-	    GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"]/. (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15))
-	    
-	  }],
-	  TrackedSymbols :> {$CurrentModel}
-	]
-	
-	
-	
+    (* ═══════════════════════════════════════════════════════════ *)
+    (* ГЛАВНАЯ СТРОКА: Слайдеры слева, График справа               *)
+    (* ═══════════════════════════════════════════════════════════ *)
+    Row[{
+      (* ЛЕВАЯ КОЛОНКА: Выбор модели + Слайдеры + Кнопка *)
+      Column[{
+        SelectModel[Unevaluated@model, modelsStack],
+        MakeSliderHub[Unevaluated@model],
+        
+        (* Кнопка обновления графика *)
+        Button["Update 3D Plot",
+          needsUpdate = True,  (* ← Установить флаг *)
+          Method -> "Queued"
+        ]
+      },
+      Alignment -> Top
+      ],
+      
+      Spacer[20],  (* Пробел между колонками *)
+      
+      (* ПРАВАЯ КОЛОНКА: График *)
+      Dynamic[
+        If[needsUpdate,
+          (* Пересчитать кэш *)
+          $CurrentModel["Numerical"]["IsDirty"] = True;
+          GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"];
+          needsUpdate = False;
+        ];
+        
+        (* Показать график *)
+        GetNumericalQuantity[$CurrentModel, "PlotPotentialSlices3D"],
+        
+        TrackedSymbols :> {needsUpdate},
+  		SynchronousUpdating -> False
+      ]
+    },
+    Alignment -> Top  (* Выравнивание по верху *)
+    ],
+    
+    Spacer[10]  (* Пробел перед данными *)
+    
+    (* ═══════════════════════════════════════════════════════════ *)
+    (* НИЖНЯЯ СЕКЦИЯ: Hamiltonian и Equilibrium Fluxes            *)
+    (* ═══════════════════════════════════════════════════════════ *)
+    (*Dynamic[
+      Column[{
+        "Hamiltonian (numerical):",
+        GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
+        "Equilibrium Fluxes:",
+        GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
+          (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15))
+      }],
+      TrackedSymbols :> {$CurrentModel}
+    ]*)
   }]
 ];
 
