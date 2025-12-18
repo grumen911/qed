@@ -408,8 +408,9 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
 PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] := 
  Module[{topology, hamiltonian, phi0, fluxVars, potential, 
          equilibria, allEnergies, energyMin, energyMax, 
-         allFluxCoords, slicePositions, sliceSurf, plot, 
-         showPoints, nContours, nPlotPoints},
+         allFluxCoords, sliceSurf, plot, interiorPoints,
+         showPoints, nContours, nPlotPoints, characteristicCoords,
+         characteristicPoints, boundaryThreshold},
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* 1. ИЗВЛЕЧЕНИЕ ПОТЕНЦИАЛА                                         *)
@@ -461,74 +462,185 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
   (* 4. ИЗВЛЕЧЕНИЕ КООРДИНАТ ДЛЯ СРЕЗОВ                               *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  (* Взять только характерные точки (с наименьшей энергией) *)
-  characteristicPoints = Take[
-    SortBy[equilibria["Solutions"], #["Energy"] &], 
-    UpTo[5]  (* максимум 5 точек *)
+  (* Фильтр: Убрать точки на границах (|φᵢ| > BoundaryThreshold × Φ₀) *)
+  boundaryThreshold = OptionValue[BoundaryThreshold] * phi0;
+  
+  interiorPoints = Select[equilibria["Solutions"],
+    Module[{coords = Values[#["Fluxes"]]},
+      AllTrue[Abs[coords], # < boundaryThreshold &]
+    ] &
   ];
+  
+  If[$DebugPlotPotentialSlices3D === True,
+    Print["Total equilibrium points: ", Length[equilibria["Solutions"]]];
+    Print["Interior points (|φᵢ| < ", OptionValue[BoundaryThreshold], "Φ₀): ", 
+          Length[interiorPoints]];
+    Print["Boundary points removed: ", 
+          Length[equilibria["Solutions"]] - Length[interiorPoints]];
+  ];
+  
+  (* Взять до 3 точек с минимальной энергией *)
+  characteristicPoints = Take[
+    SortBy[interiorPoints, #["Energy"] &], 
+    UpTo[3]
+  ];
+
+  (* Координаты характерных точек (для секций 5 и 6) *)
+  characteristicCoords = (#["Fluxes"][[All, 2]]) & /@ characteristicPoints;
   
   (* Все координаты равновесных точек для overlay *)
   allFluxCoords = (#["Fluxes"][[All, 2]]) & /@ equilibria["Solutions"];
   
-  (* Координаты характерных точек для срезов *)
-  characteristicCoords = (#["Fluxes"][[All, 2]]) & /@ characteristicPoints;
-  
-  (* Уникальные значения по каждой оси для срезов *)
-  slicePositions = Union /@ Transpose[characteristicCoords];
-  
   If[$DebugPlotPotentialSlices3D === True,
     Print["Selected ", Length[characteristicPoints], " characteristic points"];
-    Print["Energies: ", #["Energy"] & /@ characteristicPoints];
-    Print["Slice positions:"];
-    Print["  φ₁ (", Length[slicePositions[[1]]], " slices): ", slicePositions[[1]]];
-    Print["  φ₂ (", Length[slicePositions[[2]]], " slices): ", slicePositions[[2]]];
-    Print["  φ₃ (", Length[slicePositions[[3]]], " slices): ", slicePositions[[3]]];
-    Print["Total planes: ", Total[Length /@ slicePositions]];
+    Print["Energies: ", ScientificForm[#, 3] & /@ (#["Energy"] & /@ characteristicPoints)];
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
-  (* 5. ПОСТРОЕНИЕ СРЕЗОВ (пока стандартные, TODO: кастомные через минимумы) *)
+  (* 5. ПОСТРОЕНИЕ СРЕЗОВ (3 ортогональные плоскости)                 *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  sliceSurf = Switch[OptionValue[SliceType],
-    "Auto",
-    (* Срезы через все найденные равновесные точки *)
-    {
-      {"XStackedPlanes", slicePositions[[1]]},
-      {"YStackedPlanes", slicePositions[[2]]},
-      {"ZStackedPlanes", slicePositions[[3]]}
-    },
+  (* Сначала вычислить нормали и смещения в численных координатах *)
+  Module[{min1, min2, min3, v1, v2, n1, n2, n3, d1, d2, d3, coords,
+          normals, offsets},
     
-    "CenterPlanes",
-    "CenterPlanes",
+    coords = characteristicCoords;
     
-    "ThroughMinima",
-    (* TODO: Реализовать кастомные плоскости через три минимума *)
-    (Print["SliceType -> \"ThroughMinima\" not yet implemented. Using \"CenterPlanes\"."];
-     "CenterPlanes"),
+    {normals, offsets} = Which[
+      (* СЛУЧАЙ 1: Есть 3+ точки *)
+      Length[coords] >= 3,
+      {min1, min2, min3} = coords[[1 ;; 3]];
+      
+      (* Векторы в плоскости *)
+      v1 = min2 - min1;
+      v2 = min3 - min1;
+      
+      (* Нормаль к плоскости P₁: n₁ = v₁ × v₂ *)
+      n1 = Cross[v1, v2];
+      
+      (* Проверка коллинеарности *)
+      If[Norm[n1] < 10^-10,
+        (* Точки на одной прямой → fallback *)
+        If[$DebugPlotPotentialSlices3D === True,
+          Print["Warning: 3 points are collinear. Using phi3 axis for 3rd plane."];
+        ];
+        
+        (* P₁: через min1 и min2 *)
+        v1 = min2 - min1;
+        n1 = Cross[v1, {0, 0, 1}];
+        If[Norm[n1] < 10^-10, n1 = Cross[v1, {0, 1, 0}]];
+        n1 = n1 / Norm[n1];
+        
+        (* P₂: перп. к P₁, через min1 *)
+        n2 = Cross[n1, v1];
+        n2 = n2 / Norm[n2];
+        
+        (* P₃: вдоль оси phi3 *)
+        n3 = {0, 0, 1},
+        
+        (* Точки НЕ коллинеарны *)
+        n1 = n1 / Norm[n1];
+        n2 = Cross[n1, v1];
+        n2 = n2 / Norm[n2];
+        n3 = Cross[n1, n2];
+        n3 = n3 / Norm[n3];
+      ];
+      
+      d1 = n1.min1;
+      d2 = n2.min1;
+      d3 = n3.min1;
+      
+      {{n1, n2, n3}, {d1, d2, d3}},
+      
+      (* СЛУЧАЙ 2: Есть 2 точки *)
+      Length[coords] == 2,
+      {min1, min2} = coords;
+      v1 = min2 - min1;
+      
+      n1 = Cross[v1, {0, 0, 1}];
+      If[Norm[n1] < 10^-10, n1 = Cross[v1, {0, 1, 0}]];
+      n1 = n1 / Norm[n1];
+      
+      n2 = Cross[n1, v1];
+      n2 = n2 / Norm[n2];
+      
+      n3 = {0, 0, 1};
+      
+      d1 = n1.min1;
+      d2 = n2.min1;
+      d3 = n3.min1;
+      
+      If[$DebugPlotPotentialSlices3D === True,
+        Print["Warning: Only 2 minima found. Using phi3 axis for 3rd plane."];
+      ];
+      
+      {{n1, n2, n3}, {d1, d2, d3}},
+      
+      (* СЛУЧАЙ 3: < 2 точки → fallback *)
+      True,
+      If[$DebugPlotPotentialSlices3D === True,
+        Print["Warning: Less than 2 minima. Using CenterPlanes fallback."];
+      ];
+      sliceSurf = "CenterPlanes";
+      {{}, {}}
+    ];
     
-    _,
-    (* Пользовательский surf *)
-    OptionValue[SliceType]
+    (* Сохранить для использования в секции 6 *)
+    sliceSurf = If[sliceSurf === "CenterPlanes",
+      "CenterPlanes",
+      {normals, offsets}  (* передаём нормали и смещения *)
+    ];
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* 6. ПОСТРОЕНИЕ SliceContourPlot3D                                 *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  Module[{phi1, phi2, phi3, potentialPlot, coordsPlot},
+  Module[{phi1, phi2, phi3, potentialPlot, coordsPlot, finalSliceSurf},
     
     (* Подстановка Subscript -> простые символы *)
     potentialPlot = potential /. Thread[fluxVars -> {phi1, phi2, phi3}];
-    coordsPlot = allFluxCoords /. Thread[fluxVars -> {phi1, phi2, phi3}];
+    coordsPlot = allFluxCoords;
     
     showPoints = OptionValue[ShowEquilibriumPoints];
     nContours = OptionValue[Contours];
     nPlotPoints = OptionValue[PlotPoints];
     
+    (* Построить уравнения плоскостей ВНУТРИ Module где определены phi1, phi2, phi3 *)
+    finalSliceSurf = Switch[OptionValue[SliceType],
+      "CenterPlanes",
+      "CenterPlanes",
+      
+      "Auto" | "ThroughMinima",
+      If[sliceSurf === "CenterPlanes",
+        "CenterPlanes",
+        Module[{normals, offsets, n1, n2, n3, d1, d2, d3, plane1, plane2, plane3},
+          {normals, offsets} = sliceSurf;
+          {n1, n2, n3} = normals;
+          {d1, d2, d3} = offsets;
+          
+          plane1 = n1[[1]]*phi1 + n1[[2]]*phi2 + n1[[3]]*phi3 == d1;
+          plane2 = n2[[1]]*phi1 + n2[[2]]*phi2 + n2[[3]]*phi3 == d2;
+          plane3 = n3[[1]]*phi1 + n3[[2]]*phi2 + n3[[3]]*phi3 == d3;
+          
+          If[$DebugPlotPotentialSlices3D === True,
+            Print["Slice planes (through minima):"];
+            Print["  P₁: ", plane1];
+            Print["  P₂: ", plane2];
+            Print["  P₃: ", plane3];
+          ];
+          
+          {plane1, plane2, plane3}
+        ]
+      ],
+      
+      _,
+      OptionValue[SliceType]
+    ];
+    
     plot = SliceContourPlot3D[
       potentialPlot,
-      sliceSurf,
+      finalSliceSurf,
       {phi1, -0.5*phi0, 0.5*phi0},
       {phi2, -0.5*phi0, 0.5*phi0},
       {phi3, -0.5*phi0, 0.5*phi0},
@@ -557,13 +669,31 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
     
     (* Overlay точек *)
     If[showPoints,
-      Show[
-        plot,
-        Graphics3D[{
-          PointSize[0.015],
-          Red,
-          Point /@ coordsPlot
-        }]
+      Module[{sphereRadius, colors},
+        
+        (* Радиус сфер: 2% от размера области *)
+        sphereRadius = 0.02 * phi0;
+        
+        (* Цвета по энергии: синий (min) → красный (max) *)
+        colors = ColorData["Rainbow"] /@ Rescale[
+          #["Energy"] & /@ characteristicPoints,
+          {energyMin, energyMax},
+          {0, 1}
+        ];
+        
+        Show[
+          plot,
+          Graphics3D[{
+            (* Все точки: маленькие красные *)
+            PointSize[0.01],
+            Red,
+            Point /@ coordsPlot,
+            
+            (* Характерные точки: цветные сферы *)
+            Opacity[0.8],
+            MapThread[{#1, Sphere[#2, sphereRadius]} &, {colors, characteristicCoords}]
+          }]
+        ]
       ],
       plot
     ]
@@ -592,11 +722,11 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
 (* ════════════════════════════════════════════════════════════════ *)
 
 Options[PlotPotentialSlices3D] = {
-  SliceType -> "Auto",              (* "Auto" | "CenterPlanes" | "ThroughMinima" | custom *)
-  ShowEquilibriumPoints -> True,    (* overlay маркеры на равновесных точках *)
-  PlotPoints -> 25,                 (* разрешение *)
-  Contours -> 15,                   (* количество изолиний *)
-  MaxCharacteristicPoints -> 5      (* макс. количество точек для срезов *)
+  SliceType -> "Auto",              (* "Auto" теперь = "ThroughMinima" *)
+  ShowEquilibriumPoints -> True,
+  PlotPoints -> 25,
+  Contours -> 15,
+  BoundaryThreshold -> 0.45
 };
 
 
