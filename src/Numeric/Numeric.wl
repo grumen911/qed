@@ -21,10 +21,52 @@ Returns frequencies in rad/s (SI units), sorted by increasing frequency.";
 (*                  3D POTENTIAL VISUALIZATION                      *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-PlotPotentialSlices3D::usage = "PlotPotentialSlices3D[model, opts] \
-creates 3D slice visualization of potential energy U(φ₁, φ₂, φ₃) using SliceContourPlot3D. \
-Automatically computes equilibrium points if not cached and places slices through them. \
-Returns Graphics3D object.";
+PlotPotentialSlices3D::usage = 
+"PlotPotentialSlices3D[model] creates a 3D visualization of the potential \
+energy landscape using slice contour plots through equilibrium points.
+
+Options:
+  SliceType -> \"Auto\" | \"CenterPlanes\" | custom
+    \"Auto\" (default) - Automatically constructs three orthogonal planes passing \
+through characteristic equilibrium points (lowest energy interior points).
+    \"CenterPlanes\" - Uses standard coordinate planes (φ₁=0, φ₂=0, φ₃=0).
+  
+  PlotCenter -> \"GlobalMinimum\" | \"Origin\" | {φ1, φ2, φ3}
+    \"GlobalMinimum\" (default) - Centers the plot at the global energy minimum, \
+bringing boundary minima into the visible region.
+    \"Origin\" - Centers at {0, 0, 0}.
+    {φ1, φ2, φ3} - Custom center coordinates (in SI units).
+  
+  ShowEquilibriumPoints -> True | False
+    If True (default), overlays equilibrium points as colored spheres (by energy) \
+and red dots for all equilibria.
+  
+  BoundaryThreshold -> number (default: 0.45)
+    Filters out equilibrium points where |φᵢ - center| > threshold × Φ₀. \
+Points outside this range are excluded from characteristic point selection.
+  
+  PlotPoints -> integer (default: 25)
+    Resolution of the contour plot. Lower values (15-20) improve performance.
+  
+  Contours -> integer (default: 15)
+    Number of energy contour levels.
+
+Returns:
+  Graphics3D object showing potential energy isosurfaces on slice planes, \
+with equilibrium points highlighted.
+
+Key features:
+• Automatic slice plane calculation through up to 3 lowest-energy interior points
+• PlotCenter option for centering at global minimum (reveals boundary minima)
+• Energy-based color coding: blue (low) → red (high) via TemperatureMap
+• Lazy evaluation via GetNumericalQuantity[model, \"PlotPotentialSlices3D\"]
+• Debug mode: Set $DebugPlotPotentialSlices3D = True for diagnostics
+
+Example:
+  PlotPotentialSlices3D[$CurrentModel]
+  PlotPotentialSlices3D[$CurrentModel, PlotCenter -> \"Origin\"]
+  PlotPotentialSlices3D[$CurrentModel, PlotPoints -> 15, Contours -> 10]
+";
 
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
@@ -405,12 +447,32 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
 ];
 
 
+(* ::Section:: *)
+(* PlotPotentialSlices3D with PlotCenter option *)
+
+(* ════════════════════════════════════════════════════════════════ *)
+(*                          OPTIONS                                 *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+Options[PlotPotentialSlices3D] = {
+  SliceType -> "Auto",              
+  ShowEquilibriumPoints -> True,
+  PlotPoints -> 25,
+  Contours -> 15,
+  BoundaryThreshold -> 0.45,
+  PlotCenter -> "GlobalMinimum"     (* НОВОЕ: "GlobalMinimum" | "Origin" | {φ1, φ2, φ3} *)
+};
+
+(* ════════════════════════════════════════════════════════════════ *)
+(*                     MAIN FUNCTION                                *)
+(* ════════════════════════════════════════════════════════════════ *)
+
 PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] := 
  Module[{topology, hamiltonian, phi0, fluxVars, potential, 
          equilibria, allEnergies, energyMin, energyMax, 
          allFluxCoords, sliceSurf, plot, interiorPoints,
          showPoints, nContours, nPlotPoints, characteristicCoords,
-         characteristicPoints, boundaryThreshold},
+         characteristicPoints, boundaryThreshold, plotCenter, globalMin},
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* 1. ИЗВЛЕЧЕНИЕ ПОТЕНЦИАЛА                                         *)
@@ -435,10 +497,13 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
   potential = potential /. model["SubstitutionRules"];
   
   (* ════════════════════════════════════════════════════════════════ *)
-  (* 2. ПОЛУЧЕНИЕ РАВНОВЕСНЫХ ТОЧЕК 									 *)
+  (* 2. ПОЛУЧЕНИЕ РАВНОВЕСНЫХ ТОЧЕК  *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  equilibria = GetNumericalQuantity[model, "EquilibriumPoints"];
+  equilibria = GetCacheEntry[
+    model["Numerical"]["Cache"]["EquilibriumPoints"],
+    model
+  ];
   
   If[equilibria === $Failed || Length[equilibria["Solutions"]] == 0,
     Message[PlotPotentialSlices3D::noequilibria];
@@ -459,21 +524,49 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
-  (* 4. ИЗВЛЕЧЕНИЕ КООРДИНАТ ДЛЯ СРЕЗОВ                               *)
+  (* 3.5. ОПРЕДЕЛЕНИЕ ЦЕНТРА КООРДИНАТ                               *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  (* Фильтр: Убрать точки на границах (|φᵢ| > BoundaryThreshold × Φ₀) *)
+  plotCenter = Switch[OptionValue[PlotCenter],
+    "GlobalMinimum",
+    (* Глобальный минимум (наименьшая энергия среди ВСЕХ точек) *)
+    globalMin = First[SortBy[equilibria["Solutions"], #["Energy"] &]];
+    Values[globalMin["Fluxes"]],
+    
+    "Origin",
+    {0, 0, 0},
+    
+    _List,
+    (* Пользовательские координаты в единицах СИ *)
+    OptionValue[PlotCenter],
+    
+    _,
+    (* Fallback *)
+    {0, 0, 0}
+  ];
+
+  If[$DebugPlotPotentialSlices3D === True,
+    Print["PlotCenter option: ", OptionValue[PlotCenter]];
+    Print["Plot center (Φ₀ units): ", Round[plotCenter / phi0, 0.001]];
+    Print["Plot center (absolute): ", ScientificForm[#, 3]& /@ plotCenter];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* 4. ИЗВЛЕЧЕНИЕ КООРДИНАТ ДЛЯ СРЕЗОВ (СДВИНУТЫХ)                  *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  (* Фильтр: Убрать точки на границах ПОСЛЕ сдвига *)
   boundaryThreshold = OptionValue[BoundaryThreshold] * phi0;
   
   interiorPoints = Select[equilibria["Solutions"],
-    Module[{coords = Values[#["Fluxes"]]},
+    Module[{coords = Values[#["Fluxes"]] - plotCenter},  (* СДВИГ *)
       AllTrue[Abs[coords], # < boundaryThreshold &]
     ] &
   ];
   
   If[$DebugPlotPotentialSlices3D === True,
     Print["Total equilibrium points: ", Length[equilibria["Solutions"]]];
-    Print["Interior points (|φᵢ| < ", OptionValue[BoundaryThreshold], "Φ₀): ", 
+    Print["Interior points (|φᵢ - center| < ", OptionValue[BoundaryThreshold], "Φ₀): ", 
           Length[interiorPoints]];
     Print["Boundary points removed: ", 
           Length[equilibria["Solutions"]] - Length[interiorPoints]];
@@ -485,70 +578,111 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
     UpTo[3]
   ];
 
-  (* Координаты характерных точек (для секций 5 и 6) *)
-  characteristicCoords = (#["Fluxes"][[All, 2]]) & /@ characteristicPoints;
+  (* Координаты характерных точек СДВИНУТЫЕ *)
+  characteristicCoords = (#["Fluxes"][[All, 2]] - plotCenter) & /@ characteristicPoints;
   
-  (* Все координаты равновесных точек для overlay *)
-  allFluxCoords = (#["Fluxes"][[All, 2]]) & /@ equilibria["Solutions"];
+  (* Все координаты равновесных точек для overlay СДВИНУТЫЕ *)
+  allFluxCoords = (#["Fluxes"][[All, 2]] - plotCenter) & /@ equilibria["Solutions"];
   
   If[$DebugPlotPotentialSlices3D === True,
     Print["Selected ", Length[characteristicPoints], " characteristic points"];
     Print["Energies: ", ScientificForm[#, 3] & /@ (#["Energy"] & /@ characteristicPoints)];
+    Print["Shifted characteristic coords (Φ₀ units):"];
+    Do[
+      Print["  Point ", i, ": ", Round[characteristicCoords[[i]] / phi0, 0.001]],
+      {i, Length[characteristicCoords]}
+    ];
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* 5. ПОСТРОЕНИЕ СРЕЗОВ (3 ортогональные плоскости)                 *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  (* Сначала вычислить нормали и смещения в численных координатах *)
   Module[{min1, min2, min3, v1, v2, n1, n2, n3, d1, d2, d3, coords,
           normals, offsets},
     
-    coords = characteristicCoords;
+    coords = characteristicCoords;  (* УЖЕ СДВИНУТЫЕ *)
     
     {normals, offsets} = Which[
       (* СЛУЧАЙ 1: Есть 3+ точки *)
       Length[coords] >= 3,
       {min1, min2, min3} = coords[[1 ;; 3]];
       
-      (* Векторы в плоскости *)
-      v1 = min2 - min1;
-      v2 = min3 - min1;
-      
-      (* Нормаль к плоскости P₁: n₁ = v₁ × v₂ *)
-      n1 = Cross[v1, v2];
-      
-      (* Проверка коллинеарности *)
-      If[Norm[n1] < 10^-10,
-        (* Точки на одной прямой → fallback *)
-        If[$DebugPlotPotentialSlices3D === True,
-          Print["Warning: 3 points are collinear. Using phi3 axis for 3rd plane."];
-        ];
-        
-        (* P₁: через min1 и min2 *)
-        v1 = min2 - min1;
-        n1 = Cross[v1, {0, 0, 1}];
-        If[Norm[n1] < 10^-10, n1 = Cross[v1, {0, 1, 0}]];
-        n1 = n1 / Norm[n1];
-        
-        (* P₂: перп. к P₁, через min1 *)
-        n2 = Cross[n1, v1];
-        n2 = n2 / Norm[n2];
-        
-        (* P₃: вдоль оси phi3 *)
-        n3 = {0, 0, 1},
-        
-        (* Точки НЕ коллинеарны *)
-        n1 = n1 / Norm[n1];
-        n2 = Cross[n1, v1];
-        n2 = n2 / Norm[n2];
-        n3 = Cross[n1, n2];
-        n3 = n3 / Norm[n3];
+    (* Векторы в плоскости *)
+    v1 = min2 - min1;
+    v2 = min3 - min1;
+    
+    (* Нормаль к плоскости P₁: n₁ = v₁ × v₂ *)
+    n1 = Cross[v1, v2];
+    
+    (* DEBUG *)
+    If[$DebugPlotPotentialSlices3D === True,
+      Print["v1 = ", v1];
+      Print["v2 = ", v2];
+      Print["n1 = Cross[v1, v2] = ", n1];
+      Print["Norm[n1] = ", Norm[n1]];
+      Print["Relative threshold: ", Norm[n1] / (Norm[v1] * Norm[v2])];
+    ];
+    
+    (* Относительная проверка коллинеарности *)
+    If[Norm[n1] < 10^-6 * Norm[v1] * Norm[v2],
+      (* Коллинеарны → fallback *)
+      If[$DebugPlotPotentialSlices3D === True,
+        Print["Warning: 3 points are collinear. Using phi3 axis for 3rd plane."];
       ];
       
-      d1 = n1.min1;
-      d2 = n2.min1;
-      d3 = n3.min1;
+      (* Направление прямой: от min1 к min3 *)
+      v1 = min3 - min1;
+      
+      (* P₁: перпендикулярна v1 и оси z *)
+      n1 = Cross[v1, {0, 0, 1}];
+      If[Norm[n1] < 10^-10, n1 = Cross[v1, {0, 1, 0}]];
+      n1 = n1 / Norm[n1];
+      
+      (* P₂: перпендикулярна P₁ и v1 *)
+      n2 = Cross[n1, v1];
+      n2 = n2 / Norm[n2];
+      
+      (* P₃: вдоль оси phi3 *)
+      n3 = {0, 0, 1},
+      
+      (* НЕ коллинеарны — стандартная логика *)
+      n1 = n1 / Norm[n1];
+      
+      (* P₂: перпендикулярна P₁, проходит через min1-min2 *)
+      n2 = Cross[n1, v1];
+      n2 = n2 / Norm[n2];
+      
+      (* P₃: перпендикулярна P₁, проходит через min1-min3 *)
+      Module[{v3},
+        v3 = min3 - min1;
+        n3 = Cross[n1, v3];
+        n3 = n3 / Norm[n3];
+      ];
+    ];
+    
+    d1 = n1.min1;
+    d2 = n2.min1;
+    d3 = n3.min1;
+
+    (* DEBUG: проверить, что все плоскости проходят через нужные точки *)
+    If[$DebugPlotPotentialSlices3D === True,
+      Print["=== PLANE VALIDATION ==="];
+      Print["P₁ distances:"];
+      Print["  dist(min1, P₁) = ", Abs[n1.min1 - d1]];
+      Print["  dist(min2, P₁) = ", Abs[n1.min2 - d1]];
+      Print["  dist(min3, P₁) = ", Abs[n1.min3 - d1]];
+      Print[""];
+      Print["P₂ distances:"];
+      Print["  dist(min1, P₂) = ", Abs[n2.min1 - d2]];
+      Print["  dist(min2, P₂) = ", Abs[n2.min2 - d2]];
+      Print["  dist(min3, P₂) = ", Abs[n2.min3 - d2]];
+      Print[""];
+      Print["P₃ distances:"];
+      Print["  dist(min1, P₃) = ", Abs[n3.min1 - d3]];
+      Print["  dist(min2, P₃) = ", Abs[n3.min2 - d3]];
+      Print["  dist(min3, P₃) = ", Abs[n3.min3 - d3]];
+    ];
       
       {{n1, n2, n3}, {d1, d2, d3}},
       
@@ -588,7 +722,7 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
     (* Сохранить для использования в секции 6 *)
     sliceSurf = If[sliceSurf === "CenterPlanes",
       "CenterPlanes",
-      {normals, offsets}  (* передаём нормали и смещения *)
+      {normals, offsets}
     ];
   ];
   
@@ -598,15 +732,20 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
   
   Module[{phi1, phi2, phi3, potentialPlot, coordsPlot, finalSliceSurf},
     
-    (* Подстановка Subscript -> простые символы *)
-    potentialPlot = potential /. Thread[fluxVars -> {phi1, phi2, phi3}];
-    coordsPlot = allFluxCoords;
+    (* ПОДСТАНОВКА С УЧЁТОМ СДВИГА: U(φ + center) *)
+    potentialPlot = potential /. Thread[
+      fluxVars -> {phi1 + plotCenter[[1]], 
+                   phi2 + plotCenter[[2]], 
+                   phi3 + plotCenter[[3]]}
+    ];
+    
+    coordsPlot = allFluxCoords;  (* УЖЕ СДВИНУТЫЕ *)
     
     showPoints = OptionValue[ShowEquilibriumPoints];
     nContours = OptionValue[Contours];
     nPlotPoints = OptionValue[PlotPoints];
     
-    (* Построить уравнения плоскостей ВНУТРИ Module где определены phi1, phi2, phi3 *)
+    (* Построить уравнения плоскостей *)
     finalSliceSurf = Switch[OptionValue[SliceType],
       "CenterPlanes",
       "CenterPlanes",
@@ -664,17 +803,22 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
       },
       
       BoxRatios -> {1, 1, 1},
-      ImageSize -> 600
+      ImageSize -> 600,
+      
+      PlotLabel -> Style[
+        "Potential Energy (center: " <> 
+        Replace[OptionValue[PlotCenter], 
+          {"GlobalMinimum" -> "global min", "Origin" -> "origin", _ -> "custom"}] <> ")",
+        12
+      ]
     ];
     
     (* Overlay точек *)
     If[showPoints,
       Module[{sphereRadius, colors},
         
-        (* Радиус сфер: 2% от размера области *)
-        sphereRadius = 0.02 * phi0;
+        sphereRadius = 0.05 * phi0;
         
-        (* Цвета по энергии: синий (min) → красный (max) *)
         colors = ColorData["Rainbow"] /@ Rescale[
           #["Energy"] & /@ characteristicPoints,
           {energyMin, energyMax},
@@ -684,12 +828,10 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
         Show[
           plot,
           Graphics3D[{
-            (* Все точки: маленькие красные *)
-            PointSize[0.01],
+            PointSize[0.02],
             Red,
             Point /@ coordsPlot,
             
-            (* Характерные точки: цветные сферы *)
             Opacity[0.8],
             MapThread[{#1, Sphere[#2, sphereRadius]} &, {colors, characteristicCoords}]
           }]
@@ -697,44 +839,15 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
       ],
       plot
     ]
-  ];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* 7. OVERLAY РАВНОВЕСНЫХ ТОЧЕК (если опция включена)               *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  If[showPoints,
-    Show[
-      plot,
-      Graphics3D[{
-        PointSize[0.015],
-        Red,
-        Point /@ allFluxCoords
-      }]
-    ],
-    plot
   ]
 ];
-
-
-(* ════════════════════════════════════════════════════════════════ *)
-(*                          OPTIONS                                 *)
-(* ════════════════════════════════════════════════════════════════ *)
-
-Options[PlotPotentialSlices3D] = {
-  SliceType -> "Auto",              (* "Auto" теперь = "ThroughMinima" *)
-  ShowEquilibriumPoints -> True,
-  PlotPoints -> 25,
-  Contours -> 15,
-  BoundaryThreshold -> 0.45
-};
 
 
 (* ════════════════════════════════════════════════════════════════ *)
 (*                       DEBUG FLAG                                 *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-$DebugPlotPotentialSlices3D = True;
+$DebugPlotPotentialSlices3D = False;
   
 
 PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},
@@ -746,6 +859,27 @@ ComputeEvolution[model_, tmax_?NumericQ] := Module[{sol},
   (* NDSolve *)
   sol
 ];
+
+
+(* Извлечь значение из записи кэша, вычисляя если нужно *)
+GetCacheEntry[cacheEntry_Association, model_Association] := Module[
+  {state, thunk},
+  
+  state = Lookup[cacheEntry, "State", "Unknown"];
+  
+  Which[
+    state === "Ready",
+      Lookup[cacheEntry, "Value", $Failed],
+    
+    state === "Lazy",
+      thunk = Lookup[cacheEntry, "Thunk", $Failed];
+      If[thunk === $Failed, $Failed, thunk[model]],
+    
+    True,
+      $Failed
+  ]
+];
+
 
 End[];
 EndPackage[];

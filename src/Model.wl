@@ -9,6 +9,7 @@ CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]
 GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
 GetNumericalQuantity::usage = "GetNumericalQuantity[model, key]"
 GetNumericalParams::usage = "GetNumericalParams[model]"
+GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]"
 UpdatePrimaryParam::usage = "UpdatePrimaryParam[model, path, value]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
@@ -465,6 +466,17 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
             ]
           ]
         ]
+      ]
+    |>;
+    
+    (* ════════════════════════════════════════════════════════════ *)
+    (* 3D Potential Landscape Visualization (Lazy)                  *)
+    (* ════════════════════════════════════════════════════════════ *)
+    
+    cache["PlotPotentialSlices3D"] = <|
+      "State" -> "Lazy",
+      "Thunk" -> Function[{m},
+        PlotPotentialSlices3D[m]
       ]
     |>;
     

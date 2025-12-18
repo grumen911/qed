@@ -47,7 +47,7 @@ MakeDynamicSlider[model_, componentTag_, paramName_, currentValue_,
     Row[{
       componentTag <> "." <> paramName <> ": ",
       Slider[d, {min, max, step}],
-      InputField[d, Number, FieldSize -> {5, 1}]
+      InputField[d, Number, FieldSize -> {6, 1}]
     }]
   ];
 		
@@ -99,26 +99,32 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
   {model = First@modelsStack},
   
   Column[{
-   SelectModel[Unevaluated@model, modelsStack],
-   MakeSliderHub[Unevaluated@model],
-   
-   
-   Dynamic[
-      Column[{
-        "Hamiltonian (numerical):",
-        GetNumericalQuantity[$CurrentModel, "HamiltonianNumerical"]
-        (*/. s_Symbol :> Symbol[SymbolName[s]]*),
-        "",
-        "InverseCapacitanceMatrix:",
-        MatrixForm@GetNumericalQuantity[$CurrentModel, "InverseCapacitanceMatrix"],
-        "",
-        
-        Style["Test Plot:", Bold, 12](*,
-        GetNumericalQuantity[$CurrentModel, "PlotTest"]*)
-      }],
-      TrackedSymbols :> {$CurrentModel},
-      ContinuousAction -> False
-    ]
+  	Row[{
+  		Column[{
+		   SelectModel[Unevaluated@model, modelsStack],
+		   MakeSliderHub[Unevaluated@model],
+		Dynamic[
+			GetNumericalQuantity[$CurrentModel, "PlotPotentialSlices3D"], 
+			ContinuousAction -> False,
+			SynchronousUpdating -> False,
+      		UpdateInterval -> Infinity
+      	]
+		}]
+  	}],
+  	
+	Dynamic[
+	  Column[{
+	    "Hamiltonian (numerical):",
+	    GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
+	    "Equilibrium Fluxes:",
+	    GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"]/. (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15))
+	    
+	  }],
+	  TrackedSymbols :> {$CurrentModel}
+	]
+	
+	
+	
   }]
 ];
 
