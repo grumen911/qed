@@ -1,4 +1,4 @@
-BeginPackage["QED`Numeric`"];
+BeginPackage["QED`Numeric`", {"QED`Model`"}];
 
 PrepareNumericModel::usage = "PrepareNumericModel[symModel, params] prepares numeric functions.";
 ComputeEvolution::usage = "ComputeEvolution[model, tmax] computes NDSolve solution.";
@@ -16,6 +16,18 @@ Returns Association with list of solutions, energies, and residuals.";
 ComputeNormalModeFrequencies::usage = "ComputeNormalModeFrequencies[invCap, L] \
 computes normal mode frequencies ω_i from eigenvalues of C^(-1)·L matrix. \
 Returns frequencies in rad/s (SI units), sorted by increasing frequency.";
+
+(* ════════════════════════════════════════════════════════════════ *)
+(*                  3D POTENTIAL VISUALIZATION                      *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+PlotPotentialSlices3D::usage = "PlotPotentialSlices3D[model, opts] \
+creates 3D slice visualization of potential energy U(φ₁, φ₂, φ₃) using SliceContourPlot3D. \
+Automatically computes equilibrium points if not cached and places slices through them. \
+Returns Graphics3D object.";
+
+PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
+PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
 
 Begin["`Private`"];
@@ -356,7 +368,7 @@ Options[FindEquilibriumPoints] = {
 };
 
 (* Debug флаг *)
-$DebugFindEquilibriumPoints = True;
+$DebugFindEquilibriumPoints = False;
 
 
 (*
@@ -391,6 +403,208 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
     "NumUnstableModes" -> Count[omega2, x_ /; x < -threshold]
   |>
 ];
+
+
+PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] := 
+ Module[{topology, hamiltonian, phi0, fluxVars, potential, 
+         equilibria, allEnergies, energyMin, energyMax, 
+         allFluxCoords, slicePositions, sliceSurf, plot, 
+         showPoints, nContours, nPlotPoints},
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* 1. ИЗВЛЕЧЕНИЕ ПОТЕНЦИАЛА                                         *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  topology = model["Topology"];
+  hamiltonian = model["Analytical"]["Hamiltonian"];
+  phi0 = QED`$Phi0Value;
+  
+  (* Независимые потоки *)
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ 
+    Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+  
+  (* Проверка размерности *)
+  If[Length[fluxVars] != 3,
+    Message[PlotPotentialSlices3D::dimension, Length[fluxVars]];
+    Return[$Failed]
+  ];
+  
+  (* Потенциальная энергия U(φ) = H(q=0, φ) с подстановкой параметров *)
+  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
+  potential = potential /. model["SubstitutionRules"];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* 2. ПОЛУЧЕНИЕ РАВНОВЕСНЫХ ТОЧЕК 									 *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  equilibria = GetNumericalQuantity[model, "EquilibriumPoints"];
+  
+  If[equilibria === $Failed || Length[equilibria["Solutions"]] == 0,
+    Message[PlotPotentialSlices3D::noequilibria];
+    Return[$Failed]
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* 3. ВЫЧИСЛЕНИЕ ГЛОБАЛЬНОГО ДИАПАЗОНА ЭНЕРГИЙ                      *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  allEnergies = #["Energy"] & /@ equilibria["Solutions"];
+  energyMin = Min[allEnergies];
+  energyMax = Max[allEnergies];
+  
+  If[$DebugPlotPotentialSlices3D === True,
+    Print["Energy range: [", ScientificForm[energyMin, 3], ", ", 
+          ScientificForm[energyMax, 3], "] J"];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* 4. ИЗВЛЕЧЕНИЕ КООРДИНАТ ДЛЯ СРЕЗОВ                               *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  (* Взять только характерные точки (с наименьшей энергией) *)
+  characteristicPoints = Take[
+    SortBy[equilibria["Solutions"], #["Energy"] &], 
+    UpTo[5]  (* максимум 5 точек *)
+  ];
+  
+  (* Все координаты равновесных точек для overlay *)
+  allFluxCoords = (#["Fluxes"][[All, 2]]) & /@ equilibria["Solutions"];
+  
+  (* Координаты характерных точек для срезов *)
+  characteristicCoords = (#["Fluxes"][[All, 2]]) & /@ characteristicPoints;
+  
+  (* Уникальные значения по каждой оси для срезов *)
+  slicePositions = Union /@ Transpose[characteristicCoords];
+  
+  If[$DebugPlotPotentialSlices3D === True,
+    Print["Selected ", Length[characteristicPoints], " characteristic points"];
+    Print["Energies: ", #["Energy"] & /@ characteristicPoints];
+    Print["Slice positions:"];
+    Print["  φ₁ (", Length[slicePositions[[1]]], " slices): ", slicePositions[[1]]];
+    Print["  φ₂ (", Length[slicePositions[[2]]], " slices): ", slicePositions[[2]]];
+    Print["  φ₃ (", Length[slicePositions[[3]]], " slices): ", slicePositions[[3]]];
+    Print["Total planes: ", Total[Length /@ slicePositions]];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* 5. ПОСТРОЕНИЕ СРЕЗОВ (пока стандартные, TODO: кастомные через минимумы) *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  sliceSurf = Switch[OptionValue[SliceType],
+    "Auto",
+    (* Срезы через все найденные равновесные точки *)
+    {
+      {"XStackedPlanes", slicePositions[[1]]},
+      {"YStackedPlanes", slicePositions[[2]]},
+      {"ZStackedPlanes", slicePositions[[3]]}
+    },
+    
+    "CenterPlanes",
+    "CenterPlanes",
+    
+    "ThroughMinima",
+    (* TODO: Реализовать кастомные плоскости через три минимума *)
+    (Print["SliceType -> \"ThroughMinima\" not yet implemented. Using \"CenterPlanes\"."];
+     "CenterPlanes"),
+    
+    _,
+    (* Пользовательский surf *)
+    OptionValue[SliceType]
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* 6. ПОСТРОЕНИЕ SliceContourPlot3D                                 *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  Module[{phi1, phi2, phi3, potentialPlot, coordsPlot},
+    
+    (* Подстановка Subscript -> простые символы *)
+    potentialPlot = potential /. Thread[fluxVars -> {phi1, phi2, phi3}];
+    coordsPlot = allFluxCoords /. Thread[fluxVars -> {phi1, phi2, phi3}];
+    
+    showPoints = OptionValue[ShowEquilibriumPoints];
+    nContours = OptionValue[Contours];
+    nPlotPoints = OptionValue[PlotPoints];
+    
+    plot = SliceContourPlot3D[
+      potentialPlot,
+      sliceSurf,
+      {phi1, -0.5*phi0, 0.5*phi0},
+      {phi2, -0.5*phi0, 0.5*phi0},
+      {phi3, -0.5*phi0, 0.5*phi0},
+      
+      ColorFunctionScaling -> False,
+      ColorFunction -> Function[z,
+        ColorData["TemperatureMap"][
+          Rescale[z, {energyMin, energyMax}, {0, 1}]
+        ]
+      ],
+      
+      PlotRange -> {energyMin, energyMax},
+      Contours -> nContours,
+      PlotLegends -> Automatic,
+      PlotPoints -> nPlotPoints,
+      
+      AxesLabel -> {
+        Subscript[QED`$FluxSymbol, 1],
+        Subscript[QED`$FluxSymbol, 2],
+        Subscript[QED`$FluxSymbol, 3]
+      },
+      
+      BoxRatios -> {1, 1, 1},
+      ImageSize -> 600
+    ];
+    
+    (* Overlay точек *)
+    If[showPoints,
+      Show[
+        plot,
+        Graphics3D[{
+          PointSize[0.015],
+          Red,
+          Point /@ coordsPlot
+        }]
+      ],
+      plot
+    ]
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* 7. OVERLAY РАВНОВЕСНЫХ ТОЧЕК (если опция включена)               *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  If[showPoints,
+    Show[
+      plot,
+      Graphics3D[{
+        PointSize[0.015],
+        Red,
+        Point /@ allFluxCoords
+      }]
+    ],
+    plot
+  ]
+];
+
+
+(* ════════════════════════════════════════════════════════════════ *)
+(*                          OPTIONS                                 *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+Options[PlotPotentialSlices3D] = {
+  SliceType -> "Auto",              (* "Auto" | "CenterPlanes" | "ThroughMinima" | custom *)
+  ShowEquilibriumPoints -> True,    (* overlay маркеры на равновесных точках *)
+  PlotPoints -> 25,                 (* разрешение *)
+  Contours -> 15,                   (* количество изолиний *)
+  MaxCharacteristicPoints -> 5      (* макс. количество точек для срезов *)
+};
+
+
+(* ════════════════════════════════════════════════════════════════ *)
+(*                       DEBUG FLAG                                 *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+$DebugPlotPotentialSlices3D = True;
   
 
 PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},
