@@ -16,6 +16,7 @@ InitQED[] := Module[{srcDir},
     Get[FileNameJoin[{srcDir, "CircuitTopology.wl"}]];
     Get[FileNameJoin[{srcDir, "Model.wl"}]];
 
+	Get[FileNameJoin[{srcDir, "Plots", "Plots.wl"}]];
 	Get[FileNameJoin[{srcDir, "GUI", "Interactive.wl"}]];
 
 ];
