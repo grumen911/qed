@@ -1,24 +1,46 @@
 BeginPackage["QED`Bootstrap`"];
 
-InitQED::usage = "Initialize[] sets up the package.";
+InitQED::usage = "InitQED[] sets up the package.";
+$QEDDebug::usage = "$QEDDebug - if True, enables verbose loading messages.";
 
 Begin["`Private`"];
 
-InitQED[] := Module[{srcDir},
+(* Глобальный флаг дебага *)
+$QEDDebug = True;
+
+(* Утилита для условного вывода *)
+debugPrint[msg_String] := If[TrueQ[$QEDDebug], Print["[QED Debug] ", msg]];
+
+InitQED[] := Module[{srcDir, loadTime},
+    debugPrint["Starting QED initialization..."];
+    
     srcDir = DirectoryName[$InputFileName];
-    If[!MemberQ[$Path, srcDir], PrependTo[$Path, srcDir]];
+    debugPrint["Source directory: " <> srcDir];
+    
+    If[!MemberQ[$Path, srcDir], 
+        PrependTo[$Path, srcDir];
+        debugPrint["Added to $Path: " <> srcDir];
+    ];
 
-    (* 1. Сначала загружаем базу: стили, аналитику и МОДЕЛЬ *)
-    Get[FileNameJoin[{srcDir, "Plots", "PlotStyle.wl"}]];
-    Get[FileNameJoin[{srcDir, "Analytic", "Analytic.wl"}]];
-    Get[FileNameJoin[{srcDir, "Numeric", "Numeric.wl"}]]; 
+    (* Макрос для загрузки с таймингом *)
+    loadPackage[relPath_String] := Module[{file, t},
+        file = FileNameJoin[{srcDir, relPath}];
+        debugPrint["Loading: " <> relPath <> "..."];
+        t = AbsoluteTiming[Get[file]][[1]];
+        debugPrint[" [OK] Successful Loaded " <> relPath <> " in " <> ToString[NumberForm[t, {4, 3}]] <> " seconds"];
+    ];
 
-    Get[FileNameJoin[{srcDir, "CircuitTopology.wl"}]];
-    Get[FileNameJoin[{srcDir, "Model.wl"}]];
+    (* Загрузка модулей *)
+    loadPackage["Plots/PlotStyle.wl"];
+    loadPackage["Analytic/Analytic.wl"];
+    loadPackage["Numeric/HarmonicOscillator.wl"];    
+    loadPackage["Numeric/Numeric.wl"];
+    loadPackage["CircuitTopology.wl"];
+    loadPackage["Model.wl"];
+    loadPackage["GUI/Interactive.wl"];
 
-	Get[FileNameJoin[{srcDir, "Plots", "Plots.wl"}]];
-	Get[FileNameJoin[{srcDir, "GUI", "Interactive.wl"}]];
-
+    debugPrint["QED initialization complete."];
 ];
+
 End[];
 EndPackage[];

@@ -26,7 +26,7 @@ Begin["`Private`"];
 (*                       DEBUG FLAG                                 *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-$DebugHarmonicDiagonalization = True;
+$DebugHarmonicDiagonalization = False;
 
 DiagonalizeHarmonicHamiltonian[invC_?MatrixQ, invL_?MatrixQ] := 
  Module[{omega0, C0, L0, invCscaled, invLscaled, 

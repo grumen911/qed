@@ -9,7 +9,8 @@ PacletObject[
       {
         "Kernel",
         "Root" -> "src",
-        "Context" -> {"QED`"}
+        "Context" -> {"QED`"},
+        "Loading" -> "Manual"
       },
       {
         "Documentation",
@@ -19,11 +20,10 @@ PacletObject[
     
 	  "Description" -> "Quantum qubit simulation package",
 	  "Creator" -> "grumen911",
-	  "URL" -> "https://github.com/yourname/QED",
+	  "URL" -> "https://github.com/grumen911/QED",
 	  "License" -> "MIT", 
 	  
 	  (* версифицирование *)
-	  "RequiredContexts" -> {},       (* зависимости от других пакетов *)
 	  "Updating" -> "Manual",         (* "Manual" или "Automatic" *)
 	  
 	  (* категория в Repository *)
@@ -31,9 +31,6 @@ PacletObject[
 	    "Physics",
 	    "Quantum Computing",
 	    "Superconductivity"
-	  },
-	  
-	  (* поддерживаемые версии WL *)
-	  "MathematicaVersion" -> "13.0+"
+	  }
   |>
 ]

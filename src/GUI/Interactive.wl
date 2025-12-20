@@ -1,12 +1,13 @@
 (*BeginPackage["QED`Interactive`", {"QED`Model`"}];*)
 BeginPackage["QED`Interactive`"];
 
-Needs["QED`Model`"];
 
 QubitDashboard::usage = "QubitDashboard[model ] - интерактивная панель управления";
 
 
 Begin["`Private`"];
+
+Needs["QED`Model`"];
 
 (* ═══════════════════════════════════════════════════════════════ *)
 (* ЛОГИКА *)
@@ -149,7 +150,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
         "Equilibrium Fluxes:",
         GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
-          (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15))
+          (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
+        GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"]
       }],
       TrackedSymbols :> {$CurrentModel}
     ]
