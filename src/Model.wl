@@ -447,6 +447,17 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
       (* Если матрицы сингулярные *)
       cache["PlasmonFrequencies"] = <|"State" -> "Failed", "Error" -> "Singular matrices"|>
     ];
+
+    (* ════════════════════════════════════════════════════════════════ *)
+    (* Plasmon Frequencies vs Flux (Lazy)                              *)
+    (* ════════════════════════════════════════════════════════════════ *)
+
+    cache["PlasmonFrequenciesVsFlux"] = <|
+      "State" -> "Lazy",
+      "Thunk" -> Function[{m},
+        QED`Numeric`PlasmonFrequenciesVsFlux[m]
+      ]
+    |>;
     
 	(* ════════════════════════════════════════════════════════════════ *)
 	(* Harmonic mode diagonalization (READY)                            *)

@@ -1,4 +1,4 @@
-BeginPackage["QED`Numeric`"];
+BeginPackage["QED`Numeric`", {"QED`Numeric`HarmonicOscillator`"}];
 
 PrepareNumericModel::usage = "PrepareNumericModel[symModel, params] prepares numeric functions.";
 ComputeEvolution::usage = "ComputeEvolution[model, tmax] computes NDSolve solution.";
@@ -78,8 +78,6 @@ PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceCon
 
 Begin["`Private`"];
 
-Needs["QED`Numeric`HarmonicOscillator`"];
-
 (*
   Physics: Find equilibrium positions φ_min where ∂U/∂φ = 0.
   
@@ -114,6 +112,12 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
   phi0Value = QED`$Phi0Value;
   externalFlux = QED`$PhiExt /. substitutionRules;
   potentialNumeric = potential /. substitutionRules /. QED`$Phi0 -> phi0Value;
+
+  If[$DebugFindPotentialMinimum === True,
+    Print["Potential after substitution: ", Short[potentialNumeric, 3]];
+    Print["Contains $CurrentModel? ", !FreeQ[potentialNumeric, $CurrentModel]];
+    Print["Contains symbols? ", Cases[potentialNumeric, _Symbol, {0, 5}]];
+  ];
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* ОБЕЗРАЗМЕРИВАНИЕ для численной стабильности                      *)
@@ -484,6 +488,7 @@ Options[PlotPotentialSlices3D] = {
   Reference: Koch et al., PRA 76, 042319 (2007), Eq. 8
 *)
 
+
 PlasmonFrequenciesVsFlux[model_Association] := Module[
   {
     capSym, lindInvSym, hamiltonian, topology, rulesBase, phiExtSym, phi0
@@ -511,6 +516,10 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
     Module[{phiExtPhysical, rulesWithFlux, capNum, lindInvNum, 
             invCapNum, omega2, frequencies, equilibriumRules},
       
+      If[!NumericQ[phiExtDimensionless],
+        Return[$Failed, Module]
+      ];
+
       (* Конвертировать φext из единиц Φ₀ в Weber *)
       phiExtPhysical = phiExtDimensionless * phi0;
       
