@@ -6,10 +6,14 @@ DefaultPlotOptions::usage = "DefaultPlotOptions[key] returns plot options.";
 TestPlot[expr_] :=
   Plot[Sin[expr x],{x,0,1}]
 
+
+
 Begin["`Private`"];
 
+
+
 DefaultPlotOptions["QubitTimeSeries"] := {
-  PlotRange -> All,
+  PlotRange -> All ,
   Frame -> True,
   PlotStyle -> {Thick, ColorData[97][1]},
   ImageSize -> 300
