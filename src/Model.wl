@@ -305,7 +305,7 @@ GenerateDefaultParameters[topology_] :=
 	  primaryParams["Fext"] = <|
 	    "Type" -> "ExternalFlux",
 	    "Fext" -> <|
-	      "Value" -> 0.0,
+	      "Value" -> 0.3,
 	      "Symbol" -> QED`$PhiExt,
 	      "Min" -> -0.5,
 	      "Max" -> 0.5,
@@ -336,7 +336,7 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
   harmonicHamiltonian = BuildHarmonicHamiltonian[hamiltonian, topology];
   
   (* Индуктивная матрица (обратная) *)
-  indMatrix = BuildInductanceMatrix[harmonicHamiltonian, topology];
+  indMatrix = BuildInductanceMatrix[hamiltonian, topology];
   
   (*Градиент потенциала для поиска равновесия *)
   potentialGradient = BuildPotentialGradient[hamiltonian, topology];
@@ -379,10 +379,7 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     
     equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
     cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
-    
-    (* ОБНОВИТЬ $CurrentModel чтобы правила подстановки работали! *)
-	$CurrentModel = ReplacePart[$CurrentModel, {"Numerical", "Cache"} -> cache];
-    
+
     (* Равновесные точки (LAZY) *)
     cache["EquilibriumPoints"] = <|
       "State" -> "Lazy",
@@ -395,6 +392,9 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
         ]
       ]
     |>;
+
+    (* ОБНОВИТЬ $CurrentModel чтобы правила подстановки работали! *)
+    $CurrentModel = ReplacePart[$CurrentModel, {"Numerical", "Cache"} -> cache];
     
     (* ════════════════════════════════════════════════════════════ *)
     (* Шаг 3: Остальные матрицы (ТЕПЕРЬ с φ_min!)                   *)
@@ -589,7 +589,8 @@ GetNumericalQuantity[model_Association, key_String] := Module[
          ];
        num["IsDirty"] = False;
        num["ComputationTime"] = Now;
-       $CurrentModel = ReplacePart[$CurrentModel, "Numerical" -> num];  (* Обновить model *)
+      
+      $CurrentModel = ReplacePart[$CurrentModel, "Numerical" -> num];  (* Обновить model *)
      ];
     
     (* Шаг 2: Получить запрошенный ключ из кэша *)

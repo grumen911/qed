@@ -115,32 +115,53 @@ BuildCapacitanceMatrix[lagrangian_, topology_Association] :=
 
 
 (*
-  Physics: Inverse inductance matrix L⁻¹ (stiffness matrix) from harmonic Hamiltonian.
+  Physics: Inverse inductance matrix L⁻¹ (stiffness matrix) from direct Hessian.
   
-  For harmonic approximation:
-  H = (1/2) qᵀ C⁻¹ q + (1/2) φᵀ L⁻¹ φ
+  For harmonic approximation around equilibrium:
+  H ≈ H(φ_min) + (1/2) ∑ᵢⱼ L⁻¹ᵢⱼ (φᵢ - φᵢ,min)(φⱼ - φⱼ,min)
   
-  where L⁻¹ᵢⱼ = ∂²U/∂φᵢ∂φⱼ|_min is the Hessian of potential energy.
+  where L⁻¹ᵢⱼ = ∂²H/∂φᵢ∂φⱼ|_{φ=φ_min} is the Hessian evaluated at equilibrium.
   
-  This is the linearized inductance around equilibrium φ_min.
+  CRITICAL: Must use direct Hessian from original Hamiltonian!
+  
+  Using Series-expanded harmonicHamiltonian produces incorrect matrix elements
+  due to numerical errors in mixed derivatives (~10⁻⁸), which corrupt the 
+  eigenspectrum and produce NON-PHYSICAL IMAGINARY FREQUENCIES.
+  
+  At a true minimum, Hessian must be positive-definite → all eigenvalues > 0.
+  Imaginary frequencies (λ < 0) indicate either:
+  1. Numerical artifact (if error ~ 10⁻⁸)
+  2. Saddle point instead of minimum (requires investigation)
+  
+  This implementation computes Hessian symbolically, then substitutes φ_min,
+  preserving positive-definiteness and avoiding imaginary frequencies.
   
   Reference: Devoret lectures, Les Houches (2004), Section 3.2
+             Koch et al., PRA 76, 042319 (2007)
 *)
 
 BuildInductanceMatrix[hamiltonian_, topology_Association] := 
- Module[{nodes, phiVars, inductanceMatrixInv},
+ Module[{nodes, phiVars, minSymbols, hessianSymbolic},
   
   nodes = getIndependentNodes[topology];
   phiVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
   
-  (* L⁻¹ = ∂²H/∂φᵢ∂φⱼ *)
-  inductanceMatrixInv = Outer[
-    D[D[hamiltonian, #1], #2] &,
+  (* Step 1: Compute symbolic Hessian ∂²H/∂φᵢ∂φⱼ from original Hamiltonian *)
+  (* This avoids numerical errors from Series expansion *)
+  hessianSymbolic = Outer[
+    Function[{var1, var2},
+      D[D[hamiltonian, var1], var2]
+    ],
     phiVars,
     phiVars
   ];
   
-  Simplify[inductanceMatrixInv]
+  (* Step 2: Substitute φ → φ_min symbolically *)
+  hessianSymbolic = hessianSymbolic /. Thread[phiVars -> minSymbols];
+  
+  (* Step 3: Simplify coefficients *)
+  Simplify[hessianSymbolic]
  ];
 
 
