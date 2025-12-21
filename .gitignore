@@ -28,7 +28,9 @@ output/
 # IDE временные файлы
 .vscode/
 .idea/
+scripts/
 
 # Большие бинарные файлы
 *.zip
 *.tar.gz
+.WolframResources
