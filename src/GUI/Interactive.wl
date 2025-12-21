@@ -1,5 +1,5 @@
-(*BeginPackage["QED`Interactive`", {"QED`Model`"}];*)
-BeginPackage["QED`Interactive`"];
+BeginPackage["QED`Interactive`", {"QED`Model`"}];
+(* BeginPackage["QED`Interactive`"]; *)
 
 
 QubitDashboard::usage = "QubitDashboard[model ] - интерактивная панель управления";
@@ -7,7 +7,7 @@ QubitDashboard::usage = "QubitDashboard[model ] - интерактивная п�
 
 Begin["`Private`"];
 
-Needs["QED`Model`"];
+
 
 (* ═══════════════════════════════════════════════════════════════ *)
 (* ЛОГИКА *)
@@ -42,7 +42,8 @@ MakeDynamicSlider[model_, componentTag_, paramName_, currentValue_,
       model["Primary"][componentTag][paramName]["Value"], 
       (model["Primary"][componentTag][paramName]["Value"] = #;
       model["Numerical"]["IsDirty"] = True;
-       $CurrentModel = model) &
+      $CurrentModel["Primary"][componentTag][paramName]["Value"] = #;
+      $CurrentModel["Numerical"]["IsDirty"] = True;) &
     ]
   },
     Row[{
@@ -151,7 +152,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         "Equilibrium Fluxes:",
         GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
           (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
-        GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"]
+        GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"],
+        $CurrentModel["SubstitutionRules"] // Values
       }],
       TrackedSymbols :> {$CurrentModel}
     ]
