@@ -1,6 +1,4 @@
-BeginPackage["QED`Numeric`", {"QED`Numeric`HarmonicOscillator`"}];
-
-Needs["QED`Numeric`HarmonicOscillator`"];
+BeginPackage["QED`Numeric`"];
 
 PrepareNumericModel::usage = "PrepareNumericModel[symModel, params] prepares numeric functions.";
 ComputeEvolution::usage = "ComputeEvolution[model, tmax] computes NDSolve solution.";
@@ -19,6 +17,10 @@ ComputeNormalModeFrequencies::usage = "ComputeNormalModeFrequencies[invCap, L] \
 computes normal mode frequencies ω_i from eigenvalues of C^(-1)·L matrix. \
 Returns frequencies in rad/s (SI units), sorted by increasing frequency.";
 
+PlasmonFrequenciesVsFlux::usage = 
+  "PlasmonFrequenciesVsFlux[model] возвращает численную функцию ω[φext_?NumericQ], \
+где φext в единицах Φ₀. Возвращает список частот {ω₁, ω₂, ...} в rad/s.";
+
 (* ════════════════════════════════════════════════════════════════ *)
 (*                  3D POTENTIAL VISUALIZATION                      *)
 (* ════════════════════════════════════════════════════════════════ *)
@@ -34,9 +36,9 @@ through characteristic equilibrium points (lowest energy interior points).
     \"CenterPlanes\" - Uses standard coordinate planes (φ₁=0, φ₂=0, φ₃=0).
   
   PlotCenter -> \"GlobalMinimum\" | \"Origin\" | {φ1, φ2, φ3}
-    \"GlobalMinimum\" (default) - Centers the plot at the global energy minimum, \
+    \"GlobalMinimum\" - Centers the plot at the global energy minimum, \
 bringing boundary minima into the visible region.
-    \"Origin\" - Centers at {0, 0, 0}.
+    \"Origin\" (default) - Centers at {0, 0, 0}.
     {φ1, φ2, φ3} - Custom center coordinates (in SI units).
   
   ShowEquilibriumPoints -> True | False
@@ -75,6 +77,8 @@ PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceCon
 
 
 Begin["`Private`"];
+
+Needs["QED`Numeric`HarmonicOscillator`"];
 
 (*
   Physics: Find equilibrium positions φ_min where ∂U/∂φ = 0.
@@ -173,20 +177,20 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
     ];
   ];
   
-(* DEBUG: два минимума *)
-If[$DebugFindPotentialMinimum === True,
-  Module[{res1, res2, E1, E2, phi1, phi2},
-    res1 = NMinimize[{potentialRescaled, constraints}, fluxVars, 
-      Method -> {"RandomSearch", "SearchPoints" -> 10}];
-    res2 = NMinimize[{potentialRescaled, constraints}, fluxVars, 
-      Method -> {"RandomSearch", "SearchPoints" -> 10, "RandomSeed" -> 999}];
-    E1 = res1[[1]]; phi1 = res1[[2]];
-    E2 = res2[[1]]; phi2 = res2[[2]];
-    Print["E1 = ", ScientificForm[E1, 3], " at φ = ", fluxVars /. phi1];
-    Print["E2 = ", ScientificForm[E2, 3], " at φ = ", fluxVars /. phi2];
-    Print["ΔE = ", ScientificForm[Abs[E1-E2], 2]];
+  (* DEBUG: два минимума *)
+  If[$DebugFindPotentialMinimum === True,
+    Module[{res1, res2, E1, E2, phi1, phi2},
+      res1 = NMinimize[{potentialRescaled, constraints}, fluxVars, 
+        Method -> {"RandomSearch", "SearchPoints" -> 10}];
+      res2 = NMinimize[{potentialRescaled, constraints}, fluxVars, 
+        Method -> {"RandomSearch", "SearchPoints" -> 10, "RandomSeed" -> 999}];
+      E1 = res1[[1]]; phi1 = res1[[2]];
+      E2 = res2[[1]]; phi2 = res2[[2]];
+      Print["E1 = ", ScientificForm[E1, 3], " at φ = ", fluxVars /. phi1];
+      Print["E2 = ", ScientificForm[E2, 3], " at φ = ", fluxVars /. phi2];
+      Print["ΔE = ", ScientificForm[Abs[E1-E2], 2]];
+    ];
   ];
-];
 
   
   (* DEBUG: градиент в минимуме *)
@@ -442,7 +446,7 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
   
   (* Вернуть с диагностикой *)
   <|
-    "Frequencies" -> frequencies,
+    "Frequencies" -> Chop[frequencies],
     "IsStable" -> AllTrue[omega2, # > threshold &],
     "NumUnstableModes" -> Count[omega2, x_ /; x < -threshold]
   |>
@@ -462,8 +466,85 @@ Options[PlotPotentialSlices3D] = {
   PlotPoints -> 25,
   Contours -> 15,
   BoundaryThreshold -> 0.45,
-  PlotCenter -> "GlobalMinimum"     (* НОВОЕ: "GlobalMinimum" | "Origin" | {φ1, φ2, φ3} *)
+  PlotCenter -> "Origin"     (* НОВОЕ: "GlobalMinimum" | "Origin" | {φ1, φ2, φ3} *)
 };
+
+
+(* После ComputeNormalModeFrequencies *)
+
+(*
+  Physics: Plasmon frequencies as function of external flux.
+  
+  Returns pure function ω[φext_?NumericQ] where φext is dimensionless (in Φ₀ units).
+  For each flux value, performs:
+  1. Numerical substitution into C and L⁻¹ matrices
+  2. Eigenvalue decomposition of C⁻¹·L⁻¹
+  3. Returns sorted frequencies ω_i in rad/s
+  
+  Reference: Koch et al., PRA 76, 042319 (2007), Eq. 8
+*)
+
+PlasmonFrequenciesVsFlux[model_Association] := Module[
+  {
+    capSym, lindInvSym, hamiltonian, topology, rulesBase, phiExtSym, phi0
+  },
+  
+  (* Аналитические матрицы из модели *)
+  capSym     = model["Analytical"]["CapacitanceMatrix"];
+  lindInvSym = model["Analytical"]["InductanceMatrix"];  (* L⁻¹ *)
+  hamiltonian = model["Analytical"]["Hamiltonian"];
+  topology    = model["Topology"];  
+
+  
+  (* Физические константы *)
+  phiExtSym = QED`$PhiExt;
+  phi0      = QED`$Phi0Value;
+  
+  (* Базовые правила подстановки БЕЗ внешнего потока и φ_min *)
+  rulesBase = DeleteCases[
+    model["SubstitutionRules"],
+    (phiExtSym :> _) | (Subscript[QED`$FluxSymbol, "min", _] :> _)
+  ];
+  
+  (* Возвращаем чисто численную функцию *)
+  Function[{phiExtDimensionless},
+    Module[{phiExtPhysical, rulesWithFlux, capNum, lindInvNum, 
+            invCapNum, omega2, frequencies, equilibriumRules},
+      
+      (* Конвертировать φext из единиц Φ₀ в Weber *)
+      phiExtPhysical = phiExtDimensionless * phi0;
+      
+      (* Подставить текущее значение внешнего потока *)
+      rulesWithFlux = Append[rulesBase, phiExtSym -> phiExtPhysical];
+      
+      equilibriumRules = FindPotentialMinimum[
+        hamiltonian,
+        topology,
+        rulesWithFlux
+      ];      
+
+      rulesWithFlux = Join[rulesWithFlux, equilibriumRules];
+      
+      (* Численные матрицы *)
+      capNum     = capSym /. rulesWithFlux;
+      lindInvNum = lindInvSym /. rulesWithFlux;
+      
+      (* C⁻¹ *)
+      If[Det[capNum] == 0, Return[$Failed]];
+      invCapNum = Inverse[capNum];
+      
+      (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
+      omega2 = Eigenvalues[N[invCapNum . lindInvNum]];
+      
+      (* √ω² с сортировкой, комплексные если неустойчивость *)
+      frequencies = Sort[Sqrt[omega2 + 0. I], Re[#1] < Re[#2] &];
+      
+      Chop[frequencies]
+    ]
+  ]
+];
+
+
 
 (* ════════════════════════════════════════════════════════════════ *)
 (*                     MAIN FUNCTION                                *)
@@ -770,7 +851,7 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
             Print["  P₂: ", plane2];
             Print["  P₃: ", plane3];
           ];
-          
+
           {plane1, plane2, plane3}
         ]
       ],
