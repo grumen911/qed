@@ -33,4 +33,7 @@ scripts/
 # Большие бинарные файлы
 *.zip
 *.tar.gz
+
+
 .WolframResources
+vscode_kernel_server.wl
