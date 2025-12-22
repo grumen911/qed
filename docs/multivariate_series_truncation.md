@@ -10,7 +10,7 @@ and can shift the minimizer of the truncated polynomial.
 ## Key idea
 
 `Series[f, {x, x0, nx}, {y, y0, ny}]` performs series expansions successively with respect
-to x, then y, etc.
+to `x`, then `y`, etc.
 This corresponds to a “rectangular” truncation: the degree in each variable is bounded separately.
 
 A true multivariate Taylor polynomial of total degree ≤ N is different: it keeps only monomials
@@ -30,14 +30,14 @@ The script `series_truncation_demo.wl` prints three related polynomials.
 ~~~wl
 serPerVarExpr =
   Normal@Series[U[x, y], {x, p1m, nPerVar}, {y, p2m, nPerVar}] /. {x -> p1, y -> p2} // Expand;
-This polynomial may include terms such as p1^2p2, p1p2^2, p1^2*p2^2, etc., depending on nPerVar.
 ~~~
+This polynomial may include terms such as `p1^2p2`, `p1p2^2`, `p1^2*p2^2`, etc., depending on `nPerVar`.
 
-2) “Shadows”: keep only monomials of degree ≤ 2 in (p1, p2)
+2) “Shadows”: keep only monomials of degree ≤ 2 in `(p1, p2)`
 Sometimes it is useful to explicitly drop all monomials with total degree > 2 in the raw variables
-(p1, p2) while keeping the lower-degree terms that remain after expansion (informally: “leave only shadows”).
+`(p1, p2)` while keeping the lower-degree terms that remain after expansion (informally: “leave only shadows”).
 
-This is not the same as truncation in increments around (p1m, p2m); it is just a filter in (p1, p2).
+This is not the same as truncation in increments around `(p1m, p2m)`; it is just a filter in `(p1, p2)`.
 
 ~~~wl
 serPerVarExprShadow2 =
@@ -47,7 +47,7 @@ serPerVarExprShadow2 =
   ] // Expand;
 ~~~
 3) Total-degree Taylor via t-scaling
-`serTotalDegExpr` is the Taylor polynomial around (p1m, p2m) obtained by scaling the increment with a single parameter t:
+`serTotalDegExpr` is the Taylor polynomial around `(p1m, p2m)` obtained by scaling the increment with a single parameter t:
 
 ~~~wl
 serTotalDegExpr =
@@ -55,7 +55,7 @@ serTotalDegExpr =
   Normal@Series[U[p1m + t d1, p2m + t d2], {t, 0, nTotalDeg}] /. t -> 1 // Expand
  ];
 ~~~
-This keeps terms of total degree ≤ `nTotalDeg` in the increment (d1, d2).
+This keeps terms of total degree ≤ `nTotalDeg` in the increment `(d1, d2)`.
 
 Comparing “shadows” to total-degree
 We compare the “shadows” polynomial (degree ≤ 2 in raw variables) with the true total-degree quadratic Taylor polynomial:
@@ -63,11 +63,11 @@ We compare the “shadows” polynomial (degree ≤ 2 in raw variables) with the
 ~~~wl
 diff = Chop[serPerVarExprShadow2 - serTotalDegExpr];
 ~~~
-If diff != 0, it does not mean the expansion point is wrong.
+If `diff != 0`, it does not mean the expansion point is wrong.
 It means the two objects are different by construction:
 
-`serPerVarExprShadow2` filters monomials by degree in (p1, p2).
+`serPerVarExprShadow2` filters monomials by degree in `(p1, p2)`.
 
-`serTotalDegExpr` truncates by degree in the increment (p - pm).
+`serTotalDegExpr` truncates by degree in the increment `(p - pm)`.
 
 These operations do not commute with shifting the origin, so they generally produce different quadratics.
