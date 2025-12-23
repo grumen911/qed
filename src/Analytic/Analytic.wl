@@ -149,13 +149,7 @@ BuildInductanceMatrix[hamiltonian_, topology_Association] :=
   
   (* Step 1: Compute symbolic Hessian ∂²H/∂φᵢ∂φⱼ from original Hamiltonian *)
   (* This avoids numerical errors from Series expansion *)
-  hessianSymbolic = Outer[
-    Function[{var1, var2},
-      D[D[hamiltonian, var1], var2]
-    ],
-    phiVars,
-    phiVars
-  ];
+  hessianSymbolic = D[hamiltonian, {phiVars, 2}];
   
   (* Step 2: Substitute φ → φ_min symbolically *)
   hessianSymbolic = hessianSymbolic /. Thread[phiVars -> minSymbols];
