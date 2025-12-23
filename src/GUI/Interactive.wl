@@ -147,10 +147,12 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
     (* ═══════════════════════════════════════════════════════════ *)
     Dynamic[
       Column[{
-        "Hamiltonian (numerical):",
+        "PlasmonFrequencies:",
         GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
         "Equilibrium Fluxes:",
         GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
+          (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
+        GetNumericalQuantity[$CurrentModel, "EquilibriumFluxesTEMP"] /. 
           (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
         GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"],
         $CurrentModel["SubstitutionRules"] // Values

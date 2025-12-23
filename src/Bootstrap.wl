@@ -6,7 +6,7 @@ $QEDDebug::usage = "$QEDDebug - if True, enables verbose loading messages.";
 Begin["`Private`"];
 
 (* Глобальный флаг дебага *)
-$QEDDebug = True;
+$QEDDebug = False;
 
 (* Утилита для условного вывода *)
 debugPrint[msg_String] := If[TrueQ[$QEDDebug], Print["[QED Debug] ", msg]];

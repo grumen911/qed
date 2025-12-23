@@ -352,14 +352,14 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         			NUMERICAL PARAMETERS                        ║ *)
+(* ║         			NUMERICAL PARAMETERS                              ║ *)
 (* ║   (Численные вычисления для DynamicModule с кэшированием)      ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
 
 ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     {analytical, topology, subRules, cache, capNum, hamNum, indNum,
-     equilibriumFluxes, equilibriumPoints},
+     equilibriumFluxes, equilibriumPoints, subRulesWithoutPhiExt},
      
     analytical = model["Analytical"];
     subRules = model["SubstitutionRules"];
@@ -372,13 +372,28 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     
     hamNum = analytical["Hamiltonian"] /. subRules;
     cache["HamiltonianNumerical"] = <|"State" -> "Ready", "Value" -> hamNum|>;
+
+        (* Удалить правило для Φext из подстановки *)
+    subRulesWithoutPhiExt = DeleteCases[subRules, QED`$PhiExt :> _];
+
+    (* Подставить все параметры кроме Φext *)
+    hamNumPartial = analytical["Hamiltonian"] /. subRulesWithoutPhiExt;
+
+    (* Кэшировать частичный гамильтониан *)
+    cache["HamiltonianNumericalPartial"] = <|
+      "State" -> "Ready", 
+      "Value" -> hamNumPartial
+    |>;
     
     (* ════════════════════════════════════════════════════════════ *)
     (* Шаг 2: Равновесные потоки (ПЕРЕНЕСЛИ СЮДА!)                 *)
     (* ════════════════════════════════════════════════════════════ *)
     
     equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
+    equilibriumFluxesTEMP = FindPotentialMinimumContinuation[hamNumPartial, topology, QED`$PhiExt /. subRules];
+    
     cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
+    cache["EquilibriumFluxesTEMP"] = <|"State" -> "Ready", "Value" -> equilibriumFluxesTEMP|>;
 
     (* Равновесные точки (LAZY) *)
     cache["EquilibriumPoints"] = <|
