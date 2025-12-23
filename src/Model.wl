@@ -399,8 +399,8 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
       (* Символьное дифференцирование (один раз!) *)
       cache["ContinuationDerivatives"] = <|
         "State" -> "Ready",
-        "Gradient" -> (D[potentialRescaled, #] & /@ fluxVars),
-        "Hessian" -> D[potentialRescaled, {fluxVars, 2}],
+        "Gradient" -> Simplify@(D[potentialRescaled, #] & /@ fluxVars),
+        "Hessian" -> Simplify@D[potentialRescaled, {fluxVars, 2}],
         "FluxVars" -> fluxVars
       |>;
     ];
@@ -420,8 +420,8 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
         QED`$PhiExt /. subRules
       ];
 
-      cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
-      cache["EquilibriumFluxesContinuation"] = <|
+      cache["EquilibriumFluxes1231"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
+      cache["EquilibriumFluxes"] = <|
         "State" -> "Ready", 
         "Value" -> equilibriumFluxesContinuation
       |>;

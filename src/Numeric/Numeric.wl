@@ -531,6 +531,24 @@ FindPotentialMinimumContinuation[
         gradVec = gradientRescaled /. {QED`$PhiExt -> phiExtValue};
         hessMat = hessianRescaled /. {QED`$PhiExt -> phiExtValue};
         
+      (* ═══════════════════════════════════════════════════════════ *)
+      (* DEBUG: Проверить типы                                       *)
+      (* ═══════════════════════════════════════════════════════════ *)
+      
+      If[$DebugFindPotentialMinimumContinuation === True,
+        Print["[DEBUG Step ", Length[solutionPath], "]"];
+        Print["  phiExtValue: ", phiExtValue];
+        Print["  gradVec Head: ", Head[gradVec]];
+        Print["  gradVec Length: ", Length[gradVec]];
+        Print["  gradVec[[1]] contains symbols? ", 
+              !FreeQ[gradVec[[1]], _Symbol]];
+        Print["  gradVec[[1]] short form: ", Short[gradVec[[1]], 3]];
+        Print["  hessMat dimensions: ", Dimensions[hessMat]];
+        Print["  hessMat[[1,1]] contains symbols? ", 
+              !FreeQ[hessMat[[1,1]], _Symbol]];
+      ];
+
+
         (* Начальная точка *)
         startPoint = Thread[{fluxVars, fluxVars /. prevSol}];
         
@@ -541,15 +559,16 @@ FindPotentialMinimumContinuation[
               Thread[gradVec == 0],
               startPoint,
               Jacobian -> hessMat,
-              Method -> "Newton",
-              AccuracyGoal -> -Log10[tolerance],
-              PrecisionGoal -> -Log10[tolerance],
-              MaxIterations -> 50
+              Method -> {"Newton", "StepControl" -> "LineSearch"},
+              AccuracyGoal -> 6,
+              PrecisionGoal -> 6,
+              WorkingPrecision -> MachinePrecision,
+              MaxIterations -> 20
             ],
             $Failed,
-            {FindRoot::cvmit, FindRoot::lstol}
+            {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
           ],
-          {FindRoot::cvmit, FindRoot::lstol}
+          {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
         ];
         
         newSol
