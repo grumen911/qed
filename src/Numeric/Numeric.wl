@@ -23,13 +23,6 @@ Performance: ~1 ms per call (vs 4 ms with on-the-fly differentiation).";
 FindPotentialMinimumContinuation::badstep = 
   "Continuation failed at step `1` of `2`. Try reducing StepSize option.";
 
-Options[FindPotentialMinimumContinuation] = {
-  "StepSize" -> 0.05,          (* Δφ в единицах Φ₀ *)
-  "MaxSteps" -> 100,           (* защита от бесконечного цикла *)
-  "Tolerance" -> 10^-8         (* точность FindRoot *)
-};
-
-
 ComputeNormalModeFrequencies::usage = "ComputeNormalModeFrequencies[invCap, L] \
 computes normal mode frequencies ω_i from eigenvalues of C^(-1)·L matrix. \
 Returns frequencies in rad/s (SI units), sorted by increasing frequency.";
@@ -93,9 +86,38 @@ PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot creat
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
 
-$DebugFindPotentialMinimumContinuation = True;
+
 
 Begin["`Private`"];
+
+
+
+Options[FindPotentialMinimumContinuation] = {
+  "StepSize" -> 0.05,          (* Δφ в единицах Φ₀ *)
+  "MaxSteps" -> 100,           (* защита от бесконечного цикла *)
+  "Tolerance" -> 10^-8         (* точность FindRoot *)
+};
+
+Options[PlotPotentialSlices3D] = {
+  SliceType -> "Auto",              
+  ShowEquilibriumPoints -> True,
+  PlotPoints -> 25,
+  Contours -> 15,
+  BoundaryThreshold -> 0.45,
+  PlotCenter -> "Origin"     (* НОВОЕ: "GlobalMinimum" | "Origin" | {φ1, φ2, φ3} *)
+};
+
+Options[FindEquilibriumPoints] = {
+  GridResolution -> 5,
+  MaxResidual -> 10^-5,
+  Method -> "Newton"
+};
+
+$DebugFindPotentialMinimumContinuation = False;
+$DebugFindPotentialMinimum = False;
+$DebugFindEquilibriumPoints = False;
+$DebugPlotPotentialSlices3D = False;
+$DebugPlasmonFrequencies = False;
 
 (*
   Physics: Find equilibrium positions φ_min where ∂U/∂φ = 0.
@@ -246,9 +268,6 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
   
   minValues
 ];
-
-(* Глобальная переменная для отладки *)
-$DebugFindPotentialMinimum = False;
 
 
 FindEquilibriumPoints[hamiltonian_, gradient_List, topology_Association, 
@@ -438,16 +457,6 @@ If[$DebugFindEquilibriumPoints === True,
   |>
 ];
 
-(* Опции *)
-Options[FindEquilibriumPoints] = {
-  GridResolution -> 5,
-  MaxResidual -> 10^-5,
-  Method -> "Newton"
-};
-
-(* Debug флаг *)
-$DebugFindEquilibriumPoints = False;
-
 
 (*
   Physics: Continuation-based equilibrium tracking with pre-cached derivatives.
@@ -622,8 +631,6 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
   |>
 ];
 
-$DebugPlasmonFrequencies = False;
-
 
 (* ::Section:: *)
 (* PlotPotentialSlices3D with PlotCenter option *)
@@ -632,14 +639,7 @@ $DebugPlasmonFrequencies = False;
 (*                          OPTIONS                                 *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-Options[PlotPotentialSlices3D] = {
-  SliceType -> "Auto",              
-  ShowEquilibriumPoints -> True,
-  PlotPoints -> 25,
-  Contours -> 15,
-  BoundaryThreshold -> 0.45,
-  PlotCenter -> "Origin"     (* НОВОЕ: "GlobalMinimum" | "Origin" | {φ1, φ2, φ3} *)
-};
+
 
 
 (* После ComputeNormalModeFrequencies *)
@@ -1120,8 +1120,6 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
 (* ════════════════════════════════════════════════════════════════ *)
 (*                       DEBUG FLAG                                 *)
 (* ════════════════════════════════════════════════════════════════ *)
-
-$DebugPlotPotentialSlices3D = False;
   
 
 PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},
