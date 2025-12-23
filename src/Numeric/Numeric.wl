@@ -524,46 +524,21 @@ FindPotentialMinimumContinuation[
     Function[{prevSol, phiExtCurrent},
       Module[{gradVec, hessMat, startPoint, newSol, phiExtValue},
         
-        (* Текущее значение Φext в Weber *)
         phiExtValue = phiExtCurrent * phi0Value;
         
-        (* Подставить Φext в ПРЕДВЫЧИСЛЕННЫЕ градиент и гессиан *)
+        (* Подставить Φext *)
         gradVec = gradientRescaled /. {QED`$PhiExt -> phiExtValue};
         hessMat = hessianRescaled /. {QED`$PhiExt -> phiExtValue};
         
-      (* ═══════════════════════════════════════════════════════════ *)
-      (* DEBUG: Проверить типы                                       *)
-      (* ═══════════════════════════════════════════════════════════ *)
-      
-      If[$DebugFindPotentialMinimumContinuation === True,
-        Print["[DEBUG Step ", Length[solutionPath], "]"];
-        Print["  phiExtValue: ", phiExtValue];
-        Print["  gradVec Head: ", Head[gradVec]];
-        Print["  gradVec Length: ", Length[gradVec]];
-        Print["  gradVec[[1]] contains symbols? ", 
-              !FreeQ[gradVec[[1]], _Symbol]];
-        Print["  gradVec[[1]] short form: ", Short[gradVec[[1]], 3]];
-        Print["  hessMat dimensions: ", Dimensions[hessMat]];
-        Print["  hessMat[[1,1]] contains symbols? ", 
-              !FreeQ[hessMat[[1,1]], _Symbol]];
-      ];
-
-
-        (* Начальная точка *)
         startPoint = Thread[{fluxVars, fluxVars /. prevSol}];
         
-        (* FindRoot *)
+        (* Минимальный FindRoot *)
         newSol = Quiet[
           Check[
             FindRoot[
               Thread[gradVec == 0],
               startPoint,
-              Jacobian -> hessMat,
-              Method -> {"Newton", "StepControl" -> "LineSearch"},
-              AccuracyGoal -> 6,
-              PrecisionGoal -> 6,
-              WorkingPrecision -> MachinePrecision,
-              MaxIterations -> 20
+              Jacobian -> hessMat
             ],
             $Failed,
             {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
@@ -577,6 +552,7 @@ FindPotentialMinimumContinuation[
     initialSolution,
     Rest[phiExtPath]
   ];
+
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* 4. HANDLE FAILURES                                               *)
@@ -661,7 +637,6 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
 
 
 
-(* После ComputeNormalModeFrequencies *)
 
 (*
   Physics: Plasmon frequencies as function of external flux.
