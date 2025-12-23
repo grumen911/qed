@@ -359,41 +359,72 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     {analytical, topology, subRules, cache, capNum, hamNum, indNum,
-     equilibriumFluxes, equilibriumPoints, subRulesWithoutPhiExt},
+     equilibriumFluxes, equilibriumFluxesContinuation,
+     equilibriumPoints, subRulesWithoutPhiExt},
      
     analytical = model["Analytical"];
     subRules = model["SubstitutionRules"];
     topology = model["Topology"];
     cache = <||>;
-    
-    (* ════════════════════════════════════════════════════════════ *)
-    (* Шаг 1: Численный гамильтониан (для поиска минимума)         *)
-    (* ════════════════════════════════════════════════════════════ *)
-    
+
+    (* ════════════════════════════════════════════════════════════════ *)
+    (* Шаг 1: Численный гамильтониан + производные для continuation     *)
+    (* ════════════════════════════════════════════════════════════════ *)
+
+    (* Полный гамильтониан для NMinimize *)
     hamNum = analytical["Hamiltonian"] /. subRules;
     cache["HamiltonianNumerical"] = <|"State" -> "Ready", "Value" -> hamNum|>;
 
-        (* Удалить правило для Φext из подстановки *)
+    (* Частичный гамильтониан (без Φext) для continuation *)
     subRulesWithoutPhiExt = DeleteCases[subRules, QED`$PhiExt :> _];
-
-    (* Подставить все параметры кроме Φext *)
     hamNumPartial = analytical["Hamiltonian"] /. subRulesWithoutPhiExt;
 
-    (* Кэшировать частичный гамильтониан *)
     cache["HamiltonianNumericalPartial"] = <|
       "State" -> "Ready", 
       "Value" -> hamNumPartial
     |>;
-    
+
+    (* Предвычисление производных для continuation *)
+    Module[{nodes, fluxVars, potential, potentialRescaled, phi0},
+      nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+      fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+      phi0 = QED`$Phi0Value;
+      
+      (* Потенциал: U(φ) = H(q=0, φ) *)
+      potential = hamNumPartial /. Subscript[QED`$ChargeSymbol, _] -> 0;
+      
+      (* Обезразмерить: U(φ) → U(φ̃ * Φ₀) *)
+      potentialRescaled = potential /. Thread[fluxVars -> fluxVars * phi0];
+      
+      (* Символьное дифференцирование (один раз!) *)
+      cache["ContinuationDerivatives"] = <|
+        "State" -> "Ready",
+        "Gradient" -> Simplify@(D[potentialRescaled, #] & /@ fluxVars),
+        "Hessian" -> Simplify@D[potentialRescaled, {fluxVars, 2}],
+        "FluxVars" -> fluxVars
+      |>;
+    ];
+
+
     (* ════════════════════════════════════════════════════════════ *)
     (* Шаг 2: Равновесные потоки (ПЕРЕНЕСЛИ СЮДА!)                 *)
     (* ════════════════════════════════════════════════════════════ *)
     
-    equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
-    equilibriumFluxesTEMP = FindPotentialMinimumContinuation[hamNumPartial, topology, QED`$PhiExt /. subRules];
-    
-    cache["EquilibriumFluxes"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
-    cache["EquilibriumFluxesTEMP"] = <|"State" -> "Ready", "Value" -> equilibriumFluxesTEMP|>;
+      equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
+
+      equilibriumFluxesContinuation = QED`Numeric`FindPotentialMinimumContinuation[
+        cache["ContinuationDerivatives"]["Gradient"],
+        cache["ContinuationDerivatives"]["Hessian"],
+        cache["ContinuationDerivatives"]["FluxVars"],
+        topology,
+        QED`$PhiExt /. subRules
+      ];
+
+      cache["EquilibriumFluxes1231"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
+      cache["EquilibriumFluxes"] = <|
+        "State" -> "Ready", 
+        "Value" -> equilibriumFluxesContinuation
+      |>;
 
     (* Равновесные точки (LAZY) *)
     cache["EquilibriumPoints"] = <|

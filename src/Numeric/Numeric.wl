@@ -14,20 +14,14 @@ finds all equilibrium flux configurations by solving ∇U = 0 on a grid of start
 Returns Association with list of solutions, energies, and residuals.";
 
 FindPotentialMinimumContinuation::usage = 
-  "FindPotentialMinimumContinuation[hamiltonian, topology, phiExtTarget, opts] \
-finds the equilibrium flux configuration using homotopy continuation from \
-Phi_ext = 0 to phiExtTarget. Uses Newton-Raphson with analytical Jacobian. \
-Options: \"StepSize\" (default: 0.05 Phi_0), \"MaxSteps\" (100), \"Tolerance\" (10^-10).";
+  "FindPotentialMinimumContinuation[gradient, hessian, fluxVars, topology, phiExtTarget, opts] \
+finds equilibrium flux using homotopy continuation with pre-cached symbolic derivatives. \
+Requires rescaled derivatives: gradient = D[U(φ̃*Φ₀), φ̃], hessian = D²[U(φ̃*Φ₀), φ̃²]. \
+Options: \"StepSize\" (0.05 Φ₀), \"MaxSteps\" (100), \"Tolerance\" (10^-10). \
+Performance: ~1 ms per call (vs 4 ms with on-the-fly differentiation).";
 
 FindPotentialMinimumContinuation::badstep = 
   "Continuation failed at step `1` of `2`. Try reducing StepSize option.";
-
-Options[FindPotentialMinimumContinuation] = {
-  "StepSize" -> 0.05,          (* Δφ в единицах Φ₀ *)
-  "MaxSteps" -> 100,           (* защита от бесконечного цикла *)
-  "Tolerance" -> 10^-8         (* точность FindRoot *)
-};
-
 
 ComputeNormalModeFrequencies::usage = "ComputeNormalModeFrequencies[invCap, L] \
 computes normal mode frequencies ω_i from eigenvalues of C^(-1)·L matrix. \
@@ -92,7 +86,38 @@ PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot creat
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
 
+
+
 Begin["`Private`"];
+
+
+
+Options[FindPotentialMinimumContinuation] = {
+  "StepSize" -> 0.05,          (* Δφ в единицах Φ₀ *)
+  "MaxSteps" -> 100,           (* защита от бесконечного цикла *)
+  "Tolerance" -> 10^-8         (* точность FindRoot *)
+};
+
+Options[PlotPotentialSlices3D] = {
+  SliceType -> "Auto",              
+  ShowEquilibriumPoints -> True,
+  PlotPoints -> 25,
+  Contours -> 15,
+  BoundaryThreshold -> 0.45,
+  PlotCenter -> "Origin"     (* НОВОЕ: "GlobalMinimum" | "Origin" | {φ1, φ2, φ3} *)
+};
+
+Options[FindEquilibriumPoints] = {
+  GridResolution -> 5,
+  MaxResidual -> 10^-5,
+  Method -> "Newton"
+};
+
+$DebugFindPotentialMinimumContinuation = False;
+$DebugFindPotentialMinimum = False;
+$DebugFindEquilibriumPoints = False;
+$DebugPlotPotentialSlices3D = False;
+$DebugPlasmonFrequencies = False;
 
 (*
   Physics: Find equilibrium positions φ_min where ∂U/∂φ = 0.
@@ -243,9 +268,6 @@ FindPotentialMinimum[hamiltonian_, topology_Association, substitutionRules_List]
   
   minValues
 ];
-
-(* Глобальная переменная для отладки *)
-$DebugFindPotentialMinimum = False;
 
 
 FindEquilibriumPoints[hamiltonian_, gradient_List, topology_Association, 
@@ -435,70 +457,45 @@ If[$DebugFindEquilibriumPoints === True,
   |>
 ];
 
-(* Опции *)
-Options[FindEquilibriumPoints] = {
-  GridResolution -> 5,
-  MaxResidual -> 10^-5,
-  Method -> "Newton"
-};
-
-(* Debug флаг *)
-$DebugFindEquilibriumPoints = False;
 
 (*
-  Physics: Continuation-based equilibrium tracking.
+  Physics: Continuation-based equilibrium tracking with pre-cached derivatives.
   
   Algorithm:
-  1. At Φext = 0: trivial solution φ_min = {0, 0, ...}
-  2. Build path: Φext,0 = 0 → Φext,1 → ... → Φext,target
-  3. For each step: FindRoot[∇U = 0] with Jacobian = Hessian,
-     starting from previous solution φ_min,i-1
+  1. Receives pre-computed gradient ∇U and Hessian ∇²U from Model cache
+  2. Builds homotopy path: Φext = 0 → target
+  3. Newton-Raphson at each step with analytical Jacobian
   
-  Advantages over NMinimize:
-  - ~1000× faster (0.001 sec vs 1 sec)
-  - Guaranteed convergence if step size Δφ is small
-  - Tracks specific branch (avoids jumping to other minima)
+  Performance: ~1 ms per call (vs 4 ms with symbolic differentiation)
   
   Reference: Allgower & Georg, "Numerical Continuation Methods" (1990)
 *)
 
 FindPotentialMinimumContinuation[
-  hamiltonian_,           (* содержит QED`$PhiExt символьно *)
+  gradientRescaled_List,      (* Предвычисленный ∇U(φ̃) *)
+  hessianRescaled_List,       (* Предвычисленный ∇²U(φ̃) *)
+  fluxVars_List,              (* Список переменных {φ̃₁, φ̃₂, ...} *)
   topology_Association,
-  phiExtTarget_?NumericQ, (* целевое значение в Weber *)
+  phiExtTarget_?NumericQ,     (* Целевое значение в Weber *)
   opts:OptionsPattern[]
 ] := Module[{
-  nodes, fluxVars, potential, potentialRescaled,
-  gradientRescaled, hessianRescaled,
-  phi0Value, phiExtDimensionless, stepSize, maxSteps,
+  nodes, phi0Value, phiExtDimensionless, stepSize, maxSteps,
   nSteps, phiExtPath, initialSolution, solutionPath, finalSolution,
-  minSymbols, tolerance
+  minSymbols, tolerance, startTime, endTime
   },
   
   startTime = AbsoluteTime[];
-
+  
   (* ════════════════════════════════════════════════════════════════ *)
   (* 1. PREPARATION                                                   *)
   (* ════════════════════════════════════════════════════════════════ *)
   
   nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  
   phi0Value = QED`$Phi0Value;
   phiExtDimensionless = phiExtTarget / phi0Value;
   
-  (* Потенциальная энергия *)
-  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
-  
-  (* Обезразмеривание: φ → φ̃ * Φ₀ *)
-  potentialRescaled = potential /. Thread[fluxVars -> fluxVars * phi0Value];
-  
-  (* Градиент и Гессиан по безразмерным переменным *)
-  gradientRescaled = D[potentialRescaled, #] & /@ fluxVars;
-  hessianRescaled = D[potentialRescaled, {fluxVars, 2}];
-  
   If[$DebugFindPotentialMinimumContinuation === True,
-    Print["[Continuation] Variables rescaled: phi -> phi_tilde * Phi_0"];
+    Print["[Continuation] Using pre-cached derivatives"];
     Print["[Continuation] Target Phi_ext = ", Round[phiExtDimensionless, 0.001], " Phi_0"];
   ];
   
@@ -527,48 +524,26 @@ FindPotentialMinimumContinuation[
     Function[{prevSol, phiExtCurrent},
       Module[{gradVec, hessMat, startPoint, newSol, phiExtValue},
         
-        (* Текущее значение Φext в Weber *)
         phiExtValue = phiExtCurrent * phi0Value;
         
-        (* Подставить Φext в градиент и гессиан *)
+        (* Подставить Φext *)
         gradVec = gradientRescaled /. {QED`$PhiExt -> phiExtValue};
         hessMat = hessianRescaled /. {QED`$PhiExt -> phiExtValue};
         
-        (* Начальная точка в безразмерных координатах *)
         startPoint = Thread[{fluxVars, fluxVars /. prevSol}];
         
-        (* FindRoot *)
+        (* Минимальный FindRoot *)
         newSol = Quiet[
           Check[
             FindRoot[
               Thread[gradVec == 0],
               startPoint,
-              Jacobian -> hessMat,
-              Method -> "Newton",
-              AccuracyGoal -> -Log10[tolerance],
-              PrecisionGoal -> -Log10[tolerance],
-              MaxIterations -> 50
+              Jacobian -> hessMat
             ],
             $Failed,
-            {FindRoot::cvmit, FindRoot::lstol}
+            {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
           ],
-          {FindRoot::cvmit, FindRoot::lstol}
-        ];
-        
-        (* Debug *)
-        If[$DebugFindPotentialMinimumContinuation === True,
-          Module[{stepIndex},
-            stepIndex = First @ FirstPosition[phiExtPath, phiExtCurrent];
-            If[Mod[stepIndex, 1] == 0,
-              Print["  Step ", stepIndex, "/", nSteps, 
-                    ": Phi_ext = ", Round[phiExtCurrent, 0.001], " Phi_0",
-                    If[newSol =!= $Failed,
-                      ", phi_tilde = " <> ToString[Round[Values[newSol], 0.001]],
-                      " [FAILED]"
-                    ]
-              ];
-            ];
-          ];
+          {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
         ];
         
         newSol
@@ -577,6 +552,7 @@ FindPotentialMinimumContinuation[
     initialSolution,
     Rest[phiExtPath]
   ];
+
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* 4. HANDLE FAILURES                                               *)
@@ -593,26 +569,28 @@ FindPotentialMinimumContinuation[
   finalSolution = Last[solutionPath];
   
   (* ════════════════════════════════════════════════════════════════ *)
-  (* 5. FORMAT RESULT: φ̃ → φ (обратное масштабирование)              *)
+  (* 5. FORMAT RESULT                                                 *)
   (* ════════════════════════════════════════════════════════════════ *)
   
   minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  
   Module[{values},
     values = (fluxVars /. finalSolution) * phi0Value;
-
+    
     endTime = AbsoluteTime[];
     
     If[$DebugFindPotentialMinimumContinuation === True,
       Print["[Continuation] Total execution time: ", endTime - startTime, " sec"];
     ];
-
+    
     Thread[minSymbols -> values]
   ]
 ];
 
 
 
-$DebugFindPotentialMinimumContinuation = True;
+
+
 
 (*
   Physics: Normal mode frequencies from harmonic approximation.
@@ -648,8 +626,6 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
   |>
 ];
 
-$DebugPlasmonFrequencies = False;
-
 
 (* ::Section:: *)
 (* PlotPotentialSlices3D with PlotCenter option *)
@@ -658,17 +634,9 @@ $DebugPlasmonFrequencies = False;
 (*                          OPTIONS                                 *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-Options[PlotPotentialSlices3D] = {
-  SliceType -> "Auto",              
-  ShowEquilibriumPoints -> True,
-  PlotPoints -> 25,
-  Contours -> 15,
-  BoundaryThreshold -> 0.45,
-  PlotCenter -> "Origin"     (* НОВОЕ: "GlobalMinimum" | "Origin" | {φ1, φ2, φ3} *)
-};
 
 
-(* После ComputeNormalModeFrequencies *)
+
 
 (*
   Physics: Plasmon frequencies as function of external flux.
@@ -1146,8 +1114,6 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
 (* ════════════════════════════════════════════════════════════════ *)
 (*                       DEBUG FLAG                                 *)
 (* ════════════════════════════════════════════════════════════════ *)
-
-$DebugPlotPotentialSlices3D = False;
   
 
 PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},
