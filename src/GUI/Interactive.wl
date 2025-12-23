@@ -152,7 +152,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         "Equilibrium Fluxes:",
         GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
           (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
-        GetNumericalQuantity[$CurrentModel, "EquilibriumFluxesTEMP"] /. 
+        GetNumericalQuantity[$CurrentModel, "EquilibriumFluxesContinuation"] /. 
           (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
         GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"],
         $CurrentModel["SubstitutionRules"] // Values
