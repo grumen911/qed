@@ -399,7 +399,7 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
       (* Символьное дифференцирование (один раз!) *)
       cache["ContinuationDerivatives"] = <|
         "State" -> "Ready",
-        "Gradient" -> D[potentialRescaled, #] & /@ fluxVars,
+        "Gradient" -> (D[potentialRescaled, #] & /@ fluxVars),
         "Hessian" -> D[potentialRescaled, {fluxVars, 2}],
         "FluxVars" -> fluxVars
       |>;
@@ -412,7 +412,7 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     
       equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
 
-      equilibriumFluxesContinuation = FindPotentialMinimumContinuation[
+      equilibriumFluxesContinuation = QED`Numeric`FindPotentialMinimumContinuation[
         cache["ContinuationDerivatives"]["Gradient"],
         cache["ContinuationDerivatives"]["Hessian"],
         cache["ContinuationDerivatives"]["FluxVars"],
