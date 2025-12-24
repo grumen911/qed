@@ -773,44 +773,47 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
       
       tEnd = AbsoluteTime[];
       
+      
       (* ════════════════════════════════════════════════════════════════ *)
       (* ПРОФИЛИРОВАНИЕ: Накопление статистики                            *)
       (* ════════════════════════════════════════════════════════════════ *)
-      
-      Module[{dtContinuation, dtEigen, dtOverhead, dtTotal},
-        dtContinuation = (tAfterContinuation - tStart) * 1000;
-        dtEigen = (tAfterEigen - tAfterContinuation) * 1000;
-        dtTotal = (tEnd - tStart) * 1000;
-        dtOverhead = dtTotal - dtContinuation - dtEigen;
-        
-        totalContinuationTime += dtContinuation;
-        totalEigenTime += dtEigen;
-        totalOverhead += dtOverhead;
-        
-        (* Вывод для первой и каждой 10-й точки *)
-        If[callCounter == 1 || Mod[callCounter, 10] == 0,
-          Print["[PROFILE Point ", callCounter, "]"];
-          Print["  Continuation: ", Round[dtContinuation, 0.1], " ms"];
-          Print["  Eigenvalues: ", Round[dtEigen, 0.1], " ms"];
-          Print["  Overhead: ", Round[dtOverhead, 0.1], " ms"];
-          Print["  Total: ", Round[dtTotal, 0.1], " ms"];
-        ];
-        
-        (* Итоговый отчёт после 25 и 50 вызовов *)
-        If[callCounter > 20 && Mod[callCounter, 25] == 0,
-          Print[""];
-          Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
-          Print["  Continuation: ", Round[totalContinuationTime, 0.1], " ms (", 
-                Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-          Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
-                Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-          Print["  Overhead: ", Round[totalOverhead, 0.1], " ms (", 
-                Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-          Print["  TOTAL: ", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], " ms"];
-          Print["  Average per point: ", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
+      If[$DebugPlasmonFrequencies === True,
+        Module[{dtContinuation, dtEigen, dtOverhead, dtTotal},
+          dtContinuation = (tAfterContinuation - tStart) * 1000;
+          dtEigen = (tAfterEigen - tAfterContinuation) * 1000;
+          dtTotal = (tEnd - tStart) * 1000;
+          dtOverhead = dtTotal - dtContinuation - dtEigen;
+          
+          totalContinuationTime += dtContinuation;
+          totalEigenTime += dtEigen;
+          totalOverhead += dtOverhead;
+          
+          
+          (* Вывод для первой и каждой 10-й точки *)
+          If[callCounter == 1 || Mod[callCounter, 10] == 0,
+            Print["[PROFILE Point ", callCounter, "]"];
+            Print["  Continuation: ", Round[dtContinuation, 0.1], " ms"];
+            Print["  Eigenvalues: ", Round[dtEigen, 0.1], " ms"];
+            Print["  Overhead: ", Round[dtOverhead, 0.1], " ms"];
+            Print["  Total: ", Round[dtTotal, 0.1], " ms"];
+          ];
+          
+          (* Итоговый отчёт после 25 и 50 вызовов *)
+          If[callCounter > 20 && Mod[callCounter, 25] == 0,
+            Print[""];
+            Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
+            Print["  Continuation: ", Round[totalContinuationTime, 0.1], " ms (", 
+                  Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
+                  Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  Overhead: ", Round[totalOverhead, 0.1], " ms (", 
+                  Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  TOTAL: ", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], " ms"];
+            Print["  Average per point: ", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
+          ];
         ];
       ];
-      
+
       Chop[frequencies]
     ]
   ]

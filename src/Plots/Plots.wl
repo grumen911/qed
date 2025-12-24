@@ -30,6 +30,8 @@ Options[PlotPlasmonSpectrum] = {
   FrequencyUnit -> "GHz"
 };
 
+$DebugPlotPlasmonSpectrum = False;
+
 PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] := 
   Module[{freqFunc, nModes, range, scale, modeFreq, 
           t1, t2, t3, dataComputeTime, plotRenderTime},
@@ -37,7 +39,9 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
     (* ════════════════════════════════════════════════════════════════ *)
     (* ПРОФИЛИРОВАНИЕ: Начало общего замера                             *)
     (* ════════════════════════════════════════════════════════════════ *)
-    t1 = AbsoluteTime[];
+    If[$DebugPlotPlasmonSpectrum === True,
+      t1 = AbsoluteTime[];
+    ];
     
     (* Получить функцию PlasmonFrequenciesVsFlux напрямую *)
     freqFunc = QED`Numeric`PlasmonFrequenciesVsFlux[model];
@@ -55,8 +59,10 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
     Clear[modeFreq];
     modeFreq[i_Integer][phi_?NumericQ] := Re[freqFunc[phi][[i]]] / scale;
     
-    t2 = AbsoluteTime[];
-    dataComputeTime = (t2 - t1) * 1000;
+    If[$DebugPlotPlasmonSpectrum === True,
+      t2 = AbsoluteTime[];
+      dataComputeTime = (t2 - t1) * 1000;
+    ];
     
     (* ════════════════════════════════════════════════════════════════ *)
     (* ПРОФИЛИРОВАНИЕ: Рендеринг графика                                *)
@@ -79,20 +85,22 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
         MaxRecursion -> 1,
         opts
       ];
-      
-      t3 = AbsoluteTime[];
-      plotRenderTime = (t3 - t2) * 1000;
+
+      If[$DebugPlotPlasmonSpectrum === True,
+        t3 = AbsoluteTime[];
+        plotRenderTime = (t3 - t2) * 1000;
+      ];
       
       (* ════════════════════════════════════════════════════════════════ *)
       (* ПРОФИЛИРОВАНИЕ: Вывод результатов                                *)
       (* ════════════════════════════════════════════════════════════════ *)
-      
-      Print["[PROFILE PlotPlasmonSpectrum]"];
-      Print["  Data preparation: ", Round[dataComputeTime, 0.1], " ms"];
-      Print["  Plot rendering: ", Round[plotRenderTime, 0.1], " ms"];
-      Print["  Total time: ", Round[(t3 - t1) * 1000, 0.1], " ms"];
-      Print["  NOTE: Actual computation happens during Plot evaluation"];
-      
+      If[$DebugPlotPlasmonSpectrum === True,
+        Print["[PROFILE PlotPlasmonSpectrum]"];
+        Print["  Data preparation: ", Round[dataComputeTime, 0.1], " ms"];
+        Print["  Plot rendering: ", Round[plotRenderTime, 0.1], " ms"];
+        Print["  Total time: ", Round[(t3 - t1) * 1000, 0.1], " ms"];
+        Print["  NOTE: Actual computation happens during Plot evaluation"];
+      ];
       plot
     ]
   ];
