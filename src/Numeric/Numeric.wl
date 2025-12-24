@@ -627,15 +627,6 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
 ];
 
 
-(* ::Section:: *)
-(* PlotPotentialSlices3D with PlotCenter option *)
-
-(* ════════════════════════════════════════════════════════════════ *)
-(*                          OPTIONS                                 *)
-(* ════════════════════════════════════════════════════════════════ *)
-
-
-
 
 
 (*
@@ -653,20 +644,25 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
 
 PlasmonFrequenciesVsFlux[model_Association] := Module[
   {
-    capSym, lindInvSym, hamiltonian, topology, rulesBase, phiExtSym, phi0,
-    callCounter = 0, totalFindMinTime = 0, totalEigenTime = 0, totalOverhead = 0
+    capSym, lindInvSym, topology, rulesBase, phiExtSym, phi0,
+    gradientRescaled, hessianRescaled, fluxVars, nodes,
+    callCounter = 0, totalFindMinTime = 0, totalEigenTime = 0, totalOverhead = 0,
+    useContinuation
   },
   
   (* Аналитические матрицы из модели *)
   capSym     = model["Analytical"]["CapacitanceMatrix"];
   lindInvSym = model["Analytical"]["InductanceMatrix"];  (* L⁻¹ *)
-  hamiltonian = model["Analytical"]["Hamiltonian"];
-  topology    = model["Topology"];  
+  topology   = model["Topology"];  
 
   
   (* Физические константы *)
   phiExtSym = QED`$PhiExt;
   phi0      = QED`$Phi0Value;
+  
+  (* Извлечь узлы и переменные *)
+  nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   
   (* Базовые правила подстановки БЕЗ внешнего потока и φ_min *)
   rulesBase = DeleteCases[
@@ -675,14 +671,40 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
-  (* ПРОФИЛИРОВАНИЕ: Wrapper с таймерами                              *)
+  (* ИЗВЛЕЧЕНИЕ CONTINUATION DERIVATIVES ИЗ КЭША                      *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  (* Возвращаем чисто численную функцию *)
+  useContinuation = KeyExistsQ[model, "Numerical"] && 
+                    KeyExistsQ[model["Numerical"], "Cache"] &&
+                    KeyExistsQ[model["Numerical"]["Cache"], "ContinuationDerivatives"];
+  
+  If[useContinuation,
+    Module[{cache},
+      cache = model["Numerical"]["Cache"]["ContinuationDerivatives"];
+      gradientRescaled = Lookup[cache, "Gradient", $Failed];
+      hessianRescaled = Lookup[cache, "Hessian", $Failed];
+      
+      If[gradientRescaled === $Failed || hessianRescaled === $Failed,
+        useContinuation = False;
+        Print["[WARNING] Continuation derivatives not found in cache. This should not happen!"];
+      ];
+    ];
+  ];
+  
+  If[!useContinuation,
+    Print["[ERROR] PlasmonFrequenciesVsFlux requires continuation derivatives in model cache."];
+    Print["[ERROR] Make sure ComputeNumericalHarmonicPerturbation has been called."];
+    Return[$Failed];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ВОЗВРАЩАЕМ ЧИСЛЕННУЮ ФУНКЦИЮ С ПРОФИЛИРОВАНИЕМ                   *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
   Function[{phiExtDimensionless},
     Module[{phiExtPhysical, rulesWithFlux, capNum, lindInvNum, 
             invCapNum, omega2, frequencies, equilibriumRules,
-            tStart, tAfterFindMin, tAfterEigen, tEnd},
+            tStart, tAfterContinuation, tAfterEigen, tEnd},
       
       If[!NumericQ[phiExtDimensionless],
         Return[$Failed, Module]
@@ -698,16 +720,18 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
       rulesWithFlux = Append[rulesBase, phiExtSym -> phiExtPhysical];
       
       (* ════════════════════════════════════════════════════════════════ *)
-      (* ПРОФИЛИРОВАНИЕ: FindPotentialMinimum                             *)
+      (* ПРОФИЛИРОВАНИЕ: FindPotentialMinimumContinuation                 *)
       (* ════════════════════════════════════════════════════════════════ *)
       
-      equilibriumRules = FindPotentialMinimum[
-        hamiltonian,
+      equilibriumRules = FindPotentialMinimumContinuation[
+        gradientRescaled,
+        hessianRescaled,
+        fluxVars,
         topology,
-        rulesWithFlux
-      ];      
+        phiExtPhysical
+      ];
 
-      tAfterFindMin = AbsoluteTime[];
+      tAfterContinuation = AbsoluteTime[];
       
       rulesWithFlux = Join[rulesWithFlux, equilibriumRules];
       
@@ -751,30 +775,30 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
       (* ПРОФИЛИРОВАНИЕ: Накопление статистики                            *)
       (* ════════════════════════════════════════════════════════════════ *)
       
-      Module[{dtFindMin, dtEigen, dtOverhead, dtTotal},
-        dtFindMin = (tAfterFindMin - tStart) * 1000;
-        dtEigen = (tAfterEigen - tAfterFindMin) * 1000;
+      Module[{dtContinuation, dtEigen, dtOverhead, dtTotal},
+        dtContinuation = (tAfterContinuation - tStart) * 1000;
+        dtEigen = (tAfterEigen - tAfterContinuation) * 1000;
         dtTotal = (tEnd - tStart) * 1000;
-        dtOverhead = dtTotal - dtFindMin - dtEigen;
+        dtOverhead = dtTotal - dtContinuation - dtEigen;
         
-        totalFindMinTime += dtFindMin;
+        totalFindMinTime += dtContinuation;
         totalEigenTime += dtEigen;
         totalOverhead += dtOverhead;
         
-        (* Вывод для первой и последней точки *)
+        (* Вывод для первой и каждой 10-й точки *)
         If[callCounter == 1 || Mod[callCounter, 10] == 0,
           Print["[PROFILE Point ", callCounter, "]"];
-          Print["  FindPotentialMinimum: ", Round[dtFindMin, 0.1], " ms"];
+          Print["  Continuation: ", Round[dtContinuation, 0.1], " ms"];
           Print["  Eigenvalues: ", Round[dtEigen, 0.1], " ms"];
           Print["  Overhead: ", Round[dtOverhead, 0.1], " ms"];
           Print["  Total: ", Round[dtTotal, 0.1], " ms"];
         ];
         
-        (* Итоговый отчёт после последнего вызова (эвристика: callCounter > 20) *)
+        (* Итоговый отчёт после 25 и 50 вызовов *)
         If[callCounter > 20 && Mod[callCounter, 25] == 0,
           Print[""];
           Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
-          Print["  FindPotentialMinimum: ", Round[totalFindMinTime, 0.1], " ms (", 
+          Print["  Continuation: ", Round[totalFindMinTime, 0.1], " ms (", 
                 Round[100 * totalFindMinTime / (totalFindMinTime + totalEigenTime + totalOverhead), 1], "%)"];
           Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
                 Round[100 * totalEigenTime / (totalFindMinTime + totalEigenTime + totalOverhead), 1], "%)"];
@@ -789,8 +813,6 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
     ]
   ]
 ];
-
-
 
 
 (* ════════════════════════════════════════════════════════════════ *)
