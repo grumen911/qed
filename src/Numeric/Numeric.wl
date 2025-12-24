@@ -642,11 +642,27 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
 *)
 
 
+(*
+  Physics: Plasmon frequencies as function of external flux.
+  
+  Returns pure function ω[φext_?NumericQ] where φext is dimensionless (in Φ₀ units).
+  For each flux value, performs:
+  1. FindPotentialMinimumContinuation to find equilibrium (fast: ~1ms)
+  2. Eigenvalue decomposition of C⁻¹·L⁻¹
+  3. Returns sorted frequencies ω_i in rad/s
+  
+  Performance: Uses continuation method by default (~43x faster than global search).
+  Fallback: If continuation derivatives unavailable, returns $Failed.
+  
+  Reference: Koch et al., PRA 76, 042319 (2007), Eq. 8
+*)
+
+
 PlasmonFrequenciesVsFlux[model_Association] := Module[
   {
     capSym, lindInvSym, topology, rulesBase, phiExtSym, phi0,
     gradientRescaled, hessianRescaled, fluxVars, nodes,
-    callCounter = 0, totalFindMinTime = 0, totalEigenTime = 0, totalOverhead = 0,
+    callCounter = 0, totalContinuationTime = 0, totalEigenTime = 0, totalOverhead = 0,
     useContinuation
   },
   
@@ -781,7 +797,7 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
         dtTotal = (tEnd - tStart) * 1000;
         dtOverhead = dtTotal - dtContinuation - dtEigen;
         
-        totalFindMinTime += dtContinuation;
+        totalContinuationTime += dtContinuation;
         totalEigenTime += dtEigen;
         totalOverhead += dtOverhead;
         
@@ -798,14 +814,14 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
         If[callCounter > 20 && Mod[callCounter, 25] == 0,
           Print[""];
           Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
-          Print["  Continuation: ", Round[totalFindMinTime, 0.1], " ms (", 
-                Round[100 * totalFindMinTime / (totalFindMinTime + totalEigenTime + totalOverhead), 1], "%)"];
+          Print["  Continuation: ", Round[totalContinuationTime, 0.1], " ms (", 
+                Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
           Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
-                Round[100 * totalEigenTime / (totalFindMinTime + totalEigenTime + totalOverhead), 1], "%)"];
+                Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
           Print["  Overhead: ", Round[totalOverhead, 0.1], " ms (", 
-                Round[100 * totalOverhead / (totalFindMinTime + totalEigenTime + totalOverhead), 1], "%)"];
-          Print["  TOTAL: ", Round[totalFindMinTime + totalEigenTime + totalOverhead, 0.1], " ms"];
-          Print["  Average per point: ", Round[(totalFindMinTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
+                Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+          Print["  TOTAL: ", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], " ms"];
+          Print["  Average per point: ", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
         ];
       ];
       
@@ -813,6 +829,7 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
     ]
   ]
 ];
+
 
 
 (* ════════════════════════════════════════════════════════════════ *)
