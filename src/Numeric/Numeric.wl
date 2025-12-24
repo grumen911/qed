@@ -628,20 +628,6 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
 
 
 
-
-(*
-  Physics: Plasmon frequencies as function of external flux.
-  
-  Returns pure function ω[φext_?NumericQ] where φext is dimensionless (in Φ₀ units).
-  For each flux value, performs:
-  1. Numerical substitution into C and L⁻¹ matrices
-  2. Eigenvalue decomposition of C⁻¹·L⁻¹
-  3. Returns sorted frequencies ω_i in rad/s
-  
-  Reference: Koch et al., PRA 76, 042319 (2007), Eq. 8
-*)
-
-
 (*
   Physics: Plasmon frequencies as function of external flux.
   
