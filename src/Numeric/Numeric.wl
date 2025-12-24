@@ -653,7 +653,8 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
 
 PlasmonFrequenciesVsFlux[model_Association] := Module[
   {
-    capSym, lindInvSym, hamiltonian, topology, rulesBase, phiExtSym, phi0
+    capSym, lindInvSym, hamiltonian, topology, rulesBase, phiExtSym, phi0,
+    callCounter = 0, totalFindMinTime = 0, totalEigenTime = 0, totalOverhead = 0
   },
   
   (* Аналитические матрицы из модели *)
@@ -673,20 +674,32 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
     (phiExtSym :> _) | (Subscript[QED`$FluxSymbol, "min", _] :> _)
   ];
   
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ПРОФИЛИРОВАНИЕ: Wrapper с таймерами                              *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
   (* Возвращаем чисто численную функцию *)
   Function[{phiExtDimensionless},
     Module[{phiExtPhysical, rulesWithFlux, capNum, lindInvNum, 
-            invCapNum, omega2, frequencies, equilibriumRules},
+            invCapNum, omega2, frequencies, equilibriumRules,
+            tStart, tAfterFindMin, tAfterEigen, tEnd},
       
       If[!NumericQ[phiExtDimensionless],
         Return[$Failed, Module]
       ];
 
+      tStart = AbsoluteTime[];
+      callCounter++;
+      
       (* Конвертировать φext из единиц Φ₀ в Weber *)
       phiExtPhysical = phiExtDimensionless * phi0;
       
       (* Подставить текущее значение внешнего потока *)
       rulesWithFlux = Append[rulesBase, phiExtSym -> phiExtPhysical];
+      
+      (* ════════════════════════════════════════════════════════════════ *)
+      (* ПРОФИЛИРОВАНИЕ: FindPotentialMinimum                             *)
+      (* ════════════════════════════════════════════════════════════════ *)
       
       equilibriumRules = FindPotentialMinimum[
         hamiltonian,
@@ -694,6 +707,8 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
         rulesWithFlux
       ];      
 
+      tAfterFindMin = AbsoluteTime[];
+      
       rulesWithFlux = Join[rulesWithFlux, equilibriumRules];
       
       If[$DebugPlasmonFrequencies === True,
@@ -718,16 +733,63 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
       If[Det[capNum] == 0, Return[$Failed]];
       invCapNum = Inverse[capNum];
       
+      (* ════════════════════════════════════════════════════════════════ *)
+      (* ПРОФИЛИРОВАНИЕ: Eigenvalue computation                           *)
+      (* ════════════════════════════════════════════════════════════════ *)
+      
       (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
       omega2 = Eigenvalues[N[invCapNum . lindInvNum]];
       
+      tAfterEigen = AbsoluteTime[];
+      
       (* √ω² с сортировкой, комплексные если неустойчивость *)
       frequencies = Sort[Sqrt[omega2 + 0. I], Re[#1] < Re[#2] &];
+      
+      tEnd = AbsoluteTime[];
+      
+      (* ════════════════════════════════════════════════════════════════ *)
+      (* ПРОФИЛИРОВАНИЕ: Накопление статистики                            *)
+      (* ════════════════════════════════════════════════════════════════ *)
+      
+      Module[{dtFindMin, dtEigen, dtOverhead, dtTotal},
+        dtFindMin = (tAfterFindMin - tStart) * 1000;
+        dtEigen = (tAfterEigen - tAfterFindMin) * 1000;
+        dtTotal = (tEnd - tStart) * 1000;
+        dtOverhead = dtTotal - dtFindMin - dtEigen;
+        
+        totalFindMinTime += dtFindMin;
+        totalEigenTime += dtEigen;
+        totalOverhead += dtOverhead;
+        
+        (* Вывод для первой и последней точки *)
+        If[callCounter == 1 || Mod[callCounter, 10] == 0,
+          Print["[PROFILE Point ", callCounter, "]"];
+          Print["  FindPotentialMinimum: ", Round[dtFindMin, 0.1], " ms"];
+          Print["  Eigenvalues: ", Round[dtEigen, 0.1], " ms"];
+          Print["  Overhead: ", Round[dtOverhead, 0.1], " ms"];
+          Print["  Total: ", Round[dtTotal, 0.1], " ms"];
+        ];
+        
+        (* Итоговый отчёт после последнего вызова (эвристика: callCounter > 20) *)
+        If[callCounter > 20 && Mod[callCounter, 25] == 0,
+          Print[""];
+          Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
+          Print["  FindPotentialMinimum: ", Round[totalFindMinTime, 0.1], " ms (", 
+                Round[100 * totalFindMinTime / (totalFindMinTime + totalEigenTime + totalOverhead), 1], "%)"];
+          Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
+                Round[100 * totalEigenTime / (totalFindMinTime + totalEigenTime + totalOverhead), 1], "%)"];
+          Print["  Overhead: ", Round[totalOverhead, 0.1], " ms (", 
+                Round[100 * totalOverhead / (totalFindMinTime + totalEigenTime + totalOverhead), 1], "%)"];
+          Print["  TOTAL: ", Round[totalFindMinTime + totalEigenTime + totalOverhead, 0.1], " ms"];
+          Print["  Average per point: ", Round[(totalFindMinTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
+        ];
+      ];
       
       Chop[frequencies]
     ]
   ]
 ];
+
 
 
 

@@ -131,7 +131,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         ];
         
         (* Показать график *)
-        GetNumericalQuantity[$CurrentModel, "PlotPotentialSlices3D"],
+        (* GetNumericalQuantity[$CurrentModel, "PlotPotentialSlices3D"], *)
+        QED`Plots`PlotPlasmonSpectrum[$CurrentModel],
         
         TrackedSymbols :> {needsUpdate},
   		SynchronousUpdating -> False
@@ -151,8 +152,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
         "Equilibrium Fluxes:",
         GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
-          (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
-        GetNumericalQuantity[$CurrentModel, "EquilibriumFluxesContinuation"] /. 
           (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
         GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"],
         $CurrentModel["SubstitutionRules"] // Values

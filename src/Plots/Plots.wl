@@ -25,13 +25,19 @@ Reference: Koch et al., PRA 76, 042319 (2007), Eq. 8";
 Begin["`Private`"];
 
 Options[PlotPlasmonSpectrum] = {
-  NumModes -> 3,
-  FluxRange -> {-0.5, 0.5},
+  NumModes -> 2,
+  FluxRange -> {0., 0.5},
   FrequencyUnit -> "GHz"
 };
 
 PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] := 
-  Module[{freqFunc, nModes, range, scale, modeFreq},
+  Module[{freqFunc, nModes, range, scale, modeFreq, 
+          t1, t2, t3, dataComputeTime, plotRenderTime},
+    
+    (* ════════════════════════════════════════════════════════════════ *)
+    (* ПРОФИЛИРОВАНИЕ: Начало общего замера                             *)
+    (* ════════════════════════════════════════════════════════════════ *)
+    t1 = AbsoluteTime[];
     
     (* Получить функцию PlasmonFrequenciesVsFlux напрямую *)
     freqFunc = QED`Numeric`PlasmonFrequenciesVsFlux[model];
@@ -49,23 +55,48 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
     Clear[modeFreq];
     modeFreq[i_Integer][phi_?NumericQ] := Re[freqFunc[phi][[i]]] / scale;
     
+    t2 = AbsoluteTime[];
+    dataComputeTime = (t2 - t1) * 1000;
+    
+    (* ════════════════════════════════════════════════════════════════ *)
+    (* ПРОФИЛИРОВАНИЕ: Рендеринг графика                                *)
+    (* ════════════════════════════════════════════════════════════════ *)
+    
     (* Построить график *)
-    Plot[
-      Evaluate @ Table[modeFreq[i][phi], {i, nModes}],
-      {phi, range[[1]], range[[2]]},
+    Module[{plot},
+      plot = Plot[
+        Evaluate @ Table[modeFreq[i][phi], {i, nModes}],
+        {phi, range[[1]], range[[2]]},
+        
+        PlotLegends -> Table[Subscript["\[Omega]", i], {i, nModes}],
+        Frame -> True,
+        FrameLabel -> {
+          "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)",
+          "Frequency (GHz)"
+        },
+        PlotRange -> All,
+        PlotPoints -> 25,
+        MaxRecursion -> 1,
+        opts
+      ];
       
-      PlotLegends -> Table[Subscript["\[Omega]", i], {i, nModes}],
-      Frame -> True,
-      FrameLabel -> {
-        "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)",
-        "Frequency (GHz)"
-      },
-      PlotRange -> All,
-      PlotPoints -> 25,
-      MaxRecursion -> 1,
-      opts
+      t3 = AbsoluteTime[];
+      plotRenderTime = (t3 - t2) * 1000;
+      
+      (* ════════════════════════════════════════════════════════════════ *)
+      (* ПРОФИЛИРОВАНИЕ: Вывод результатов                                *)
+      (* ════════════════════════════════════════════════════════════════ *)
+      
+      Print["[PROFILE PlotPlasmonSpectrum]"];
+      Print["  Data preparation: ", Round[dataComputeTime, 0.1], " ms"];
+      Print["  Plot rendering: ", Round[plotRenderTime, 0.1], " ms"];
+      Print["  Total time: ", Round[(t3 - t1) * 1000, 0.1], " ms"];
+      Print["  NOTE: Actual computation happens during Plot evaluation"];
+      
+      plot
     ]
   ];
+
 
 End[];
 EndPackage[];
