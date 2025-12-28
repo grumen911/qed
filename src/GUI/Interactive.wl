@@ -4,6 +4,8 @@ QubitDashboard::usage = "QubitDashboard[model] - интерактивная па
 
 Begin["`Private`"];
 
+$DebugLog = {};
+
 (* ═══════════════════════════════════════════════════════════════ *)
 (* ЛОГИКА *)
 (* ═══════════════════════════════════════════════════════════════ *)
@@ -208,67 +210,78 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
           
           (* Plot display area *)
           Dynamic[
-            Module[{plotInfo, plotType},
+            Module[{plotInfo, plotType, result},
               plotInfo = plotRegistry[selectedPlot];
               plotType = plotInfo["Type"];
               
-              Which[
+              result = Which[
                 (* ════════════════════════════════════════════════════════ *)
-                (* HEAVY PLOT: Manual update via button                    *)
+                (* HEAVY PLOT *)
                 (* ════════════════════════════════════════════════════════ *)
                 plotType === "Heavy",
-                  (* Check if update requested *)
                   If[needsUpdate,
-                    (* Force Model cache refresh *)
+                    AppendTo[$DebugLog, "needsUpdate=True"];
                     $CurrentModel["Numerical"]["IsDirty"] = True;
                     
-                    (* Compute plot and cache result *)
-                    plotCache[selectedPlot] = <|
-                      "Plot" -> plotInfo["Compute"][$CurrentModel],
-                      "Status" -> "UpToDate",
-                      "Timestamp" -> Now
-                    |>;
+                    Module[{computed},
+                      computed = plotInfo["Compute"][$CurrentModel];
+                      AppendTo[$DebugLog, {"Computed", Head[computed]}];
+                      
+                      plotCache[selectedPlot] = <|
+                        "Plot" -> computed,
+                        "Status" -> "UpToDate",
+                        "Timestamp" -> Now
+                      |>;
+                      
+                      AppendTo[$DebugLog, {"Cached", Keys[plotCache]}];
+                    ];
                     
                     needsUpdate = False;
                   ];
                   
-                (* Display cached plot or placeholder *)
-                If[KeyExistsQ[plotCache, selectedPlot],
-                  plotCache[selectedPlot]["Plot"],
-                  
-                  (* Placeholder с рамкой *)
-                  Framed[
-                    Pane[
-                      Style["Click 'Update Plot' to compute", 16, Gray, Bold],
-                      ImageSize -> {380, 380},
-                      Alignment -> Center
-                    ],
-                    Background -> GrayLevel[0.97],
-                    FrameStyle -> GrayLevel[0.8],
-                    ImageSize -> 400
-                  ]
-                ],
+                  (* Отображение *)
+                  Module[{display},
+                    AppendTo[$DebugLog, {"KeyExistsQ", KeyExistsQ[plotCache, selectedPlot]}];
+                    
+                    display = If[KeyExistsQ[plotCache, selectedPlot],
+                      Module[{cached},
+                        cached = plotCache[selectedPlot]["Plot"];
+                        AppendTo[$DebugLog, {"Retrieved", Head[cached]}];
+                        cached
+                      ],
+                      
+                      AppendTo[$DebugLog, "ShowingPlaceholder"];
+                      Framed[
+                        Pane[
+                          Style["Click 'Update Plot' to compute", 16, Gray, Bold],
+                          ImageSize -> {380, 380},
+                          Alignment -> Center
+                        ],
+                        Background -> GrayLevel[0.97],
+                        FrameStyle -> GrayLevel[0.8],
+                        ImageSize -> 400
+                      ]
+                    ];
+                    
+                    AppendTo[$DebugLog, {"DisplayHead", Head[display]}];
+                    display
+                  ],
                 
-                (* ════════════════════════════════════════════════════════ *)
-                (* LIGHT PLOT: Always recompute on parameter change        *)
-                (* ════════════════════════════════════════════════════════ *)
                 plotType === "Light",
-                  (* Always refresh Model cache and compute *)
                   $CurrentModel["Numerical"]["IsDirty"] = True;
                   plotInfo["Compute"][$CurrentModel],
                 
-                (* ════════════════════════════════════════════════════════ *)
-                (* UNKNOWN TYPE: Error message                             *)
-                (* ════════════════════════════════════════════════════════ *)
                 True,
                   Graphics[
                     Text[Style["Unknown plot type: " <> ToString[plotType], 14, Red]],
                     ImageSize -> 400
                   ]
-              ]
+              ];
+              
+              AppendTo[$DebugLog, {"WhichResult", Head[result]}];
+              result
             ],
             
-            (* Track all relevant variables *)
             TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel},
             SynchronousUpdating -> False
           ]
