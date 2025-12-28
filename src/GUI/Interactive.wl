@@ -232,15 +232,22 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                     needsUpdate = False;
                   ];
                   
-                  (* Display cached plot or placeholder *)
-                  If[KeyExistsQ[plotCache, selectedPlot],
-                    plotCache[selectedPlot]["Plot"],
-                    Graphics[
-                      Text[Style["Click 'Update Plot' to compute", 14, Gray]],
-                      ImageSize -> 400,
-                      PlotRange -> {{0, 1}, {0, 1}}
-                    ]
-                  ],
+                (* Display cached plot or placeholder *)
+                If[KeyExistsQ[plotCache, selectedPlot],
+                  plotCache[selectedPlot]["Plot"],
+                  
+                  (* Placeholder с рамкой *)
+                  Framed[
+                    Pane[
+                      Style["Click 'Update Plot' to compute", 16, Gray, Bold],
+                      ImageSize -> {380, 380},
+                      Alignment -> Center
+                    ],
+                    Background -> GrayLevel[0.97],
+                    FrameStyle -> GrayLevel[0.8],
+                    ImageSize -> 400
+                  ]
+                ],
                 
                 (* ════════════════════════════════════════════════════════ *)
                 (* LIGHT PLOT: Always recompute on parameter change        *)
