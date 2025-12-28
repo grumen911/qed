@@ -46,7 +46,7 @@ InitPlotRegistry[] := <|
   "Potential3D" -> <|
     "Label" -> "Potential Landscape 3D",
     "Type" -> "Heavy",
-    "Compute" -> Function[{m}, GetNumericalQuantity[m, "PlotPotentialSlices3D"]]
+    "Compute" -> Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
   |>
 |>;
 
@@ -68,7 +68,7 @@ MakeDynamicSliderWithInvalidation[
         $CurrentModel["Numerical"]["IsDirty"] = True;
         
         (* Trigger cache invalidation if callback provided *)
-        If[invalidationCallback =!= Null, invalidationCallback];
+        If[invalidationCallback =!= Null, invalidationCallback[]];
       ) &
     ]
   },
@@ -89,7 +89,7 @@ MakeSliderHubWithInvalidation[model_, invalidationCallback_] :=
           MakeDynamicSliderWithInvalidation[
             Unevaluated@model,
             Sequence @@ paramList,
-            invalidationCallback
+            invalidationCallback[]
           ]
         ],
         params
