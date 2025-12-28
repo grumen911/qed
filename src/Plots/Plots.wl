@@ -145,6 +145,20 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
         PlotRange -> All,
         PlotPoints -> 25,
         MaxRecursion -> 1,
+        AspectRatio -> 0.6,
+        ImageSize -> 600,
+        TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
+        PlotStyle -> {
+          Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.006]],  (* Синий *)
+          Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006]]    (* Оранжевый *)
+        },
+        Frame -> True,
+        FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+        FrameLabel -> {
+          Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], 16],
+          Style["Frequency (GHz)", 16]
+        },
+        
         opts
       ];
 
