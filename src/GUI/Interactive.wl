@@ -1,16 +1,121 @@
 BeginPackage["QED`Interactive`", {"QED`Model`"}];
-(* BeginPackage["QED`Interactive`"]; *)
 
-
-QubitDashboard::usage = "QubitDashboard[model ] - интерактивная панель управления";
-
+QubitDashboard::usage = "QubitDashboard[{models..}] - интерактивная панель управления для списка моделей.";
+RegisterPlot::usage = "RegisterPlot[id, label, type, computeFunc] регистрирует новый тип графика.";
 
 Begin["`Private`"];
 
+(* ═══════════════════════════════════════════════════════════════ *)
+(* 1. BACKEND: PLOT REGISTRY & COMPUTE SYSTEM *)
+(* ═══════════════════════════════════════════════════════════════ *)
 
+$PlotRegistry = <||>;
+
+RegisterPlot[id_String, label_String, type_String, computeFunc_] := 
+  ($PlotRegistry[id] = <|
+    "Label" -> label, 
+    "Type" -> type,
+    "Compute" -> computeFunc
+  |>);
+
+(* Регистрация базовых графиков *)
+RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light", 
+  Function[{m}, QED`Plots`PlotPlasmonSpectrum[m]]
+];
+
+RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy", 
+  Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
+];
+
+(* DEBUG PLOT: Инспектор кэша (Read-only) *)
+RegisterPlot["DebugCache", "Debug Cache Inspector", "Light",
+  Function[{m},
+    Module[{cache, eqPoints, freqs, isDirty},
+      cache = m["Numerical", "Cache"];
+      isDirty = m["Numerical", "IsDirty"];
+      eqPoints = Lookup[cache, "EquilibriumPoints", "Missing"];
+      freqs = Lookup[cache, "PlasmonFrequencies", "Missing"];
+      
+      Column[{
+        Style["Numerical Cache Inspector", Bold, 16], 
+        Spacer[10],
+        
+        Style["Model Status:", Bold],
+        Row[{"IsDirty: ", If[TrueQ[isDirty], Style["True", Red], Style["False", Green]]}],
+        Spacer[10],
+        
+        Style["Cache Keys:", Bold],
+        If[AssociationQ[cache], Keys[cache], "Not an Association"],
+        Spacer[10],
+        
+        Style["EquilibriumPoints Entry:", Bold],
+        If[AssociationQ[eqPoints], 
+           Column[{
+             "State: " <> ToString[eqPoints["State"]],
+             "Solutions Count: " <> If[KeyExistsQ[eqPoints, "Value"], 
+                 ToString[Length[eqPoints["Value"]["Solutions"]]], 
+                 "No Value"
+             ]
+           }], 
+           eqPoints
+        ],
+        Spacer[10],
+        
+        Style["PlasmonFrequencies Entry:", Bold],
+        If[AssociationQ[freqs], 
+           Column[{
+             "State: " <> ToString[freqs["State"]],
+             "Value: " <> ToString[Short[freqs["Value"]]]
+           }], 
+           freqs
+        ],
+        
+        Spacer[20],
+        Style["Raw Cache Dump:", Bold],
+        Pane[Short[cache, 20], {400, 300}, Scrollbars -> True]
+      }]
+    ]
+  ]
+];
+
+
+(* 
+   COMPUTE WORKER (FUNCTIONAL STYLE)
+   Input: plotId, model (Value)
+   Output: {Graphics, UpdatedModel (Value)}
+*)
+ComputePlotData[plotId_, model_Association] := 
+  Block[{$CurrentModel = model},
+    
+    (* 0. Zombie Protection *)
+    If[Length[$CurrentModel["Numerical", "Cache"]] === 0,
+       $CurrentModel["Numerical", "IsDirty"] = True;
+    ];
+    
+    (* 1. Warm up Cache (Updates $CurrentModel internally) *)
+    QED`Model`GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"];
+    
+    If[plotId === "Potential3D",
+       QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]
+    ];
+    
+    (* 2. Compute Graphic using warmed model *)
+    Module[{info, func, graphic},
+      info = $PlotRegistry[plotId];
+      
+      graphic = If[MissingQ[info], 
+         Graphics[{Red, Text["Unknown Plot ID"]}],
+         func = info["Compute"];
+         Check[func[$CurrentModel], Graphics[{Red, Text["Computation Failed"]}]]
+      ];
+      
+      (* 3. Return Result AND The Updated Model State *)
+      {graphic, $CurrentModel}
+    ]
+  ];
 
 (* ═══════════════════════════════════════════════════════════════ *)
-(* ЛОГИКА *)
+(* 2. VIEW COMPONENTS: SLIDERS & CONTROLS *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
 ExtractInteractiveParams[model_Association] :=
@@ -20,7 +125,7 @@ ExtractInteractiveParams[model_Association] :=
         KeyValueMap[
           {tag, #1, #2["Value"], {#2["Min"], #2["Max"], #2["Step"]}} &,
           Select[componentParams, AssociationQ[#] && 
-          	Lookup[#, "Interactive", False] === True &]
+            Lookup[#, "Interactive", False] === True &]
         ]
       ],
       model["Primary"]
@@ -28,139 +133,203 @@ ExtractInteractiveParams[model_Association] :=
     1
   ];
 
-
-(* ═══════════════════════════════════════════════════════════════ *)
-(* ОФОРМЛЕНИЕ *)
-(* ═══════════════════════════════════════════════════════════════ *)
-
-
-(*Создать слайдер*)	
-MakeDynamicSlider[model_, componentTag_, paramName_, currentValue_, 
-				 {min_, max_, step_}] :=
-  With[{
-    d = Dynamic[
-      model["Primary"][componentTag][paramName]["Value"], 
-      (model["Primary"][componentTag][paramName]["Value"] = #;
-      model["Numerical"]["IsDirty"] = True;
-      $CurrentModel["Primary"][componentTag][paramName]["Value"] = #;
-      $CurrentModel["Numerical"]["IsDirty"] = True;) &
-    ]
-  },
+(* Отрисовка слайдера с именем Tag.Param *)
+SetAttributes[MakeParameterControl, HoldFirst];
+MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
+  Module[{currentVal = val},
     Row[{
-      componentTag <> "." <> paramName <> ": ",
-      Slider[d, {min, max, step}],
-      InputField[d, Number, FieldSize -> {6, 1}]
+      Style[tag <> "." <> param <> ": ", 12],
+      
+      Slider[
+        Dynamic[
+          model["Primary", tag, param, "Value"], 
+          
+          Function[{v},
+            model["Primary", tag, param, "Value"] = v;
+            model["Numerical", "IsDirty"] = True;
+            onUpdate[]
+          ]
+        ],
+        {min, max, step},
+        ImageSize -> 120
+      ],
+      
+      Spacer[5],
+      
+      InputField[
+        Dynamic[
+          model["Primary", tag, param, "Value"],
+          Function[{v},
+            model["Primary", tag, param, "Value"] = v;
+            model["Numerical", "IsDirty"] = True;
+            onUpdate[]
+          ]
+        ],
+        Number, 
+        FieldSize -> {6, 1}
+      ]
     }]
   ];
-		
-	
-(*Создает массив слайдеров*)	
-MakeSliderHub[model_] := Module[{params},
-	params = ExtractInteractiveParams[model];
-	  Column[
-	    Map[
-	      Function[{paramList},
-	        MakeDynamicSlider[Unevaluated@model, Sequence @@ paramList]
-	      ],
-	      params
-	    ]
-	  ]
-];
 
-
-(*Кнопка выбора работы*)  
-SelectModel[model_, modelsStack_] :=
+(* Выбор модели с картинками (Safe Version) *)
+SetAttributes[SelectModel, HoldFirst];
+SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
   Row[{
     Pane[
       SetterBar[
-        Dynamic[model, (model = #; $CurrentModel = #) &],
-        	  MapThread[#2 -> #1 &,
-		    {Query[All, "Image"][modelsStack],
-		    	 modelsStack}
+        Dynamic[modelSymbol, 
+           Function[{newModel},
+             modelSymbol = newModel;
+             onUpdate[]; (* Callback to clear cache/reset UI *)
+           ]
         ],
+        (* Value (Model) -> Label (Thumbnail Image) *)
+        (* Added Lookup for Name safety *)
+        (# -> Tooltip[
+                 Show[#["Image"], ImageSize->{60,60}, AspectRatio->1, Axes->False, Frame->True, FrameTicks->None], 
+                 Lookup[#["Topology"], "Name", "Circuit"]
+              ]) & /@ modelsStack,
         Appearance -> "Vertical"
       ],
-      ImageSize -> {All, 200},
+      ImageSize -> {80, 200},
       Scrollbars -> {False, True}
     ],
+    Spacer[10],
     
+    (* Big Preview of Current Model *)
     Dynamic[
-      Graphics[
-        model["Image"],
-        ImageSize -> {All, 200}
-      ],
-      TrackedSymbols :> {model}
+      Column[{
+        Style[Lookup[modelSymbol["Topology"], "Name", "Circuit"], Bold, 12],
+        Show[modelSymbol["Image"], ImageSize -> {180, 180}, AspectRatio->1]
+      }, Alignment->Center]
     ]
   }];
 
+SetAttributes[PlotControlPanel, HoldFirst];
+PlotControlPanel[model_, onUpdate_, onForceUpdate_] := 
+  Module[{params},
+    params = ExtractInteractiveParams[model];
+    
+    Column[
+      Join[
+        Map[
+          MakeParameterControl[model, #, onUpdate] &,
+          params
+        ],
+        
+        {Spacer[10],
+         Button["Update Plot", 
+           onForceUpdate[],
+           Method -> "Queued",
+           ImageSize -> {140, 30}
+         ]}
+      ]
+    ]
+  ];
 
-(*s_Symbol :> Symbol[SymbolName[s]]*)
+(* ═══════════════════════════════════════════════════════════════ *)
+(* 3. CORE: QUBIT DASHBOARD *)
+(* ═══════════════════════════════════════════════════════════════ *)
 
-
-QubitDashboard[modelsStack : {Association__}] := DynamicModule[
-  {model = First@modelsStack, needsUpdate = False},
+QubitDashboard[modelsStack : {__Association}] := DynamicModule[
+  {
+    currentModel = First[modelsStack],
+    selectedPlotId = "PlasmonSpectrum",
+    needsUpdate = False, 
+    plotCache
+  },
   
   Column[{
-    (* ═══════════════════════════════════════════════════════════ *)
-    (* ГЛАВНАЯ СТРОКА: Слайдеры слева, График справа               *)
-    (* ═══════════════════════════════════════════════════════════ *)
     Row[{
-      (* ЛЕВАЯ КОЛОНКА: Выбор модели + Слайдеры + Кнопка *)
-      Column[{
-        SelectModel[Unevaluated@model, modelsStack],
-        MakeSliderHub[Unevaluated@model],
-        
-        (* Кнопка обновления графика *)
-        Button["Update 3D Plot",
-          needsUpdate = True,  (* ← Установить флаг *)
-          Method -> "Queued"
-        ]
-      },
-      Alignment -> Top
+      (* LEFT PANEL: Model Selection + Controls *)
+      Panel[
+        Column[{
+          (* Model Selector Widget *)
+          SelectModel[currentModel, modelsStack, 
+             Function[{}, 
+               (* Reset state on model switch *)
+               plotCache = <||>;
+               needsUpdate = True; 
+               (* Force dirty to ensure recompute *)
+               currentModel["Numerical", "IsDirty"] = True;
+             ]
+          ],
+          
+          Spacer[15],
+          (* Divider[] REMOVED as requested *)
+          Spacer[10],
+          
+          (* Sliders *)
+          PlotControlPanel[
+            currentModel, 
+            Function[{}, 
+               If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
+                  needsUpdate = True,
+                  plotCache[selectedPlotId] = Missing["Stale"]
+               ]
+            ],
+            Function[{}, needsUpdate = True]
+          ]
+        }],
+        Alignment -> Top
       ],
       
-      Spacer[20],  (* Пробел между колонками *)
+      Spacer[20],
       
-      (* ПРАВАЯ КОЛОНКА: График *)
-      Dynamic[
-        If[needsUpdate,
-          (* Пересчитать кэш *)
-          $CurrentModel["Numerical"]["IsDirty"] = True;
-          GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"];
-          needsUpdate = False;
-        ];
-        
-        (* Показать график *)
-        (* GetNumericalQuantity[$CurrentModel, "PlotPotentialSlices3D"], *)
-        QED`Plots`PlotPlasmonSpectrum[$CurrentModel],
-        
-        TrackedSymbols :> {needsUpdate},
-  		SynchronousUpdating -> False
-      ]
-    },
-    Alignment -> Top  (* Выравнивание по верху *)
-    ],
-    
-    Spacer[10],  (* Пробел перед данными *)
-    
-    (* ═══════════════════════════════════════════════════════════ *)
-    (* НИЖНЯЯ СЕКЦИЯ: Hamiltonian и Equilibrium Fluxes            *)
-    (* ═══════════════════════════════════════════════════════════ *)
-    Dynamic[
+      (* RIGHT PANEL: Plot Area *)
       Column[{
-        "PlasmonFrequencies:",
-        GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
-        "Equilibrium Fluxes:",
-        GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
-          (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
-        GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"],
-        $CurrentModel["SubstitutionRules"] // Values
-      }],
-      TrackedSymbols :> {$CurrentModel}
-    ]
-  }]
+        Row[{
+           "Plot Type: ",
+           PopupMenu[Dynamic[selectedPlotId], Keys[$PlotRegistry]]
+        }],
+        Spacer[10],
+        
+        Dynamic[
+          (* 1. COMPUTE AND UPDATE STATE *)
+          If[needsUpdate,
+             Module[{res, updatedModel},
+               {res, updatedModel} = ComputePlotData[selectedPlotId, currentModel];
+               plotCache[selectedPlotId] = res;
+               currentModel = updatedModel;
+               needsUpdate = False;
+             ]
+          ];
+          
+          (* 2. RENDER *)
+          Module[{cached},
+            cached = plotCache[selectedPlotId];
+            
+            Switch[cached,
+              _Missing, 
+              If[cached === Missing["Stale"],
+                 Panel[Style["Parameters changed. Press Update.", Gray], ImageSize->{300,300}],
+                 If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
+                    needsUpdate = True; "Computing...", 
+                    Panel[Style["Select plot to start", Gray], ImageSize->{300,300}]
+                 ]
+              ],
+              
+              _, cached
+            ]
+          ],
+          
+          TrackedSymbols :> {needsUpdate, selectedPlotId, plotCache}
+        ]
+      }, Alignment -> Top]
+    }, Alignment -> Top],
+    
+    Dynamic @ Row[{"Cache: ", Keys[plotCache], " | Update: ", needsUpdate}]
+  }],
+  
+  UnsavedVariables :> {plotCache, needsUpdate},
+  Initialization :> {
+    plotCache = <||>;
+    needsUpdate = True; 
+    currentModel["Numerical", "IsDirty"] = True;
+  },
+  SynchronousInitialization -> False,
+  SaveDefinitions -> False
 ];
-
 
 End[];
 EndPackage[];
