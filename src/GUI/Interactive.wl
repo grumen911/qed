@@ -133,12 +133,11 @@ ExtractInteractiveParams[model_Association] :=
     1
   ];
 
-(* MakeParameterControl needs HoldFirst to update the local symbol from UI *)
+(* Отрисовка слайдера с именем Tag.Param *)
 SetAttributes[MakeParameterControl, HoldFirst];
 MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
   Module[{currentVal = val},
     Row[{
-      (* RESTORED STYLE FROM DEVELOP: Tag.Param label *)
       Style[tag <> "." <> param <> ": ", 12],
       
       Slider[
@@ -167,10 +166,43 @@ MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate
           ]
         ],
         Number, 
-        FieldSize -> {6, 1} (* RESTORED: Size 6x1 *)
+        FieldSize -> {6, 1}
       ]
     }]
   ];
+
+(* Выбор модели с картинками (как в Develop) *)
+SetAttributes[SelectModel, HoldFirst];
+SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
+  Row[{
+    Pane[
+      SetterBar[
+        Dynamic[modelSymbol, 
+           Function[{newModel},
+             modelSymbol = newModel;
+             onUpdate[]; (* Callback to clear cache/reset UI *)
+           ]
+        ],
+        (* Value (Model) -> Label (Thumbnail Image) *)
+        (# -> Tooltip[
+                 Show[#["Image"], ImageSize->{60,60}, AspectRatio->1, Axes->False, Frame->True, FrameTicks->None], 
+                 #["Topology","Name"]
+              ]) & /@ modelsStack,
+        Appearance -> "Vertical"
+      ],
+      ImageSize -> {80, 200},
+      Scrollbars -> {False, True}
+    ],
+    Spacer[10],
+    
+    (* Big Preview of Current Model *)
+    Dynamic[
+      Column[{
+        Style[modelSymbol["Topology"]["Name"], Bold, 12],
+        Show[modelSymbol["Image"], ImageSize -> {180, 180}, AspectRatio->1]
+      }, Alignment->Center]
+    ]
+  }];
 
 SetAttributes[PlotControlPanel, HoldFirst];
 PlotControlPanel[model_, onUpdate_, onForceUpdate_] := 
@@ -208,12 +240,25 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   
   Column[{
     Row[{
+      (* LEFT PANEL: Model Selection + Controls *)
       Panel[
         Column[{
-          (* Simple Model Title - Will be replaced by Popup in next step *)
-          Style["Model: " <> ToString[currentModel["Topology"]["Name"]], Bold],
+          (* Model Selector Widget *)
+          SelectModel[currentModel, modelsStack, 
+             Function[{}, 
+               (* Reset state on model switch *)
+               plotCache = <||>;
+               needsUpdate = True; 
+               (* Force dirty to ensure recompute *)
+               currentModel["Numerical", "IsDirty"] = True;
+             ]
+          ],
+          
+          Spacer[15],
+          Divider[],
           Spacer[10],
           
+          (* Sliders *)
           PlotControlPanel[
             currentModel, 
             Function[{}, 
@@ -230,6 +275,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       
       Spacer[20],
       
+      (* RIGHT PANEL: Plot Area *)
       Column[{
         Row[{
            "Plot Type: ",
@@ -241,11 +287,9 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
           (* 1. COMPUTE AND UPDATE STATE *)
           If[needsUpdate,
              Module[{res, updatedModel},
-               (* Functional Update: Get Result + New State *)
                {res, updatedModel} = ComputePlotData[selectedPlotId, currentModel];
-               
                plotCache[selectedPlotId] = res;
-               currentModel = updatedModel; (* Explicitly update Dynamic variable *)
+               currentModel = updatedModel;
                needsUpdate = False;
              ]
           ];
@@ -280,8 +324,6 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   Initialization :> {
     plotCache = <||>;
     needsUpdate = True; 
-    
-    (* Force Dirty on Init *)
     currentModel["Numerical", "IsDirty"] = True;
   },
   SynchronousInitialization -> False,
