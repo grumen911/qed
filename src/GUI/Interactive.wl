@@ -31,20 +31,11 @@ ExtractInteractiveParams[model_Association] :=
 
 (* Initialize plot registry with available plots *)
 InitPlotRegistry[] := <|
-  (* ════════════════════════════════════════════════════════════ *)
-  (* LIGHT PLOTS (fast, auto-update on parameter change)         *)
-  (* ════════════════════════════════════════════════════════════ *)
-  
   "PlasmonSpectrum" -> <|
     "Label" -> "Plasmon Spectrum",
     "Type" -> "Light",
     "Compute" -> Function[{m}, QED`Plots`PlotPlasmonSpectrum[m]]
   |>,
-  
-  (* ════════════════════════════════════════════════════════════ *)
-  (* HEAVY PLOTS (slow, manual update via button)                *)
-  (* ════════════════════════════════════════════════════════════ *)
-  
   "Potential3D" -> <|
     "Label" -> "Potential Landscape 3D",
     "Type" -> "Heavy",
@@ -56,7 +47,6 @@ InitPlotRegistry[] := <|
 (* SLIDER WITH CACHE INVALIDATION *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-(* Create dynamic slider with invalidation callback *)
 MakeDynamicSliderWithInvalidation[
   model_, componentTag_, paramName_, currentValue_, 
   {min_, max_, step_}, invalidationCallback_: Null
@@ -68,8 +58,6 @@ MakeDynamicSliderWithInvalidation[
         model["Numerical"]["IsDirty"] = True;
         $CurrentModel["Primary"][componentTag][paramName]["Value"] = #;
         $CurrentModel["Numerical"]["IsDirty"] = True;
-        
-        (* Trigger cache invalidation if callback provided *)
         If[invalidationCallback =!= Null, invalidationCallback[]];
       ) &
     ]
@@ -81,14 +69,12 @@ MakeDynamicSliderWithInvalidation[
   }]
 ];
 
-(* Create slider hub with invalidation support *)
 MakeSliderHubWithInvalidation[model_, invalidationCallback_] := 
   Module[{params},
     params = ExtractInteractiveParams[model];
     Column[
       Map[
         Function[{paramList},
-          (* FIX: Pass invalidationCallback itself, do not execute it here! *)
           MakeDynamicSliderWithInvalidation[
             Unevaluated@model,
             Sequence @@ paramList,
@@ -133,15 +119,12 @@ SelectModel[model_, modelsStack_] :=
 
 QubitDashboard[modelsStack : {Association__}] := DynamicModule[
   {
+    (* FIX: Define cache BEFORE model to prevent value leaking during init *)
+    cacheContainer = <|"Storage" -> <||>|>,
+    
     model = First@modelsStack,
-    
-    (* Plot management state *)
     selectedPlot = "PlasmonSpectrum",
-    (* FIX: Inline initialization to prevent state corruption/persistence *)
-    localPlotCache = <||>, 
     needsUpdate = False,
-    
-    (* Plot registry *)
     plotRegistry = InitPlotRegistry[]
   },
   
@@ -149,10 +132,11 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
   Module[{invalidateHeavyPlots},
     
     invalidateHeavyPlots[] := Module[{},
+      (* Access via "Storage" key to ensure we are inside container *)
       Do[
         If[plotRegistry[plotID]["Type"] === "Heavy" && 
-           KeyExistsQ[localPlotCache, plotID],
-          localPlotCache[plotID]["Status"] = "Stale"
+           KeyExistsQ[cacheContainer["Storage"], plotID],
+          cacheContainer["Storage", plotID, "Status"] = "Stale"
         ],
         {plotID, Keys[plotRegistry]}
       ];
@@ -160,25 +144,15 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
     
     (* Main UI *)
     Column[{
-      (* ═══════════════════════════════════════════════════════════ *)
-      (* TOP ROW: Sliders (left) + Plot (right) *)
-      (* ═══════════════════════════════════════════════════════════ *)
       Row[{
-        (* LEFT COLUMN: Model selector + Sliders + Update button *)
         Column[{
           SelectModel[Unevaluated@model, modelsStack],
-          
           Spacer[10],
-          
-          (* Sliders with cache invalidation *)
           MakeSliderHubWithInvalidation[
             Unevaluated@model,
-            invalidateHeavyPlots  (* Callback function *)
+            invalidateHeavyPlots
           ],
-          
           Spacer[10],
-          
-          (* Update button (only visible for Heavy plots) *)
           Dynamic[
             If[plotRegistry[selectedPlot]["Type"] === "Heavy",
               Button["Update Plot",
@@ -186,8 +160,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                 Method -> "Queued",
                 ImageSize -> {150, 30}
               ],
-              
-              (* For Light plots: show info text *)
               Style["(Light plot: auto-updates)", 12, Gray, Italic]
             ],
             TrackedSymbols :> {selectedPlot}
@@ -196,9 +168,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         
         Spacer[20],
         
-        (* RIGHT COLUMN: Plot selector + Plot display *)
         Column[{
-          (* Plot selector dropdown *)
           Row[{
             Style["Select Plot: ", Bold],
             PopupMenu[
@@ -212,10 +182,10 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
           
           (* Plot display area *)
           Dynamic[
-            (* SANITY CHECK: If cache is corrupted (e.g. contains Model keys), reset it *)
-            If[KeyExistsQ[localPlotCache, "ModelVersion"], 
-               localPlotCache = <||>;
-               AppendTo[$DebugLog, "CACHE_RESET_TRIGGERED"]
+            (* Sanity Check: Ensure container structure is intact *)
+            If[!AssociationQ[cacheContainer] || !KeyExistsQ[cacheContainer, "Storage"],
+               cacheContainer = <|"Storage" -> <||>|>;
+               AppendTo[$DebugLog, "CONTAINER_RESET"]
             ];
 
             Module[{plotInfo, plotType, result},
@@ -223,9 +193,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
               plotType = plotInfo["Type"];
               
               result = Which[
-                (* ════════════════════════════════════════════════════════ *)
-                (* HEAVY PLOT *)
-                (* ════════════════════════════════════════════════════════ *)
                 plotType === "Heavy",
                   If[needsUpdate,
                     AppendTo[$DebugLog, "needsUpdate=True"];
@@ -233,32 +200,32 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                     
                     Module[{computed},
                       computed = plotInfo["Compute"][$CurrentModel];
-                      AppendTo[$DebugLog, {"Computed", Head[computed]}];
                       
-                      localPlotCache[selectedPlot] = <|
+                      (* Write to Container *)
+                      cacheContainer["Storage", selectedPlot] = <|
                         "Plot" -> computed,
                         "Status" -> "UpToDate",
                         "Timestamp" -> Now
                       |>;
                       
-                      AppendTo[$DebugLog, {"Cached", Keys[localPlotCache]}];
+                      AppendTo[$DebugLog, {"CachedKey", selectedPlot}];
                     ];
                     
                     needsUpdate = False;
                   ];
                   
-                  (* Отображение *)
+                  (* Read from Container *)
                   Module[{display},
-                    (* ATOMIC ACCESS FIX: Use With/AssociationQ to prevent check-then-act race conditions *)
-                    display = With[{entry = localPlotCache[selectedPlot]},
-                      If[AssociationQ[entry],
-                        Module[{cached},
-                          cached = entry["Plot"];
-                          AppendTo[$DebugLog, {"Retrieved", Head[cached]}];
-                          cached
+                    display = With[{storage = cacheContainer["Storage"]},
+                      If[KeyExistsQ[storage, selectedPlot],
+                        With[{entry = storage[selectedPlot]},
+                           If[AssociationQ[entry],
+                              entry["Plot"],
+                              Framed[Style["Invalid Cache Entry", Red]]
+                           ]
                         ],
                         
-                        AppendTo[$DebugLog, "ShowingPlaceholder"];
+                        (* Placeholder *)
                         Framed[
                           Pane[
                             Style["Click 'Update Plot' to compute", 16, Gray, Bold],
@@ -271,8 +238,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                         ]
                       ]
                     ];
-                    
-                    AppendTo[$DebugLog, {"DisplayHead", Head[display]}];
                     display
                   ],
                 
@@ -281,18 +246,13 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                   plotInfo["Compute"][$CurrentModel],
                 
                 True,
-                  Graphics[
-                    Text[Style["Unknown plot type: " <> ToString[plotType], 14, Red]],
-                    ImageSize -> 400
-                  ]
+                  Graphics[Text[Style["Unknown", Red]]]
               ];
-              
-              AppendTo[$DebugLog, {"WhichResult", Head[result]}];
               result
             ],
             
-            (* FIX: Add localPlotCache to TrackedSymbols to ensure UI redraws after computation *)
-            TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel, localPlotCache},
+            (* Track container *)
+            TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel, cacheContainer},
             SynchronousUpdating -> False
           ]
 
@@ -301,17 +261,10 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
       
       Spacer[20],
       
-      (* ═══════════════════════════════════════════════════════════ *)
-      (* BOTTOM SECTION: Numerical parameters display *)
-      (* ═══════════════════════════════════════════════════════════ *)
       Dynamic[
         Column[{
           "PlasmonFrequencies:",
           GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
-          "Equilibrium Fluxes:",
-          GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
-            (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
-          GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"],
           $CurrentModel["SubstitutionRules"] // Values
         }],
         TrackedSymbols :> {$CurrentModel}
