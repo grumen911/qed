@@ -283,16 +283,19 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
             cached = plotCache[selectedPlotId];
             
             Switch[cached,
-              _Graphics | _Graphics3D | _Legended, cached,
+              (* Case 1: Missing (Initial or Stale) *)
+              _Missing, 
+              If[cached === Missing["Stale"],
+                 Panel[Style["Parameters changed. Press Update.", Gray], ImageSize->{300,300}],
+                 (* Initial: Check if Light *)
+                 If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
+                    needsUpdate = True; "Computing...", 
+                    Panel[Style["Select plot to start", Gray], ImageSize->{300,300}]
+                 ]
+              ],
               
-              Missing["Stale"], 
-              Panel[Style["Parameters changed. Press Update.", Gray], ImageSize->{300,300}],
-              
-              _, (* Initial state or missing *)
-              If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
-                 needsUpdate = True; "Computing...", (* Auto-start light plots *)
-                 Panel[Style["Select plot to start", Gray], ImageSize->{300,300}]
-              ]
+              (* Case 2: Success (Graphics, Column, etc.) *)
+              _, cached
             ]
           ],
           
