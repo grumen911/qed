@@ -28,18 +28,40 @@ RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy",
 ];
 
 (* 
-   COMPUTE WORKER 
-   Использует Block[{$CurrentModel}] для корректной работы 
-   SubstitutionRules, которые ссылаются на глобальный контекст.
+   COMPUTE WORKER + SYNC
+   1. Подменяем $CurrentModel на локальную.
+   2. Запускаем "прогрев" кэша через GetNumericalQuantity (которая пишет в $CurrentModel).
+   3. КОПИРУЕМ обновленный кэш из $CurrentModel обратно в локальную переменную.
+   4. Строим график.
 *)
-ComputePlotData[plotId_, model_] := 
+SetAttributes[ComputePlotData, HoldFirst];
+ComputePlotData[plotId_, model_Symbol] := 
   Block[{$CurrentModel = model},
+    
+    (* 1. ГАРАНТИРУЕМ ПРОГРЕВ КЭША *)
+    (* Если кэш грязный, GetNumericalQuantity запустит ComputeNumericalHarmonicPerturbation,
+       которая заполнит "ContinuationDerivatives" и "EquilibriumFluxes". 
+       Без этого PlasmonFrequenciesVsFlux упадет. *)
+    QED`Model`GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"];
+    
+    (* Для 3D графика нужны точки равновесия *)
+    If[plotId === "Potential3D",
+       QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]
+    ];
+    
+    (* 2. СИНХРОНИЗАЦИЯ ОБРАТНО *)
+    (* GetNumericalQuantity обновила $CurrentModel["Numerical"]. 
+       Мы должны сохранить это в локальную model, чтобы IsDirty сбросился и данные сохранились. *)
+    model["Numerical"] = $CurrentModel["Numerical"];
+    
+    (* 3. ВЫПОЛНЕНИЕ ОТРИСОВКИ *)
     Module[{info, func},
       info = $PlotRegistry[plotId];
       If[MissingQ[info], Return[Graphics[{Red, Text["Unknown Plot ID"]}]]];
       
       func = info["Compute"];
-      Check[func[model], Graphics[{Red, Text["Computation Failed"]}]]
+      (* Передаем $CurrentModel, так как она (и наша локальная model) теперь прогрета *)
+      Check[func[$CurrentModel], Graphics[{Red, Text["Computation Failed"]}]]
     ]
   ];
 
@@ -202,6 +224,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
           If[needsUpdate,
              (* Compute *)
              Module[{res},
+               (* Передаем currentModel как СИМВОЛ. Внутри она обновится (кэш). *)
                res = ComputePlotData[selectedPlotId, currentModel];
                plotCache[selectedPlotId] = res;
                needsUpdate = False;
