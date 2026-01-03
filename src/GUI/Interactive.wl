@@ -171,7 +171,7 @@ MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate
     }]
   ];
 
-(* Выбор модели с картинками (как в Develop) *)
+(* Выбор модели с картинками (Safe Version) *)
 SetAttributes[SelectModel, HoldFirst];
 SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
   Row[{
@@ -184,9 +184,10 @@ SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
            ]
         ],
         (* Value (Model) -> Label (Thumbnail Image) *)
+        (* Added Lookup for Name safety *)
         (# -> Tooltip[
                  Show[#["Image"], ImageSize->{60,60}, AspectRatio->1, Axes->False, Frame->True, FrameTicks->None], 
-                 #["Topology","Name"]
+                 Lookup[#["Topology"], "Name", "Circuit"]
               ]) & /@ modelsStack,
         Appearance -> "Vertical"
       ],
@@ -198,7 +199,7 @@ SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
     (* Big Preview of Current Model *)
     Dynamic[
       Column[{
-        Style[modelSymbol["Topology"]["Name"], Bold, 12],
+        Style[Lookup[modelSymbol["Topology"], "Name", "Circuit"], Bold, 12],
         Show[modelSymbol["Image"], ImageSize -> {180, 180}, AspectRatio->1]
       }, Alignment->Center]
     ]
@@ -255,7 +256,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
           ],
           
           Spacer[15],
-          Divider[],
+          (* Divider[] REMOVED as requested *)
           Spacer[10],
           
           (* Sliders *)
