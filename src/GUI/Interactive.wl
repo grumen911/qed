@@ -58,7 +58,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   (* VIEW *)
   Column[{
     (* Header: Model Info *)
-    Dynamic @ Style["Model: " <> ToString[currentModel["Topology"]["Name"]], Bold, 16],
+    Dynamic @ Style["Model: " <> ToString[currentModel["Topology"]["Type"]], Bold, 16],
     
     (* Debug: Cache Status *)
     Dynamic @ Row[{"Cache Keys: ", Keys[plotCache]}],
