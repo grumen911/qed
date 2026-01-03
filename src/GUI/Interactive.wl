@@ -283,7 +283,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
               result
             ],
             
-            TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel},
+            (* FIX: Add plotCache to TrackedSymbols so UI updates when data is computed *)
+            TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel, plotCache},
             SynchronousUpdating -> False
           ]
 
