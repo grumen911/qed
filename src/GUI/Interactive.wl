@@ -88,10 +88,11 @@ MakeSliderHubWithInvalidation[model_, invalidationCallback_] :=
     Column[
       Map[
         Function[{paramList},
+          (* FIX: Pass invalidationCallback itself, do not execute it here! *)
           MakeDynamicSliderWithInvalidation[
             Unevaluated@model,
             Sequence @@ paramList,
-            invalidationCallback[]
+            invalidationCallback
           ]
         ],
         params
@@ -136,7 +137,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
     
     (* Plot management state *)
     selectedPlot = "PlasmonSpectrum",
-    dashboardPlotCache, (* Renamed to avoid persistent garbage *)
+    (* FIX: Inline initialization to prevent state corruption/persistence *)
+    localPlotCache = <||>, 
     needsUpdate = False,
     
     (* Plot registry *)
@@ -149,8 +151,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
     invalidateHeavyPlots[] := Module[{},
       Do[
         If[plotRegistry[plotID]["Type"] === "Heavy" && 
-           KeyExistsQ[dashboardPlotCache, plotID],
-          dashboardPlotCache[plotID]["Status"] = "Stale"
+           KeyExistsQ[localPlotCache, plotID],
+          localPlotCache[plotID]["Status"] = "Stale"
         ],
         {plotID, Keys[plotRegistry]}
       ];
@@ -171,7 +173,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
           (* Sliders with cache invalidation *)
           MakeSliderHubWithInvalidation[
             Unevaluated@model,
-            invalidateHeavyPlots  (* Callback to invalidate cache *)
+            invalidateHeavyPlots  (* Callback function *)
           ],
           
           Spacer[10],
@@ -210,6 +212,12 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
           
           (* Plot display area *)
           Dynamic[
+            (* SANITY CHECK: If cache is corrupted (e.g. contains Model keys), reset it *)
+            If[KeyExistsQ[localPlotCache, "ModelVersion"], 
+               localPlotCache = <||>;
+               AppendTo[$DebugLog, "CACHE_RESET_TRIGGERED"]
+            ];
+
             Module[{plotInfo, plotType, result},
               plotInfo = plotRegistry[selectedPlot];
               plotType = plotInfo["Type"];
@@ -227,13 +235,13 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                       computed = plotInfo["Compute"][$CurrentModel];
                       AppendTo[$DebugLog, {"Computed", Head[computed]}];
                       
-                      dashboardPlotCache[selectedPlot] = <|
+                      localPlotCache[selectedPlot] = <|
                         "Plot" -> computed,
                         "Status" -> "UpToDate",
                         "Timestamp" -> Now
                       |>;
                       
-                      AppendTo[$DebugLog, {"Cached", Keys[dashboardPlotCache]}];
+                      AppendTo[$DebugLog, {"Cached", Keys[localPlotCache]}];
                     ];
                     
                     needsUpdate = False;
@@ -242,7 +250,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                   (* Отображение *)
                   Module[{display},
                     (* ATOMIC ACCESS FIX: Use With/AssociationQ to prevent check-then-act race conditions *)
-                    display = With[{entry = dashboardPlotCache[selectedPlot]},
+                    display = With[{entry = localPlotCache[selectedPlot]},
                       If[AssociationQ[entry],
                         Module[{cached},
                           cached = entry["Plot"];
@@ -283,8 +291,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
               result
             ],
             
-            (* FIX: Add dashboardPlotCache to TrackedSymbols to ensure UI redraws after computation *)
-            TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel, dashboardPlotCache},
+            (* FIX: Add localPlotCache to TrackedSymbols to ensure UI redraws after computation *)
+            TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel, localPlotCache},
             SynchronousUpdating -> False
           ]
 
@@ -309,12 +317,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         TrackedSymbols :> {$CurrentModel}
       ]
     }]
-  ],
-  
-  (* Initialization Rule: Ensure cache is cleanly initialized to empty association *)
-  Initialization :> {
-    dashboardPlotCache = <||>;
-  }
+  ]
 ];
 
 End[];
