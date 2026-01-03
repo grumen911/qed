@@ -29,7 +29,6 @@ ExtractInteractiveParams[model_Association] :=
 (* PLOT REGISTRY *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-(* Initialize plot registry with available plots *)
 InitPlotRegistry[] := <|
   "PlasmonSpectrum" -> <|
     "Label" -> "Plasmon Spectrum",
@@ -44,7 +43,7 @@ InitPlotRegistry[] := <|
 |>;
 
 (* ═══════════════════════════════════════════════════════════════ *)
-(* SLIDER WITH CACHE INVALIDATION *)
+(* UI COMPONENTS *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
 MakeDynamicSliderWithInvalidation[
@@ -86,10 +85,6 @@ MakeSliderHubWithInvalidation[model_, invalidationCallback_] :=
     ]
   ];
 
-(* ═══════════════════════════════════════════════════════════════ *)
-(* MODEL SELECTOR *)
-(* ═══════════════════════════════════════════════════════════════ *)
-
 SelectModel[model_, modelsStack_] :=
   Row[{
     Pane[
@@ -123,11 +118,10 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
     selectedPlot = "PlasmonSpectrum",
     needsUpdate = False,
     plotRegistry = InitPlotRegistry[],
-    (* Uninitialized variable for cache *)
+    (* UnsavedVariables handles cleanup *)
     plotCache
   },
   
-  (* Helper: Invalidate all Heavy plots in cache *)
   Module[{invalidateHeavyPlots},
     
     invalidateHeavyPlots[] := Module[{},
@@ -140,7 +134,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
       ];
     ];
     
-    (* Main UI *)
     Column[{
       Row[{
         Column[{
@@ -178,7 +171,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
           
           Spacer[10],
           
-          (* Plot display area *)
+          (* PLOT DISPLAY AREA *)
           Dynamic[
             Module[{plotInfo, plotType, result},
               plotInfo = plotRegistry[selectedPlot];
@@ -193,7 +186,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                     Module[{computed},
                       computed = plotInfo["Compute"][$CurrentModel];
                       
-                      (* Write to Cache *)
                       plotCache[selectedPlot] = <|
                         "Plot" -> computed,
                         "Status" -> "UpToDate",
@@ -202,19 +194,23 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                       
                       AppendTo[$DebugLog, {"CachedKey", selectedPlot}];
                     ];
-                    
                     needsUpdate = False;
                   ];
                   
-                  (* Read from Cache *)
-                  Module[{display},
-                    (* Clean Atomic Access *)
-                    display = With[{entry = plotCache[selectedPlot]},
-                      If[AssociationQ[entry],
-                        entry["Plot"],
-                        
-                        (* Placeholder *)
-                        Framed[
+                  (* 
+                     SIMPLIFIED READ LOGIC 
+                     Removed 'With' wrapper to fix Dynamic dependency tracking.
+                     Using local variable assignment for safety.
+                  *)
+                  Module[{entry},
+                    entry = plotCache[selectedPlot];
+                    
+                    If[AssociationQ[entry],
+                       (* Success path *)
+                       entry["Plot"],
+                       
+                       (* Failure/Empty path *)
+                       Framed[
                           Pane[
                             Style["Click 'Update Plot' to compute", 16, Gray, Bold],
                             ImageSize -> {380, 380},
@@ -224,9 +220,7 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                           FrameStyle -> GrayLevel[0.8],
                           ImageSize -> 400
                         ]
-                      ]
-                    ];
-                    display
+                    ]
                   ],
                 
                 plotType === "Light",
@@ -238,8 +232,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
               ];
               result
             ],
-            
-            (* Track cache *)
             TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel, plotCache},
             SynchronousUpdating -> False
           ]
@@ -260,10 +252,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
     }]
   ],
   
-  (* CRITICAL: Prevent saving cache state in notebook file *)
+  (* PERSISTENCE FIX *)
   UnsavedVariables :> {plotCache},
-  
-  (* Initialize cache cleanly on every load *)
   Initialization :> {
     plotCache = <||>;
   }
