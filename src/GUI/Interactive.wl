@@ -27,7 +27,7 @@ RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy",
   Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
 ];
 
-(* DEBUG PLOT: Инспектор кэша *)
+(* DEBUG PLOT: Инспектор кэша (Read-only) *)
 RegisterPlot["DebugCache", "Debug Cache Inspector", "Light",
   Function[{m},
     Module[{cache, eqPoints, freqs, isDirty},
@@ -37,15 +37,7 @@ RegisterPlot["DebugCache", "Debug Cache Inspector", "Light",
       freqs = Lookup[cache, "PlasmonFrequencies", "Missing"];
       
       Column[{
-        Row[{
-          Style["Numerical Cache Inspector", Bold, 16], 
-          Spacer[20],
-          Button["Force Recompute", 
-            m["Numerical", "IsDirty"] = True; (* Этот код выполнится в контексте Block *)
-            (* Мы не можем вызвать перерисовку отсюда легко, но IsDirty будет установлен *)
-            Print["Force Recompute Clicked. Switch plots to trigger."];
-          ]
-        }],
+        Style["Numerical Cache Inspector", Bold, 16], 
         Spacer[10],
         
         Style["Model Status:", Bold],
@@ -88,36 +80,38 @@ RegisterPlot["DebugCache", "Debug Cache Inspector", "Light",
 
 
 (* 
-   COMPUTE WORKER + SYNC
+   COMPUTE WORKER (FUNCTIONAL STYLE)
+   Input: plotId, model (Value)
+   Output: {Graphics, UpdatedModel (Value)}
 *)
-SetAttributes[ComputePlotData, HoldFirst];
-ComputePlotData[plotId_, model_Symbol] := 
+(* Note: No HoldFirst. Passing by value is safer for functional update. *)
+ComputePlotData[plotId_, model_Association] := 
   Block[{$CurrentModel = model},
     
-    (* 0. ЗАЩИТА ОТ ЗОМБИ-МОДЕЛИ *)
-    (* Если кэш пуст, но IsDirty=False, мы никогда ничего не посчитаем. *)
+    (* 0. Zombie Protection *)
     If[Length[$CurrentModel["Numerical", "Cache"]] === 0,
        $CurrentModel["Numerical", "IsDirty"] = True;
     ];
     
-    (* 1. ГАРАНТИРУЕМ ПРОГРЕВ КЭША *)
-    (* Всегда требуем PlasmonFrequencies, так как это базовый расчет *)
+    (* 1. Warm up Cache (Updates $CurrentModel internally) *)
     QED`Model`GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"];
     
     If[plotId === "Potential3D",
        QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]
     ];
     
-    (* 2. СИНХРОНИЗАЦИЯ ОБРАТНО *)
-    model["Numerical"] = $CurrentModel["Numerical"];
-    
-    (* 3. ВЫПОЛНЕНИЕ ОТРИСОВКИ *)
-    Module[{info, func},
+    (* 2. Compute Graphic using warmed model *)
+    Module[{info, func, graphic},
       info = $PlotRegistry[plotId];
-      If[MissingQ[info], Return[Graphics[{Red, Text["Unknown Plot ID"]}]]];
       
-      func = info["Compute"];
-      Check[func[$CurrentModel], Graphics[{Red, Text["Computation Failed"]}]]
+      graphic = If[MissingQ[info], 
+         Graphics[{Red, Text["Unknown Plot ID"]}],
+         func = info["Compute"];
+         Check[func[$CurrentModel], Graphics[{Red, Text["Computation Failed"]}]]
+      ];
+      
+      (* 3. Return Result AND The Updated Model State *)
+      {graphic, $CurrentModel}
     ]
   ];
 
@@ -125,13 +119,11 @@ ComputePlotData[plotId_, model_Symbol] :=
 (* 2. VIEW COMPONENTS: SLIDERS & CONTROLS *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-(* Извлечение интерактивных параметров из модели *)
 ExtractInteractiveParams[model_Association] :=
   Flatten[
     KeyValueMap[
       Function[{tag, componentParams},
         KeyValueMap[
-          (* Format: {Tag, ParamName, Value, {Min, Max, Step}} *)
           {tag, #1, #2["Value"], {#2["Min"], #2["Max"], #2["Step"]}} &,
           Select[componentParams, AssociationQ[#] && 
             Lookup[#, "Interactive", False] === True &]
@@ -142,7 +134,7 @@ ExtractInteractiveParams[model_Association] :=
     1
   ];
 
-(* Отрисовка одного слайдера с локальным Dynamic *)
+(* MakeParameterControl needs HoldFirst to update the local symbol from UI *)
 SetAttributes[MakeParameterControl, HoldFirst];
 MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
   Module[{currentVal = val},
@@ -180,7 +172,6 @@ MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate
     }]
   ];
 
-(* Панель управления *)
 SetAttributes[PlotControlPanel, HoldFirst];
 PlotControlPanel[model_, onUpdate_, onForceUpdate_] := 
   Module[{params},
@@ -246,14 +237,19 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
         Spacer[10],
         
         Dynamic[
+          (* 1. COMPUTE AND UPDATE STATE *)
           If[needsUpdate,
-             Module[{res},
-               res = ComputePlotData[selectedPlotId, currentModel];
+             Module[{res, updatedModel},
+               (* Functional Update: Get Result + New State *)
+               {res, updatedModel} = ComputePlotData[selectedPlotId, currentModel];
+               
                plotCache[selectedPlotId] = res;
+               currentModel = updatedModel; (* Explicitly update Dynamic variable *)
                needsUpdate = False;
              ]
           ];
           
+          (* 2. RENDER *)
           Module[{cached},
             cached = plotCache[selectedPlotId];
             
@@ -284,7 +280,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     plotCache = <||>;
     needsUpdate = True; 
     
-    (* Force Dirty on Init to avoid zombies *)
+    (* Force Dirty on Init *)
     currentModel["Numerical", "IsDirty"] = True;
   },
   SynchronousInitialization -> False,
