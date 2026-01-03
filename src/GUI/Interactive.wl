@@ -65,6 +65,8 @@ ExtractInteractiveParams[model_Association] :=
   ];
 
 (* Отрисовка одного слайдера с локальным Dynamic *)
+(* ВАЖНО: HoldFirst нужен, чтобы model передавалась как символ, а не значение *)
+SetAttributes[MakeParameterControl, HoldFirst];
 MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
   Module[{currentVal = val},
     Row[{
@@ -77,7 +79,7 @@ MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate
           
           (* SETTER FUNCTION *)
           Function[{v},
-            (* 1. Update Model (Reference) *)
+            (* 1. Update Model (Reference via Symbol) *)
             model["Primary", tag, param, "Value"] = v;
             model["Numerical", "IsDirty"] = True;
             
@@ -108,13 +110,18 @@ MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate
   ];
 
 (* Панель управления: Слайдеры + Кнопка обновления *)
+(* ВАЖНО: HoldFirst нужен, чтобы пробросить символ model в MakeParameterControl *)
+SetAttributes[PlotControlPanel, HoldFirst];
 PlotControlPanel[model_, onUpdate_, onForceUpdate_] := 
   Module[{params},
+    (* Здесь model ВЫЧИСЛЯЕТСЯ, чтобы получить список параметров. 
+       Это нормально, нам нужны данные для построения UI. *)
     params = ExtractInteractiveParams[model];
     
     Column[
       Join[
         (* List of Sliders *)
+        (* Map передает model (символ) в MakeParameterControl *)
         Map[
           MakeParameterControl[model, #, onUpdate] &,
           params
@@ -157,8 +164,8 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
           Spacer[10],
           
           (* Sliders *)
+          (* Здесь currentModel передается как символ благодаря HoldFirst у PlotControlPanel *)
           PlotControlPanel[
-            (* Pass model by reference (symbol) to allow modification *)
             currentModel, 
             
             (* onUpdate: Invalidate Cache *)
