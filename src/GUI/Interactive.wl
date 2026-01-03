@@ -1,8 +1,6 @@
 BeginPackage["QED`Interactive`", {"QED`Model`"}];
 
 QubitDashboard::usage = "QubitDashboard[{models..}] - интерактивная панель управления для списка моделей.";
-
-(* PUBLIC API для расширения графиков *)
 RegisterPlot::usage = "RegisterPlot[id, label, type, computeFunc] регистрирует новый тип графика.";
 
 Begin["`Private`"];
@@ -11,17 +9,16 @@ Begin["`Private`"];
 (* 1. BACKEND: PLOT REGISTRY & COMPUTE SYSTEM *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-(* Хранилище метаданных графиков *)
 $PlotRegistry = <||>;
 
 RegisterPlot[id_String, label_String, type_String, computeFunc_] := 
   ($PlotRegistry[id] = <|
     "Label" -> label, 
-    "Type" -> type,       (* "Light" (auto) или "Heavy" (manual) *)
+    "Type" -> type,
     "Compute" -> computeFunc
   |>);
 
-(* Базовые графики регистрируем при загрузке пакета *)
+(* Регистрация базовых графиков *)
 RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light", 
   Function[{m}, QED`Plots`PlotPlasmonSpectrum[m]]
 ];
@@ -30,63 +27,214 @@ RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy",
   Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
 ];
 
-(* Безопасная функция вычисления *)
+(* 
+   COMPUTE WORKER 
+   Использует Block[{$CurrentModel}] для корректной работы 
+   SubstitutionRules, которые ссылаются на глобальный контекст.
+*)
 ComputePlotData[plotId_, model_] := 
-  Module[{info, func},
-    info = $PlotRegistry[plotId];
-    If[MissingQ[info], Return[Graphics[{Red, Text["Unknown Plot ID"]}]]];
-    
-    func = info["Compute"];
-    (* Выполняем вычисление *)
-    Check[func[model], Graphics[{Red, Text["Computation Failed"]}]]
+  Block[{$CurrentModel = model},
+    Module[{info, func},
+      info = $PlotRegistry[plotId];
+      If[MissingQ[info], Return[Graphics[{Red, Text["Unknown Plot ID"]}]]];
+      
+      func = info["Compute"];
+      Check[func[model], Graphics[{Red, Text["Computation Failed"]}]]
+    ]
   ];
 
 (* ═══════════════════════════════════════════════════════════════ *)
-(* 2. CORE: DASHBOARD SHELL (SKELETON) *)
+(* 2. VIEW COMPONENTS: SLIDERS & CONTROLS *)
+(* ═══════════════════════════════════════════════════════════════ *)
+
+(* Извлечение интерактивных параметров из модели *)
+ExtractInteractiveParams[model_Association] :=
+  Flatten[
+    KeyValueMap[
+      Function[{tag, componentParams},
+        KeyValueMap[
+          (* Format: {Tag, ParamName, Value, {Min, Max, Step}} *)
+          {tag, #1, #2["Value"], {#2["Min"], #2["Max"], #2["Step"]}} &,
+          Select[componentParams, AssociationQ[#] && 
+            Lookup[#, "Interactive", False] === True &]
+        ]
+      ],
+      model["Primary"]
+    ],
+    1
+  ];
+
+(* Отрисовка одного слайдера с локальным Dynamic *)
+MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
+  Module[{currentVal = val},
+    Row[{
+      Style[param <> ": ", 12],
+      
+      (* Slider manipulates LOCAL variable inside Module *)
+      Slider[
+        Dynamic[
+          model["Primary", tag, param, "Value"], 
+          
+          (* SETTER FUNCTION *)
+          Function[{v},
+            (* 1. Update Model (Reference) *)
+            model["Primary", tag, param, "Value"] = v;
+            model["Numerical", "IsDirty"] = True;
+            
+            (* 2. Trigger Callback (for cache invalidation) *)
+            onUpdate[]
+          ]
+        ],
+        {min, max, step},
+        ImageSize -> 120
+      ],
+      
+      Spacer[5],
+      
+      (* InputField for precision *)
+      InputField[
+        Dynamic[
+          model["Primary", tag, param, "Value"],
+          Function[{v},
+            model["Primary", tag, param, "Value"] = v;
+            model["Numerical", "IsDirty"] = True;
+            onUpdate[]
+          ]
+        ],
+        Number, 
+        FieldSize -> {5, 1}
+      ]
+    }]
+  ];
+
+(* Панель управления: Слайдеры + Кнопка обновления *)
+PlotControlPanel[model_, onUpdate_, onForceUpdate_] := 
+  Module[{params},
+    params = ExtractInteractiveParams[model];
+    
+    Column[
+      Join[
+        (* List of Sliders *)
+        Map[
+          MakeParameterControl[model, #, onUpdate] &,
+          params
+        ],
+        
+        {Spacer[10],
+         (* Manual Update Button *)
+         Button["Update Plot", 
+           onForceUpdate[],
+           Method -> "Queued",
+           ImageSize -> {140, 30}
+         ]}
+      ]
+    ]
+  ];
+
+(* ═══════════════════════════════════════════════════════════════ *)
+(* 3. CORE: QUBIT DASHBOARD *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
 QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   {
-    (* State *)
+    (* STATE *)
     currentModel = First[modelsStack],
     selectedPlotId = "PlasmonSpectrum",
+    needsUpdate = False, (* Signal for Heavy plots *)
     
-    (* Cache (Transient) *)
+    (* CACHE (Transient) *)
     plotCache
   },
   
-  (* VIEW *)
+  (* VIEW LAYOUT *)
   Column[{
-    (* Header: Model Info *)
-    Dynamic @ Style["Model: " <> ToString[currentModel["Topology"]["Type"]], Bold, 16],
-    
-    (* Debug: Cache Status *)
-    Dynamic @ Row[{"Cache Keys: ", Keys[plotCache]}],
-    
-    (* Content Placeholder *)
-    Dynamic @ Panel[
+    Row[{
+      (* LEFT PANEL: Controls *)
+      Panel[
+        Column[{
+          (* Model Selector *)
+          Style["Model: " <> ToString[currentModel["Topology"]["Name"]], Bold],
+          Spacer[10],
+          
+          (* Sliders *)
+          PlotControlPanel[
+            (* Pass model by reference (symbol) to allow modification *)
+            currentModel, 
+            
+            (* onUpdate: Invalidate Cache *)
+            Function[{}, 
+               (* If Light plot -> Auto-update immediately *)
+               If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
+                  needsUpdate = True,
+                  (* If Heavy -> Just clear cache *)
+                  plotCache[selectedPlotId] = Missing["Stale"]
+               ]
+            ],
+            
+            (* onForceUpdate: Button Click *)
+            Function[{}, needsUpdate = True]
+          ]
+        }],
+        Alignment -> Top
+      ],
+      
+      Spacer[20],
+      
+      (* RIGHT PANEL: Plot Area *)
       Column[{
-        "Selected Plot: " <> selectedPlotId,
-        ActionMenu["Choose Plot", 
-          KeyValueMap[#1 :> (selectedPlotId = #1) &, $PlotRegistry]
+        (* Plot Selector *)
+        Row[{
+           "Plot Type: ",
+           PopupMenu[Dynamic[selectedPlotId], Keys[$PlotRegistry]]
+        }],
+        Spacer[10],
+        
+        (* PLOT RENDERER *)
+        Dynamic[
+          (* 1. Check if we need to compute *)
+          If[needsUpdate,
+             (* Compute *)
+             Module[{res},
+               res = ComputePlotData[selectedPlotId, currentModel];
+               plotCache[selectedPlotId] = res;
+               needsUpdate = False;
+             ]
+          ];
+          
+          (* 2. Render *)
+          Module[{cached},
+            cached = plotCache[selectedPlotId];
+            
+            Switch[cached,
+              _Graphics | _Graphics3D | _Legended, cached,
+              
+              Missing["Stale"], 
+              Panel[Style["Parameters changed. Press Update.", Gray], ImageSize->{300,300}],
+              
+              _, (* Initial state or missing *)
+              If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
+                 needsUpdate = True; "Computing...", (* Auto-start light plots *)
+                 Panel[Style["Select plot to start", Gray], ImageSize->{300,300}]
+              ]
+            ]
+          ],
+          
+          TrackedSymbols :> {needsUpdate, selectedPlotId, plotCache}
         ]
-      }]
-    ]
+      }, Alignment -> Top]
+    }, Alignment -> Top],
+    
+    (* DEBUG FOOTER *)
+    Dynamic @ Row[{"Cache: ", Keys[plotCache], " | Update: ", needsUpdate}]
   }],
   
   (* CONFIGURATION *)
-  (* 1. Cache is transient, never saved to file *)
-  UnsavedVariables :> {plotCache},
-  
-  (* 2. Clean initialization on every kernel start *)
+  UnsavedVariables :> {plotCache, needsUpdate},
   Initialization :> {
     plotCache = <||>;
+    needsUpdate = True; (* Force first render *)
   },
-  
-  (* 3. Do not block UI loading *)
   SynchronousInitialization -> False,
-  
-  (* 4. Rely on package definitions, do not embed functions *)
   SaveDefinitions -> False
 ];
 
