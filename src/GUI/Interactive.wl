@@ -1,166 +1,94 @@
 BeginPackage["QED`Interactive`", {"QED`Model`"}];
-(* BeginPackage["QED`Interactive`"]; *)
 
+QubitDashboard::usage = "QubitDashboard[{models..}] - интерактивная панель управления для списка моделей.";
 
-QubitDashboard::usage = "QubitDashboard[model ] - интерактивная панель управления";
-
+(* PUBLIC API для расширения графиков *)
+RegisterPlot::usage = "RegisterPlot[id, label, type, computeFunc] регистрирует новый тип графика.";
 
 Begin["`Private`"];
 
-
-
 (* ═══════════════════════════════════════════════════════════════ *)
-(* ЛОГИКА *)
+(* 1. BACKEND: PLOT REGISTRY & COMPUTE SYSTEM *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-ExtractInteractiveParams[model_Association] :=
-  Flatten[
-    KeyValueMap[
-      Function[{tag, componentParams},
-        KeyValueMap[
-          {tag, #1, #2["Value"], {#2["Min"], #2["Max"], #2["Step"]}} &,
-          Select[componentParams, AssociationQ[#] && 
-          	Lookup[#, "Interactive", False] === True &]
-        ]
-      ],
-      model["Primary"]
-    ],
-    1
+(* Хранилище метаданных графиков *)
+$PlotRegistry = <||>;
+
+RegisterPlot[id_String, label_String, type_String, computeFunc_] := 
+  ($PlotRegistry[id] = <|
+    "Label" -> label, 
+    "Type" -> type,       (* "Light" (auto) или "Heavy" (manual) *)
+    "Compute" -> computeFunc
+  |>);
+
+(* Базовые графики регистрируем при загрузке пакета *)
+RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light", 
+  Function[{m}, QED`Plots`PlotPlasmonSpectrum[m]]
+];
+
+RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy", 
+  Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
+];
+
+(* Безопасная функция вычисления *)
+ComputePlotData[plotId_, model_] := 
+  Module[{info, func},
+    info = $PlotRegistry[plotId];
+    If[MissingQ[info], Return[Graphics[{Red, Text["Unknown Plot ID"]}]]];
+    
+    func = info["Compute"];
+    (* Выполняем вычисление *)
+    Check[func[model], Graphics[{Red, Text["Computation Failed"]}]]
   ];
 
-
 (* ═══════════════════════════════════════════════════════════════ *)
-(* ОФОРМЛЕНИЕ *)
+(* 2. CORE: DASHBOARD SHELL (SKELETON) *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-
-(*Создать слайдер*)	
-MakeDynamicSlider[model_, componentTag_, paramName_, currentValue_, 
-				 {min_, max_, step_}] :=
-  With[{
-    d = Dynamic[
-      model["Primary"][componentTag][paramName]["Value"], 
-      (model["Primary"][componentTag][paramName]["Value"] = #;
-      model["Numerical"]["IsDirty"] = True;
-      $CurrentModel["Primary"][componentTag][paramName]["Value"] = #;
-      $CurrentModel["Numerical"]["IsDirty"] = True;) &
-    ]
+QubitDashboard[modelsStack : {__Association}] := DynamicModule[
+  {
+    (* State *)
+    currentModel = First[modelsStack],
+    selectedPlotId = "PlasmonSpectrum",
+    
+    (* Cache (Transient) *)
+    plotCache
   },
-    Row[{
-      componentTag <> "." <> paramName <> ": ",
-      Slider[d, {min, max, step}],
-      InputField[d, Number, FieldSize -> {6, 1}]
-    }]
-  ];
-		
-	
-(*Создает массив слайдеров*)	
-MakeSliderHub[model_] := Module[{params},
-	params = ExtractInteractiveParams[model];
-	  Column[
-	    Map[
-	      Function[{paramList},
-	        MakeDynamicSlider[Unevaluated@model, Sequence @@ paramList]
-	      ],
-	      params
-	    ]
-	  ]
-];
-
-
-(*Кнопка выбора работы*)  
-SelectModel[model_, modelsStack_] :=
-  Row[{
-    Pane[
-      SetterBar[
-        Dynamic[model, (model = #; $CurrentModel = #) &],
-        	  MapThread[#2 -> #1 &,
-		    {Query[All, "Image"][modelsStack],
-		    	 modelsStack}
-        ],
-        Appearance -> "Vertical"
-      ],
-      ImageSize -> {All, 200},
-      Scrollbars -> {False, True}
-    ],
-    
-    Dynamic[
-      Graphics[
-        model["Image"],
-        ImageSize -> {All, 200}
-      ],
-      TrackedSymbols :> {model}
-    ]
-  }];
-
-
-(*s_Symbol :> Symbol[SymbolName[s]]*)
-
-
-QubitDashboard[modelsStack : {Association__}] := DynamicModule[
-  {model = First@modelsStack, needsUpdate = False},
   
+  (* VIEW *)
   Column[{
-    (* ═══════════════════════════════════════════════════════════ *)
-    (* ГЛАВНАЯ СТРОКА: Слайдеры слева, График справа               *)
-    (* ═══════════════════════════════════════════════════════════ *)
-    Row[{
-      (* ЛЕВАЯ КОЛОНКА: Выбор модели + Слайдеры + Кнопка *)
+    (* Header: Model Info *)
+    Dynamic @ Style["Model: " <> ToString[currentModel["Topology"]["Name"]], Bold, 16],
+    
+    (* Debug: Cache Status *)
+    Dynamic @ Row[{"Cache Keys: ", Keys[plotCache]}],
+    
+    (* Content Placeholder *)
+    Dynamic @ Panel[
       Column[{
-        SelectModel[Unevaluated@model, modelsStack],
-        MakeSliderHub[Unevaluated@model],
-        
-        (* Кнопка обновления графика *)
-        Button["Update 3D Plot",
-          needsUpdate = True,  (* ← Установить флаг *)
-          Method -> "Queued"
+        "Selected Plot: " <> selectedPlotId,
+        ActionMenu["Choose Plot", 
+          KeyValueMap[#1 :> (selectedPlotId = #1) &, $PlotRegistry]
         ]
-      },
-      Alignment -> Top
-      ],
-      
-      Spacer[20],  (* Пробел между колонками *)
-      
-      (* ПРАВАЯ КОЛОНКА: График *)
-      Dynamic[
-        If[needsUpdate,
-          (* Пересчитать кэш *)
-          $CurrentModel["Numerical"]["IsDirty"] = True;
-          GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"];
-          needsUpdate = False;
-        ];
-        
-        (* Показать график *)
-        (* GetNumericalQuantity[$CurrentModel, "PlotPotentialSlices3D"], *)
-        QED`Plots`PlotPlasmonSpectrum[$CurrentModel],
-        
-        TrackedSymbols :> {needsUpdate},
-  		SynchronousUpdating -> False
-      ]
-    },
-    Alignment -> Top  (* Выравнивание по верху *)
-    ],
-    
-    Spacer[10],  (* Пробел перед данными *)
-    
-    (* ═══════════════════════════════════════════════════════════ *)
-    (* НИЖНЯЯ СЕКЦИЯ: Hamiltonian и Equilibrium Fluxes            *)
-    (* ═══════════════════════════════════════════════════════════ *)
-    Dynamic[
-      Column[{
-        "PlasmonFrequencies:",
-        GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"],
-        "Equilibrium Fluxes:",
-        GetNumericalQuantity[$CurrentModel, "EquilibriumFluxes"] /. 
-          (a_ -> b_) :> (a -> b/(2.067833848 * 10.^-15)),
-        GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"],
-        $CurrentModel["SubstitutionRules"] // Values
-      }],
-      TrackedSymbols :> {$CurrentModel}
+      }]
     ]
-  }]
+  }],
+  
+  (* CONFIGURATION *)
+  (* 1. Cache is transient, never saved to file *)
+  UnsavedVariables :> {plotCache},
+  
+  (* 2. Clean initialization on every kernel start *)
+  Initialization :> {
+    plotCache = <||>;
+  },
+  
+  (* 3. Do not block UI loading *)
+  SynchronousInitialization -> False,
+  
+  (* 4. Rely on package definitions, do not embed functions *)
+  SaveDefinitions -> False
 ];
-
 
 End[];
 EndPackage[];
