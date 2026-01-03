@@ -84,7 +84,6 @@ RegisterPlot["DebugCache", "Debug Cache Inspector", "Light",
    Input: plotId, model (Value)
    Output: {Graphics, UpdatedModel (Value)}
 *)
-(* Note: No HoldFirst. Passing by value is safer for functional update. *)
 ComputePlotData[plotId_, model_Association] := 
   Block[{$CurrentModel = model},
     
@@ -139,7 +138,8 @@ SetAttributes[MakeParameterControl, HoldFirst];
 MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
   Module[{currentVal = val},
     Row[{
-      Style[param <> ": ", 12],
+      (* RESTORED STYLE FROM DEVELOP: Tag.Param label *)
+      Style[tag <> "." <> param <> ": ", 12],
       
       Slider[
         Dynamic[
@@ -167,7 +167,7 @@ MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate
           ]
         ],
         Number, 
-        FieldSize -> {5, 1}
+        FieldSize -> {6, 1} (* RESTORED: Size 6x1 *)
       ]
     }]
   ];
@@ -210,6 +210,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     Row[{
       Panel[
         Column[{
+          (* Simple Model Title - Will be replaced by Popup in next step *)
           Style["Model: " <> ToString[currentModel["Topology"]["Name"]], Bold],
           Spacer[10],
           
