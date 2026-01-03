@@ -241,25 +241,26 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                   
                   (* Отображение *)
                   Module[{display},
-                    AppendTo[$DebugLog, {"KeyExistsQ", KeyExistsQ[plotCache, selectedPlot]}];
-                    
-                    display = If[KeyExistsQ[plotCache, selectedPlot],
-                      Module[{cached},
-                        cached = plotCache[selectedPlot]["Plot"];
-                        AppendTo[$DebugLog, {"Retrieved", Head[cached]}];
-                        cached
-                      ],
-                      
-                      AppendTo[$DebugLog, "ShowingPlaceholder"];
-                      Framed[
-                        Pane[
-                          Style["Click 'Update Plot' to compute", 16, Gray, Bold],
-                          ImageSize -> {380, 380},
-                          Alignment -> Center
+                    (* ATOMIC ACCESS FIX: Use With/AssociationQ to prevent check-then-act race conditions *)
+                    display = With[{entry = plotCache[selectedPlot]},
+                      If[AssociationQ[entry],
+                        Module[{cached},
+                          cached = entry["Plot"];
+                          AppendTo[$DebugLog, {"Retrieved", Head[cached]}];
+                          cached
                         ],
-                        Background -> GrayLevel[0.97],
-                        FrameStyle -> GrayLevel[0.8],
-                        ImageSize -> 400
+                        
+                        AppendTo[$DebugLog, "ShowingPlaceholder"];
+                        Framed[
+                          Pane[
+                            Style["Click 'Update Plot' to compute", 16, Gray, Bold],
+                            ImageSize -> {380, 380},
+                            Alignment -> Center
+                          ],
+                          Background -> GrayLevel[0.97],
+                          FrameStyle -> GrayLevel[0.8],
+                          ImageSize -> 400
+                        ]
                       ]
                     ];
                     
