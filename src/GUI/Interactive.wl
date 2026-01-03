@@ -27,6 +27,53 @@ RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy",
   Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
 ];
 
+(* DEBUG PLOT: Инспектор кэша *)
+RegisterPlot["DebugCache", "Debug Cache Inspector", "Light",
+  Function[{m},
+    Module[{cache, eqPoints, freqs},
+      cache = m["Numerical", "Cache"];
+      eqPoints = Lookup[cache, "EquilibriumPoints", "Missing"];
+      freqs = Lookup[cache, "PlasmonFrequencies", "Missing"];
+      
+      Column[{
+        Style["Numerical Cache Inspector", Bold, 16],
+        Spacer[10],
+        
+        Style["Cache Keys:", Bold],
+        If[AssociationQ[cache], Keys[cache], "Not an Association"],
+        Spacer[10],
+        
+        Style["EquilibriumPoints Entry:", Bold],
+        If[AssociationQ[eqPoints], 
+           Column[{
+             "State: " <> ToString[eqPoints["State"]],
+             "Solutions Count: " <> If[KeyExistsQ[eqPoints, "Value"], 
+                 ToString[Length[eqPoints["Value"]["Solutions"]]], 
+                 "No Value"
+             ]
+           }], 
+           eqPoints
+        ],
+        Spacer[10],
+        
+        Style["PlasmonFrequencies Entry:", Bold],
+        If[AssociationQ[freqs], 
+           Column[{
+             "State: " <> ToString[freqs["State"]],
+             "Value: " <> ToString[Short[freqs["Value"]]]
+           }], 
+           freqs
+        ],
+        
+        Spacer[20],
+        Style["Raw Cache Dump:", Bold],
+        Pane[Short[cache, 20], {400, 300}, Scrollbars -> True]
+      }]
+    ]
+  ]
+];
+
+
 (* 
    COMPUTE WORKER + SYNC
    1. Подменяем $CurrentModel на локальную.
