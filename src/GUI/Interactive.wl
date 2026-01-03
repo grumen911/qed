@@ -119,24 +119,22 @@ SelectModel[model_, modelsStack_] :=
 
 QubitDashboard[modelsStack : {Association__}] := DynamicModule[
   {
-    (* FIX: Define cache BEFORE model to prevent value leaking during init *)
-    cacheContainer = <|"Storage" -> <||>|>,
-    
     model = First@modelsStack,
     selectedPlot = "PlasmonSpectrum",
     needsUpdate = False,
-    plotRegistry = InitPlotRegistry[]
+    plotRegistry = InitPlotRegistry[],
+    (* Uninitialized variable for cache *)
+    plotCache
   },
   
   (* Helper: Invalidate all Heavy plots in cache *)
   Module[{invalidateHeavyPlots},
     
     invalidateHeavyPlots[] := Module[{},
-      (* Access via "Storage" key to ensure we are inside container *)
       Do[
         If[plotRegistry[plotID]["Type"] === "Heavy" && 
-           KeyExistsQ[cacheContainer["Storage"], plotID],
-          cacheContainer["Storage", plotID, "Status"] = "Stale"
+           KeyExistsQ[plotCache, plotID],
+          plotCache[plotID]["Status"] = "Stale"
         ],
         {plotID, Keys[plotRegistry]}
       ];
@@ -182,12 +180,6 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
           
           (* Plot display area *)
           Dynamic[
-            (* Sanity Check: Ensure container structure is intact *)
-            If[!AssociationQ[cacheContainer] || !KeyExistsQ[cacheContainer, "Storage"],
-               cacheContainer = <|"Storage" -> <||>|>;
-               AppendTo[$DebugLog, "CONTAINER_RESET"]
-            ];
-
             Module[{plotInfo, plotType, result},
               plotInfo = plotRegistry[selectedPlot];
               plotType = plotInfo["Type"];
@@ -201,8 +193,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                     Module[{computed},
                       computed = plotInfo["Compute"][$CurrentModel];
                       
-                      (* Write to Container *)
-                      cacheContainer["Storage", selectedPlot] = <|
+                      (* Write to Cache *)
+                      plotCache[selectedPlot] = <|
                         "Plot" -> computed,
                         "Status" -> "UpToDate",
                         "Timestamp" -> Now
@@ -214,16 +206,12 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
                     needsUpdate = False;
                   ];
                   
-                  (* Read from Container *)
+                  (* Read from Cache *)
                   Module[{display},
-                    display = With[{storage = cacheContainer["Storage"]},
-                      If[KeyExistsQ[storage, selectedPlot],
-                        With[{entry = storage[selectedPlot]},
-                           If[AssociationQ[entry],
-                              entry["Plot"],
-                              Framed[Style["Invalid Cache Entry", Red]]
-                           ]
-                        ],
+                    (* Clean Atomic Access *)
+                    display = With[{entry = plotCache[selectedPlot]},
+                      If[AssociationQ[entry],
+                        entry["Plot"],
                         
                         (* Placeholder *)
                         Framed[
@@ -251,8 +239,8 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
               result
             ],
             
-            (* Track container *)
-            TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel, cacheContainer},
+            (* Track cache *)
+            TrackedSymbols :> {needsUpdate, selectedPlot, $CurrentModel, plotCache},
             SynchronousUpdating -> False
           ]
 
@@ -270,7 +258,15 @@ QubitDashboard[modelsStack : {Association__}] := DynamicModule[
         TrackedSymbols :> {$CurrentModel}
       ]
     }]
-  ]
+  ],
+  
+  (* CRITICAL: Prevent saving cache state in notebook file *)
+  UnsavedVariables :> {plotCache},
+  
+  (* Initialize cache cleanly on every load *)
+  Initialization :> {
+    plotCache = <||>;
+  }
 ];
 
 End[];
