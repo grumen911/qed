@@ -68,46 +68,19 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
 (* NEW: Symbolic WaveFunction Inspector *)
 RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic WaveFunction", "Light",
   Function[{m},
-    Module[{state, psiSymbolic, psiFormula, hbarVal},
+    Module[{state, psiFormula},
       (* Default to ground state *)
       state = ConstantArray[0, QED`Model`GetDegreesOfFreedom[m]];
       
-      (* We can't use GetWaveFunction directly because it might substitute numbers immediately 
-         if we are not careful. But typically GetWaveFunction returns an expression with symbols 
-         if the model parameters are symbolic. 
-         
-         Actually, GetWaveFunction(model, state) returns expression with substituted values 
-         if called on a model with active substitution rules.
-         
-         To get purely symbolic form, we should look at model["Analytical"]["WaveFunctions"]["Formula"]
-         if it exists, or reconstruct it.
-      *)
-      
-      (* Let's try to get the semi-symbolic form (with numbers for C, L, but symbols for phi) *)
+      (* Get the wavefunction expression *)
       psiFormula = QED`Model`GetWaveFunction[m, state];
       
       If[FailureQ[psiFormula], 
-         Return[Style["Failed to generate wavefunction.", Red]]
+         Return["Failed to generate wavefunction."]
       ];
       
-      (* Format nicely *)
-      Column[{
-        Style["Ground State Wavefunction (Substituted Parameters)", Bold, 14],
-        Spacer[10],
-        Style["State: " <> ToString[state], Italic],
-        Spacer[10],
-        
-        (* Use Pane to handle large expressions *)
-        Pane[
-          Style[psiFormula, FontFamily -> "Consolas", 11], 
-          {500, 400}, 
-          Scrollbars -> True, 
-          AppearanceElements -> All
-        ],
-        
-        Spacer[10],
-        Button["Copy to Clipboard", CopyToClipboard[psiFormula]]
-      }]
+      (* Return RAW expression without styling - WL will render it nicely *)
+      psiFormula
     ]
   ]
 ];
