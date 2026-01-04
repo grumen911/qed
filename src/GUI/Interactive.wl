@@ -84,7 +84,7 @@ RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic Wave Function", "Light",
 
       (* Keep expression on one line: horizontal scrolling instead of wrapping *)
       Pane[
-        Defer[psiFormula],
+        psiFormula,
         ImageSize -> {700, 300},
         Scrollbars -> True,
         BaseStyle -> {LineBreakWithin -> False}
