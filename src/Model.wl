@@ -13,6 +13,8 @@ GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]"
 UpdatePrimaryParam::usage = "UpdatePrimaryParam[model, path, value]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
+GetWaveFunction::usage = "GetWaveFunction[model, quantumNumbers] returns the analytical wavefunction \
+Psi[phi1, phi2, ...] for the specified state {n1, n2, ...} in physical flux coordinates.";
 
 $CurrentModel::usage = "Global reference to the active circuit model for substitution rules";
 
@@ -473,7 +475,7 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     (* ════════════════════════════════════════════════════════════ *)
     
     If[cache["InverseCapacitanceMatrix"]["State"] === "Ready" && 
-       cache["InductanceMatrixNumerical"]["State"] === "Ready",
+       cache["InductanceMatrixInverseNumerical"]["State"] === "Ready",
       
       Module[{invC, invL, result},
         invC = cache["InverseCapacitanceMatrix"]["Value"];
@@ -512,15 +514,21 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
 	If[cache["InverseCapacitanceMatrix"]["State"] === "Ready" && 
 	   cache["InductanceMatrixInverseNumerical"]["State"] === "Ready",
 	  
-	  Module[{invC, invL, diag},
+	  Module[{invC, invL, diag, mCharge, invCdiag, effCaps},
 	    invC = cache["InverseCapacitanceMatrix"]["Value"];
 	    invL = cache["InductanceMatrixInverseNumerical"]["Value"];
 	    
 	    diag = DiagonalizeHarmonicHamiltonian[invC, invL];
 	    
+	    (* NEW: Calculate effective capacitances from M matrix *)
+	    mCharge = diag["ChargeTransform"];
+	    invCdiag = Transpose[mCharge] . invC . mCharge;
+	    effCaps = 1.0 / Diagonal[invCdiag];
+	    
+	    (* Store extended results *)
 	    cache["HarmonicDiagonalization"] = <|
 	      "State" -> "Ready",
-	      "Value" -> diag
+	      "Value" -> Append[diag, "EffectiveCapacitances" -> effCaps]
 	    |>
 	  ],
 	  
@@ -675,6 +683,40 @@ UpdatePrimaryParam[model_Association, path_List, newValue_] :=
   ];
   
 GetAnalyticalParams[model_Association] := model["Analytical"]
+
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║             API: WAVEFUNCTIONS                                 ║ *)
+(* ╚════════════════════════════════════════════════════════════════ *)
+
+GetWaveFunction[model_Association, quantumNumbers_List] := 
+ Module[{diagData, frequencies, effCaps, transform, topology, subRules, psiSymbolic},
+  
+  (* 1. Получить данные диагонализации *)
+  diagData = GetNumericalQuantity[model, "HarmonicDiagonalization"];
+  If[diagData === $Failed, Return[$Failed]];
+  
+  frequencies = diagData["NormalModeFrequencies"];
+  effCaps = diagData["EffectiveCapacitances"];
+  transform = diagData["FluxTransform"];
+  
+  topology = model["Topology"];
+  subRules = model["SubstitutionRules"];
+  
+  (* 2. Построить символьное выражение с подставленными коэффициентами *)
+  psiSymbolic = QED`Analytic`BuildHarmonicWavefunction[
+    topology,
+    frequencies,
+    effCaps,
+    transform,
+    quantumNumbers
+  ];
+  
+  (* 3. Подставить значения равновесных потоков (φ_min), чтобы получить чистую функцию от φ *)
+  (* Используем subRules, которые содержат правила для minSymbols *)
+  psiSymbolic //. subRules
+ ];
+
 
 (* Удобный доступ ко всем параметрам *)
 GetAllParams[model_Association] := <|
