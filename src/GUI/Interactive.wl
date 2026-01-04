@@ -1,4 +1,4 @@
-BeginPackage["QED`Interactive`", {"QED`Model`"}];
+BeginPackage["QED`Interactive`", {"QED`Model`", "QED`Numeric`"}];
 
 QubitDashboard::usage = "QubitDashboard[{models..}] - интерактивная панель управления для списка моделей.";
 RegisterPlot::usage = "RegisterPlot[id, label, type, computeFunc] регистрирует новый тип графика.";
@@ -25,6 +25,44 @@ RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light",
 
 RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy", 
   Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
+];
+
+(* NEW: Schrödinger Equation Verification Tool *)
+RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
+  Function[{m},
+    Module[{states, report, grid},
+      states = {{0,0,0}, {1,0,0}, {0,1,0}}; (* Default states to check *)
+      (* Adjust for actual DOF *)
+      states = Select[states, Length[#] == QED`Model`GetDegreesOfFreedom[m] &];
+      If[states === {}, states = {ConstantArray[0, QED`Model`GetDegreesOfFreedom[m]]}];
+      
+      report = Map[
+        Function[s, 
+          QED`Numeric`VerifyWaveFunction[m, s]
+        ],
+        states
+      ];
+      
+      (* Render Report Table *)
+      Grid[
+        Prepend[
+          Map[
+            Function[r, {
+              r["State"], 
+              If[r["Pass"], Style["PASS", Green, Bold], Style["FAIL", Red, Bold]],
+              ScientificForm[r["MaxError"], 3],
+              r["TestedPoints"]
+            }],
+            report
+          ],
+          {Style["State", Bold], Style["Status", Bold], Style["Max Error", Bold], Style["Points", Bold]}
+        ],
+        Frame -> All,
+        Background -> {None, {Lighter[Gray, 0.8], None}},
+        ItemSize -> {Automatic, 1.5}
+      ]
+    ]
+  ]
 ];
 
 (* DEBUG PLOT: Инспектор кэша (Read-only) *)
