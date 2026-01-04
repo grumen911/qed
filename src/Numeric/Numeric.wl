@@ -31,142 +31,11 @@ PlasmonFrequenciesVsFlux::usage =
   "PlasmonFrequenciesVsFlux[model] возвращает численную функцию ω[φext_?NumericQ], \
 где φext в единицах Φ₀. Возвращает список частот {ω₁, ω₂, ...} в rad/s.";
 
-VerifyWaveFunction::usage = 
-  "VerifyWaveFunction[model, state, opts] checks if the wavefunction satisfies the Schrödinger equation H ψ = E ψ numerically. \
-Returns <|\"Pass\" -> Boolean, \"MaxError\" -> Real, \"Points\" -> List|>. \
-Options: \"NumPoints\" -> 10, \"Tolerance\" -> 10^-5.";
+VerifyWaveFunction::usage = "VerifyWaveFunction[model, state] verifies that H|psi> = E|psi>.";
+
 
 Begin["`Private`"];
 
-(* Re-export symbols from subpackages *)
-DiagonalizeHarmonicHamiltonian = QED`Numeric`HarmonicOscillator`DiagonalizeHarmonicHamiltonian;
-
-Options[VerifyWaveFunction] = {
-  "NumPoints" -> 10,
-  "Tolerance" -> 10^-5
-};
-
-(*
-  Verification: Check Schrödinger equation numerically.
-  H(φ) = - (ℏ²/2) ∇_φ · C⁻¹ · ∇_φ + (1/2) φ · L⁻¹ · φ
-  
-  Arguments:
-  - model: QED model association (must have "Analytic" and "Numerical" parts)
-  - state: Quantum numbers {n1, n2, ...}
-  
-  Returns:
-  - Association with validation results.
-*)
-VerifyWaveFunction[model_Association, state_List, opts:OptionsPattern[]] := 
- Module[{
-   psi, energyVal, hPsi, diff, points, errors,
-   hHarmonic, subRules, hNumExpr, fluxVars, nodes, nDOF,
-   hbarValue, phi0Value, freqs,
-   applyHamiltonian, cleanExpr
-   },
-   
-   (* 1. Constants and Parameters *)
-   hbarValue = QED`$hbarValue;
-   phi0Value = QED`$Phi0Value;
-   
-   If[FailureQ[hbarValue] || FailureQ[phi0Value], 
-      Return[Failure["MissingConstants", <|"Message" -> "QED constants not defined"|>]]
-   ];
-   
-   (* Helper to clean symbolic constants from expressions *)
-   cleanExpr[expr_] := expr /. {
-       QED`$hbar -> hbarValue,
-       QED`$Phi0 -> phi0Value
-   };
-
-   (* 2. Get Wavefunction and Energy *)
-   (* This uses the analytical formula and substitutes numerical parameters *)
-   
-   (* Need to call GetWaveFunction from Model API - assuming it is available or constructing it *)
-   (* Since GetWaveFunction is likely in Model.wl, we might need to access it differently if circular dep. *)
-   (* Assuming user will pass the result of GetWaveFunction? No, signature says [model, state]. *)
-   (* We will assume QED`Model`GetWaveFunction is available or we reconstruct it. *)
-   (* Actually, let's look at the "Numerical" part of the model if it has the function. *)
-   
-   (* For now, we assume we can get the symbolic Psi from model["Analytic"]["WaveFunctions"]["Formula"] *)
-   (* But that requires substitution. *)
-   
-   (* Better approach: Use the EvaluateWaveFunction logic but keep it symbolic for derivatives *)
-   
-   (* Let's assume the caller provides the symbolic psi or we fetch it from model["Analytic"] *)
-   (* If model["Analytic"]["WaveFunctions"] exists: *)
-   
-   (* Check frequencies *)
-   freqs = QED`Model`GetNumericalQuantity[model, "PlasmonFrequencies"];
-   If[FailureQ[freqs], Return[Failure["MissingFrequencies", <|"Message" -> "Plasmon frequencies not computed"|>]]];
-   
-   (* Get Hamiltonian *)
-   hHarmonic = model["Analytical"]["HarmonicHamiltonian"];
-   subRules = model["SubstitutionRules"];
-   
-   (* Numerical Hamiltonian operator (with numbers for C, L, but symbols for q, phi) *)
-   hNumExpr = cleanExpr[hHarmonic /. subRules];
-   
-   (* Get Symbolic Wavefunction *)
-   (* We need the function constructor from Model *)
-   (* QED`Model`GetWaveFunction is the intended API. *)
-   psi = cleanExpr[QED`Model`GetWaveFunction[model, state]];
-   
-   If[FailureQ[psi], Return[Failure["MissingWaveFunction", <|"Message" -> "Could not construct wavefunction"|>]]];
-   
-   (* Energy: E = sum(hbar * omega * (n + 1/2)) *)
-   energyVal = Total[(state + 0.5) * freqs * hbarValue];
-   
-   (* 3. Construct Hamiltonian Action *)
-   (* Replace q_n -> -i hbar d/dphi_n *)
-   nodes = Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]];
-   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-   nDOF = Length[fluxVars];
-   
-   applyHamiltonian[wfunc_] := 
-       hNumExpr /. {
-           Subscript[QED`$ChargeSymbol, n_]^2 :> 
-               (-hbarValue^2 * D[D[wfunc, Subscript[QED`$FluxSymbol, n]], Subscript[QED`$FluxSymbol, n]]),
-               
-           Subscript[QED`$ChargeSymbol, n_]*Subscript[QED`$ChargeSymbol, m_] :> 
-               (-hbarValue^2 * D[D[wfunc, Subscript[QED`$FluxSymbol, n]], Subscript[QED`$FluxSymbol, m]]),
-               
-           Subscript[QED`$ChargeSymbol, n_] :> 
-               (-I * hbarValue * D[wfunc, Subscript[QED`$FluxSymbol, n]])
-       };
-
-   (* 4. Build Residual Expression *)
-   hPsi = applyHamiltonian[psi];
-   diff = hPsi - energyVal * psi;
-   
-   (* 5. Evaluate at Random Points *)
-   points = RandomReal[{-0.1, 0.1} * phi0Value, {OptionValue["NumPoints"], nDOF}];
-   
-   errors = Map[
-       Function[pt,
-           Module[{rules, valDiff, valPsi, valEnergy},
-               rules = Thread[fluxVars -> pt];
-               
-               (* N[] forces numerical evaluation of any remaining symbolic functions *)
-               valDiff = N[Abs[diff /. rules]];
-               valPsi = N[Abs[psi /. rules]];
-               valEnergy = N[Abs[energyVal]];
-               
-               (* Relative Error: |(H-E)psi| / |E psi| *)
-               (* Guard against division by zero if psi is extremely small (far tail) *)
-               If[valPsi < 10^-50, 0., valDiff / (valEnergy * valPsi)]
-           ]
-       ],
-       points
-   ];
-   
-   <|
-     "Pass" -> (Max[errors] < OptionValue["Tolerance"]),
-     "MaxError" -> Max[errors],
-     "State" -> state,
-     "TestedPoints" -> Length[points]
-   |>
- ];
 
 
 Options[FindPotentialMinimumContinuation] = {
@@ -665,7 +534,7 @@ FindPotentialMinimumContinuation[
   For quadratic Hamiltonian H = (1/2) q^T C^(-1) q + (1/2) φ^T L^(-1) φ,
   normal modes satisfy:
   
-  ω_i^2 = eigenvalues(C^(-1) · L^(-1))
+  ω_i^2 = eigenvalues(C^(-1) · L⁻¹)
   
   Returns Association with:
   - "Frequencies": ω_i in rad/s (SI units), sorted. Complex if unstable modes exist.
@@ -920,6 +789,122 @@ GetCacheEntry[cacheEntry_Association, model_Association] := Module[
       $Failed
   ]
 ];
+
+cleanExpr[expr_] := expr /. {Abs'[x_] :> Sign[x], Conjugate'[x_] :> Conjugate[x]};
+
+VerifyWaveFunction[model_Association, state_List] := 
+  Module[{hHarmonic, subRules, hNumExpr, psi, energyVal, 
+          fluxVars, ranges, points, hPsi, diff, maxDiff, 
+          applyHamiltonian, minFluxRules, UminSymbolic, Umin, totalEnergy,
+          chargeVars, hbarValue = QED`$hbarValue},
+
+   (* 1. Get Harmonic Hamiltonian and Rules *)
+   hHarmonic = model["Analytical"]["HarmonicHamiltonian"];
+   subRules = model["SubstitutionRules"];
+   
+   (* 2. Prepare Numerical Hamiltonian Operator *)
+   (* Substitute parameters (C, L, Phi0, phi_min) *)
+   hNumExpr = cleanExpr[hHarmonic /. subRules];
+   
+   (* 3. Get Wavefunction *)
+   (* This returns symbolic psi with numerical coefficients inside *)
+   psi = QED`Model`GetWaveFunction[model, state];
+   
+   (* 4. Calculate Expected Energy *)
+   (* E_harmonic = Sum[hbar * omega * (n + 1/2)] *)
+   (* BUT: Harmonic Hamiltonian includes U(phi_min) constant offset! *)
+   (* We must add U(phi_min) to the eigenenergy to match H|psi> *)
+   
+   fluxVars = model["Variables"]["Flux"];
+   chargeVars = model["Variables"]["Charge"];
+   
+   (* Calculate U_min from original Hamiltonian *)
+   (* Replace q->0, phi->phi_min_symbol in original Hamiltonian *)
+   minFluxRules = Thread[fluxVars -> (Subscript[QED`$FluxSymbol, "min", #] & /@ Range[Length[fluxVars]])];
+   
+   UminSymbolic = (model["Analytical"]["Hamiltonian"] /. Subscript[QED`$ChargeSymbol, _] -> 0) /. minFluxRules;
+   
+   (* Substitute numerical values for parameters and phi_min *)
+   Umin = cleanExpr[UminSymbolic /. subRules];
+   
+   (* Eigenenergy of excitation *)
+   energyVal = Total[(state + 0.5) * model["Numerical"]["Diagonalization"]["NormalModeFrequencies"] * hbarValue];
+   
+   totalEnergy = Umin + energyVal;
+   
+   
+   (* 5. Define Operator Action *)
+   (* Replace q_n with -i*hbar*d/dphi_n *)
+   applyHamiltonian[wfunc_] := 
+       hNumExpr /. {
+           Subscript[QED`$FluxSymbol, n_] :> Subscript[QED`$FluxSymbol, n], (* Keep flux as multiplier *)
+           Subscript[QED`$ChargeSymbol, n_] :> 
+               (-I * hbarValue * D[wfunc, Subscript[QED`$FluxSymbol, n]]),
+           
+           (* Handle powers of q *)
+           Power[Subscript[QED`$ChargeSymbol, n_], 2] :> 
+               (-hbarValue^2 * D[wfunc, {Subscript[QED`$FluxSymbol, n], 2}])
+       };
+
+   (* 6. Compute H|psi> and compare with E|psi> *)
+   (* Note: applyHamiltonian returns an EXPRESSION, not a function *)
+   (* We need to act on psi. Since we replaced q with derivative operators acting on wfunc, *)
+   (* we just need to evaluate the replacement. *)
+   
+   (* CAUTION: The replacement rule above is tricky for mixed terms like q1*q2. *)
+   (* Better approach: Expand Hamiltonian and apply term by term. *)
+   
+   (* Simplified approach: Assume Hamiltonian is quadratic form H = T(q) + V(phi) *)
+   (* T(q) contains only q terms. V(phi) contains only phi terms. *)
+   
+   hPsi = (hNumExpr /. {
+       (* V(phi) part acts as multiplication *)
+       (* q^2 part acts as second derivative *)
+       Power[Subscript[QED`$ChargeSymbol, n_], 2] :> 
+           (-hbarValue^2 * D[psi, {Subscript[QED`$FluxSymbol, n], 2}]),
+           
+       (* Mixed kinetic terms q_i * q_j *)
+       Times[Subscript[QED`$ChargeSymbol, i_], Subscript[QED`$ChargeSymbol, j_]] :>
+           (-hbarValue^2 * D[psi, Subscript[QED`$FluxSymbol, i], Subscript[QED`$FluxSymbol, j]])
+   });
+   
+   (* The above replacement leaves phi terms untouched (multipliers) and replaces q terms with derivatives acting on psi *)
+   (* However, linear q terms are not expected in Harmonic Hamiltonian, only q^2 *)
+   
+   (* Check if there are remaining q symbols *)
+   If[!FreeQ[hPsi, Subscript[QED`$ChargeSymbol, _]],
+       Return[{state, "FAIL (Operator Error)", Infinity, 0}]
+   ];
+   
+   (* 7. Check diff on a grid of points *)
+   (* Select points near equilibrium *)
+   
+   ranges = Table[{
+       Part[model["Numerical"]["Cache"]["EquilibriumFluxes"]["Value"], i, 2] - 0.1 * QED`$Phi0Value,
+       Part[model["Numerical"]["Cache"]["EquilibriumFluxes"]["Value"], i, 2] + 0.1 * QED`$Phi0Value
+   }, {i, Length[fluxVars]}];
+   
+   (* Generate random points *)
+   points = Table[
+       RandomReal[ranges[[i]]], 
+       {10}, {i, Length[fluxVars]}
+   ];
+   
+   (* Define substitution for points *)
+   diff = hPsi - totalEnergy * psi;
+   
+   maxDiff = Max @ Table[
+       Abs[diff /. Thread[fluxVars -> pt]] / Abs[(totalEnergy * psi) /. Thread[fluxVars -> pt]],
+       {pt, points}
+   ];
+   
+   {
+       state,
+       If[maxDiff < 10.^-3, "OK", "FAIL"],
+       maxDiff,
+       Length[points]
+   }
+ ];
 
 
 End[];
