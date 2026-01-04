@@ -11,12 +11,11 @@ builds symbolic gradient ∇U of potential energy U(φ) = H(q=0, φ). \
 Returns list of partial derivatives {∂U/∂φ₁, ∂U/∂φ₂, ...} for equilibrium analysis.";
 
 BuildHarmonicWavefunction::usage = 
-"BuildHarmonicWavefunction[fluxVars, minFluxVars, frequencies, effectiveCapacitances, transformationMatrix, quantumNumbers] \
+"BuildHarmonicWavefunction[topology, frequencies, effectiveCapacitances, transformationMatrix, quantumNumbers] \
 constructs the analytical harmonic oscillator wavefunction in the original flux coordinates.
 
 Arguments:
-  fluxVars: List of symbolic flux variables {φ₁, φ₂, ...} (physical units)
-  minFluxVars: List of equilibrium flux symbols {φ₁,min, φ₂,min, ...}
+  topology: Association describing the circuit topology
   frequencies: List of normal mode frequencies {ω₁, ω₂, ...}
   effectiveCapacitances: List of effective capacitances {C₁, C₂, ...} for each mode
   transformationMatrix: Matrix T such that δφ = T · q_normal
@@ -272,13 +271,13 @@ BuildHarmonicHamiltonian[hamiltonian_, topology_Association] :=
 (* ════════════════════════════════════════════════════════════════ *)
 
 BuildHarmonicWavefunction[
-    fluxVars_List, 
-    minFluxVars_List, 
+    topology_Association, 
     frequencies_List, 
     effectiveCapacitances_List, 
     transformationMatrix_?MatrixQ, 
     quantumNumbers_List
 ] := Module[{
+    nodes, fluxVars, minFluxVars,
     deltaPhi,     (* Vector of flux deviations *)
     normalCoords, (* Vector of normal coordinates q *)
     invT,         (* Inverse transformation matrix *)
@@ -287,7 +286,17 @@ BuildHarmonicWavefunction[
     psiTotal,
     nDOF
 },
-    nDOF = Length[fluxVars];
+    (* 0. Generate variables from topology *)
+    nodes = getIndependentNodes[topology];
+    fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+    minFluxVars = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+    nDOF = Length[nodes];
+    
+    (* Check consistency *)
+    If[Length[frequencies] != nDOF, Message[BuildHarmonicWavefunction::dim, "frequencies", Length[frequencies], nDOF]; Return[$Failed]];
+    If[Length[effectiveCapacitances] != nDOF, Message[BuildHarmonicWavefunction::dim, "effectiveCapacitances", Length[effectiveCapacitances], nDOF]; Return[$Failed]];
+    If[Length[transformationMatrix] != nDOF, Message[BuildHarmonicWavefunction::dim, "transformationMatrix", Length[transformationMatrix], nDOF]; Return[$Failed]];
+    
     
     (* 1. Coordinate Transformation *)
     (* δφ = T . q  =>  q = T^-1 . δφ *)
@@ -334,6 +343,8 @@ BuildHarmonicWavefunction[
     
     psiTotal
 ];
+
+BuildHarmonicWavefunction::dim = "Dimension mismatch: `1` has length `2`, expected `3`.";
  
 
 End[];
