@@ -68,7 +68,7 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
 ];
 
 (* NEW: Symbolic WaveFunction Inspector *)
-RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic WaveFunction", "Light",
+RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic Wave Function", "Light",
   Function[{m},
     Module[{state, psiFormula, nDOF},
       (* Default to ground state *)
@@ -79,11 +79,16 @@ RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic WaveFunction", "Light",
       psiFormula = QED`Model`GetWaveFunction[m, state];
       
       If[FailureQ[psiFormula], 
-         Return["Failed to generate wavefunction."]
+        Return["Failed to generate wavefunction."]
       ];
-      
-      (* Return RAW expression without styling - WL will render it nicely *)
-      psiFormula
+
+      (* Keep expression on one line: horizontal scrolling instead of wrapping *)
+      Pane[
+        Defer[psiFormula],
+        ImageSize -> {700, 300},
+        Scrollbars -> True,
+        BaseStyle -> {LineBreakWithin -> False}
+      ]
     ]
   ]
 ];
