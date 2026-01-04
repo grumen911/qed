@@ -1,4 +1,3 @@
-(*BeginPackage["QED`Model`", {"QED`CircuitTopology`","QED`Numeric`","QED`Analytic`"}];*)
 BeginPackage["QED`Model`"];
 
 Needs["QED`CircuitTopology`"];
@@ -78,7 +77,9 @@ BuildSubstitutionRules[primary_Association, topology_Association] := Module[
   (* ════════════════════════════════════════════════════════════════ *)
   
   constantRules = {
-    QED`$Phi0 :> QED`$Phi0Value
+    QED`$Phi0 -> QED`$Phi0Value,
+    QED`$hbar -> QED`$hbarValue,
+    QED`$e -> QED`$eValue
   };
   
   (* ════════════════════════════════════════════════════════════════ *)
