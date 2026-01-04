@@ -51,13 +51,13 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
           Map[
             Function[r, {
               r["State"], 
-              If[r["Pass"], Style["PASS", Green, Bold], Style["FAIL", Red, Bold]],
-              ScientificForm[r["MaxError"], 3],
-              r["TestedPoints"]
+              If[r["Status"] === "OK", Style["OK", Green, Bold], Style["FAIL", Red, Bold]],
+              ScientificForm[r["MaxRelativeError"], 3],
+              r["NumPoints"]
             }],
             report
           ],
-          {Style["State", Bold], Style["Status", Bold], Style["Max Error", Bold], Style["Points", Bold]}
+          {Style["State", Bold], Style["Status", Bold], Style["Max Rel Error", Bold], Style["Points", Bold]}
         ],
         Frame -> All,
         Background -> {None, {Lighter[Gray, 0.8], None}},
@@ -267,7 +267,7 @@ SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
       Column[{
         Style[Lookup[modelSymbol["Topology"], "Name", "Circuit"], Bold, 12],
         Show[modelSymbol["Image"], ImageSize -> {180, 180}, AspectRatio->1]
-      }, Alignment->Center]
+      }, Alignment -> Center]
     ]
   }];
 
