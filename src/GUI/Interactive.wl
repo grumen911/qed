@@ -30,11 +30,13 @@ RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy",
 (* NEW: Schrödinger Equation Verification Tool *)
 RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
   Function[{m},
-    Module[{states, report, grid},
+    Module[{states, report, grid, nDOF},
+      nDOF = m["Topology"]["DegreesOfFreedom"];
+      
       states = {{0,0,0}, {1,0,0}, {0,1,0}}; (* Default states to check *)
       (* Adjust for actual DOF *)
-      states = Select[states, Length[#] == QED`Model`GetDegreesOfFreedom[m] &];
-      If[states === {}, states = {ConstantArray[0, QED`Model`GetDegreesOfFreedom[m]]}];
+      states = Select[states, Length[#] == nDOF &];
+      If[states === {}, states = {ConstantArray[0, nDOF]}];
       
       report = Map[
         Function[s, 
@@ -68,9 +70,10 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
 (* NEW: Symbolic WaveFunction Inspector *)
 RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic WaveFunction", "Light",
   Function[{m},
-    Module[{state, psiFormula},
+    Module[{state, psiFormula, nDOF},
       (* Default to ground state *)
-      state = ConstantArray[0, QED`Model`GetDegreesOfFreedom[m]];
+      nDOF = m["Topology"]["DegreesOfFreedom"];
+      state = ConstantArray[0, nDOF];
       
       (* Get the wavefunction expression *)
       psiFormula = QED`Model`GetWaveFunction[m, state];
