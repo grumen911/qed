@@ -348,7 +348,7 @@ If[$DebugFindEquilibriumPoints === True,
   
   (* Энергии всех решений *)
   Module[{energies, Emin, Emax, dE},
-    energies = Sort[#["Energy"] & /@ solutions];
+    energies = Sort[#"Energy" & /@ solutions];
     Emin = First[energies];
     Emax = Last[energies];
     dE = Emax - Emin;
@@ -361,14 +361,14 @@ If[$DebugFindEquilibriumPoints === True,
   
   (* Группировка по энергиям (вырожденность) - НЕ округлять! *)
   Module[{grouped, degeneracies},
-    grouped = GroupBy[solutions, Round[#["Energy"], 10^-25] &];  (* <-- FIX *)
+    grouped = GroupBy[solutions, Round[#"Energy", 10^-25] &];  (* <-- FIX *)
     degeneracies = Sort[Tally[Length /@ Values[grouped]][[All, 1]], Greater];
     Print["Degeneracies: ", Take[degeneracies, UpTo[5]], " solutions per level"];
   ];
   
   (* Топ-3 минимума *)
   Module[{top3},
-    top3 = Take[SortBy[solutions, #["Energy"] &], UpTo[3]];
+    top3 = Take[SortBy[solutions, #"Energy" &], UpTo[3]];
     Print["=== TOP 3 MINIMA ==="];
     MapIndexed[
       Print["#", #2[[1]], ": E = ", ScientificForm[#1["Energy"], 4], 
@@ -873,7 +873,15 @@ VerifyWaveFunction[model_Association, state_List] :=
    
    (* Check if there are remaining q symbols *)
    If[!FreeQ[hPsi, Subscript[QED`$ChargeSymbol, _]],
-       Return[{state, "FAIL (Operator Error)", Infinity, 0}]
+     Return[
+       <|
+         "State" -> state,
+         "Status" -> "FAIL",
+         "Reason" -> "OperatorError",
+         "MaxRelativeError" -> Infinity,
+         "NumPoints" -> 0
+       |>
+     ]
    ];
    
    (* 7. Check diff on a grid of points *)
@@ -898,12 +906,13 @@ VerifyWaveFunction[model_Association, state_List] :=
        {pt, points}
    ];
    
-   {
-       state,
-       If[maxDiff < 10.^-3, "OK", "FAIL"],
-       maxDiff,
-       Length[points]
-   }
+   <|
+     "State" -> state,
+     "Status" -> If[maxDiff < 10.^-3, "OK", "FAIL"],
+     "MaxRelativeError" -> maxDiff,
+     "NumPoints" -> Length[points],
+     "TotalEnergy" -> totalEnergy
+   |>
  ];
 
 
