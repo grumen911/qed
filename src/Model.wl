@@ -514,21 +514,15 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
 	If[cache["InverseCapacitanceMatrix"]["State"] === "Ready" && 
 	   cache["InductanceMatrixInverseNumerical"]["State"] === "Ready",
 	  
-	  Module[{invC, invL, diag, mCharge, invCdiag, effCaps},
+	  Module[{invC, invL, diag},
 	    invC = cache["InverseCapacitanceMatrix"]["Value"];
 	    invL = cache["InductanceMatrixInverseNumerical"]["Value"];
 	    
 	    diag = DiagonalizeHarmonicHamiltonian[invC, invL];
 	    
-	    (* NEW: Calculate effective capacitances from M matrix *)
-	    mCharge = diag["ChargeTransform"];
-	    invCdiag = Transpose[mCharge] . invC . mCharge;
-	    effCaps = 1.0 / Diagonal[invCdiag];
-	    
-	    (* Store extended results *)
 	    cache["HarmonicDiagonalization"] = <|
 	      "State" -> "Ready",
-	      "Value" -> Append[diag, "EffectiveCapacitances" -> effCaps]
+	      "Value" -> diag
 	    |>
 	  ],
 	  
