@@ -693,7 +693,7 @@ GetWaveFunction[model_Association, quantumNumbers_List] :=
   
   frequencies = diagData["NormalModeFrequencies"];
   effCaps = diagData["EffectiveCapacitances"];
-  transform = diagData["FluxTransform"];
+  transform = Inverse[diagData["FluxTransform"]];
   
   topology = model["Topology"];
   subRules = model["SubstitutionRules"];
