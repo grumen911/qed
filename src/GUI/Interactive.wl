@@ -203,9 +203,9 @@ ComputePlotData[plotId_, model_Association] :=
        QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]
     ];
 
-    (* Explicit warmup for DiagonalizationCheck *)
+    (* Explicit warmup for DiagonalizationCheck using GetNumericalQuantity *)
     If[plotId === "DiagonalizationCheck",
-       $CurrentModel = QED`Model`ComputeNumericalHarmonicPerturbation[$CurrentModel]
+       QED`Model`GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"]
     ];
     
     (* 2. Compute Graphic using warmed model *)
