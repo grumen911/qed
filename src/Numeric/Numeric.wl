@@ -926,7 +926,8 @@ VerifyDiagonalization[model_Association] := Module[
   {capNum, invLNum, diagData, Nmat, matC_diag, matinvL_diag, expectedCaps, calculatedCaps},
   
   capNum = QED`Model`GetNumericalQuantity[model, "CapacitanceMatrixNumerical"];
-  invLNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixNumerical"];
+  (* CORRECTED: use inverse inductance matrix for Hamiltonian check *)
+  invLNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixInverseNumerical"];
   diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
   
   If[AnyTrue[{capNum, invLNum, diagData}, FailureQ], Return[$Failed]];
