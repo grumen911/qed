@@ -792,81 +792,121 @@ GetCacheEntry[cacheEntry_Association, model_Association] := Module[
 
 cleanExpr[expr_] := expr /. {Abs'[x_] :> Sign[x], Conjugate'[x_] :> Conjugate[x]};
 
-VerifyWaveFunction[model_Association, state_List] := 
-  Module[{hHarmonic, subRules, hNumExpr, psi, energyVal, 
-          fluxVars, ranges, points, hPsi, diff, maxDiff, 
-          applyHamiltonian, minFluxRules, UminSymbolic, Umin, totalEnergy,
-          chargeVars, hbarValue = QED`$hbarValue,
+(*
+  VerifyWaveFunction:
+
+  Instead of pattern-based replacement of q_i q_j -> d/dphi_i d/dphi_j,
+  build the kinetic operator from the exact Hessian in charge variables.
+
+  If H(q,phi) = 1/2 q^T C^{-1} q + V(phi), then
+    H psi = -(hbar^2/2) Sum_{ij} (C^{-1})_{ij} d_i d_j psi + V(phi) psi.
+
+  This avoids fragile Times[...] pattern matching (Times is Flat/Orderless) [web:9][web:18].
+*)
+
+VerifyWaveFunction[model_Association, state_List] := Block[
+  {QED`Model`$CurrentModel = model},
+  Module[{m, topology, nodes, fluxVars, chargeVars, q0Rules,
+          diagData, omegas, hbarValue = QED`$hbarValue,
+          hHarmonic, subRules, hNumExpr, psi,
+          UminSymbolic, Umin, energyVal, totalEnergy,
+          gradQ0, invC, hessPsi, kineticPsi, potentialPsi, hPsi,
           residualSym},
 
-   (* 1. Get Harmonic Hamiltonian and Rules *)
-   hHarmonic = model["Analytical"]["HarmonicHamiltonian"];
-   subRules = model["SubstitutionRules"];
-   
-   (* 2. Prepare Numerical Hamiltonian Operator *)
-   (* Substitute parameters (C, L, Phi0, phi_min) *)
-   hNumExpr = cleanExpr[hHarmonic /. subRules];
-   
-   (* 3. Get Wavefunction *)
-   (* This returns symbolic psi with numerical coefficients inside *)
-   psi = QED`Model`GetWaveFunction[model, state];
-   
-   (* 4. Calculate Expected Energy *)
-   
-   fluxVars = model["Variables"]["Flux"];
-   chargeVars = model["Variables"]["Charge"];
-   
-   (* Calculate U_min from original Hamiltonian *)
-   minFluxRules = Thread[fluxVars -> (Subscript[QED`$FluxSymbol, "min", #] & /@ Range[Length[fluxVars]])];
-   
-   UminSymbolic = (model["Analytical"]["Hamiltonian"] /. Subscript[QED`$ChargeSymbol, _] -> 0) /. minFluxRules;
-   
-   Umin = cleanExpr[UminSymbolic /. subRules];
-   
-   (* Eigenenergy of excitation *)
-   energyVal = Total[(state + 0.5) * model["Numerical"]["Diagonalization"]["NormalModeFrequencies"] * hbarValue];
-   
-   totalEnergy = Umin + energyVal;
-   
-   
-   (* 5. Compute H|psi> symbolically *)
-   
-   hPsi = (hNumExpr /. {
-       (* V(phi) part acts as multiplication *)
-       (* q^2 part acts as second derivative *)
-       Power[Subscript[QED`$ChargeSymbol, n_], 2] :> 
-           (-hbarValue^2 * D[psi, {Subscript[QED`$FluxSymbol, n], 2}]),
-           
-       (* Mixed kinetic terms q_i * q_j *)
-       Times[Subscript[QED`$ChargeSymbol, i_], Subscript[QED`$ChargeSymbol, j_]] :>
-           (-hbarValue^2 * D[psi, Subscript[QED`$FluxSymbol, i], Subscript[QED`$FluxSymbol, j]])
-   });
-   
-   (* Check if there are remaining q symbols *)
-   If[!FreeQ[hPsi, Subscript[QED`$ChargeSymbol, _]],
-     Return[
-       <|
-         "State" -> state,
-         "Status" -> "FAIL",
-         "Reason" -> "OperatorError",
-         "ResidualExpression" -> "H contains q symbols after substitution",
-         "TotalEnergy" -> totalEnergy
-       |>
-     ]
-   ];
-   
-   (* 6. Compute Symbolic Residual *)
-   
-   residualSym = Simplify[hPsi - totalEnergy * psi];
+    m = QED`Model`$CurrentModel;
+    topology = m["Topology"];
+    nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
 
-   
-   <|
-     "State" -> state,
-     "Status" -> "OK",
-     "ResidualExpression" -> residualSym,
-     "TotalEnergy" -> totalEnergy
-   |>
- ];
+    fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+    chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+    q0Rules = Thread[chargeVars -> 0];
+
+    (* Ensure harmonic diagonalization exists *)
+    diagData = QED`Model`GetNumericalQuantity[m, "HarmonicDiagonalization"];
+    omegas = diagData["NormalModeFrequencies"];
+
+    (* Harmonic Hamiltonian with numeric substitutions *)
+    hHarmonic = m["Analytical"]["HarmonicHamiltonian"];
+    subRules = m["SubstitutionRules"];
+    hNumExpr = cleanExpr[hHarmonic /. subRules];
+
+    (* Wavefunction *)
+    psi = QED`Model`GetWaveFunction[m, state];
+    If[FailureQ[psi],
+      Return[<|
+        "State" -> state,
+        "Status" -> "FAIL",
+        "Reason" -> "WaveFunctionError",
+        "ResidualExpression" -> "Failed to generate wavefunction",
+        "TotalEnergy" -> $Failed
+      |>]
+    ];
+
+    (* Potential energy at equilibrium (q->0, phi->phi_min) *)
+    UminSymbolic = (m["Analytical"]["Hamiltonian"] /. Subscript[QED`$ChargeSymbol, _] -> 0) /. 
+      Thread[fluxVars -> (Subscript[QED`$FluxSymbol, "min", #] & /@ nodes)];
+    Umin = cleanExpr[UminSymbolic /. subRules];
+
+    (* Eigenenergy of excitation *)
+    energyVal = Total[(state + 0.5) * omegas * hbarValue];
+    totalEnergy = Umin + energyVal;
+
+    (* Detect unexpected linear terms in q at q=0 *)
+    gradQ0 = cleanExpr[D[hNumExpr, {chargeVars, 1}] /. q0Rules];
+    If[!TrueQ[gradQ0 === ConstantArray[0, Length[chargeVars]]],
+      Return[<|
+        "State" -> state,
+        "Status" -> "FAIL",
+        "Reason" -> "LinearChargeTerms",
+        "ResidualExpression" -> gradQ0,
+        "TotalEnergy" -> totalEnergy
+      |>]
+    ];
+
+    (* Kinetic matrix invC_{ij} = d^2H / dq_i dq_j at q=0 *)
+    invC = cleanExpr[D[hNumExpr, {chargeVars, 2}] /. q0Rules];
+    If[!MatrixQ[invC],
+      Return[<|
+        "State" -> state,
+        "Status" -> "FAIL",
+        "Reason" -> "KineticMatrixError",
+        "ResidualExpression" -> invC,
+        "TotalEnergy" -> totalEnergy
+      |>]
+    ];
+
+    (* Build operator action *)
+    hessPsi = Table[
+      D[psi, fluxVars[[i]], fluxVars[[j]]],
+      {i, Length[fluxVars]},
+      {j, Length[fluxVars]}
+    ];
+
+    kineticPsi = -(hbarValue^2/2) * Total[Flatten[invC * hessPsi]];
+    potentialPsi = (hNumExpr /. q0Rules) * psi;
+
+    hPsi = Simplify[kineticPsi + potentialPsi];
+
+    If[!FreeQ[hPsi, Subscript[QED`$ChargeSymbol, _]],
+      Return[<|
+        "State" -> state,
+        "Status" -> "FAIL",
+        "Reason" -> "OperatorError",
+        "ResidualExpression" -> "H contains q symbols after operator construction",
+        "TotalEnergy" -> totalEnergy
+      |>]
+    ];
+
+    residualSym = Simplify[hPsi - totalEnergy * psi];
+
+    <|
+      "State" -> state,
+      "Status" -> "OK",
+      "ResidualExpression" -> residualSym,
+      "TotalEnergy" -> totalEnergy
+    |>
+  ]
+];
 
 
 End[];
