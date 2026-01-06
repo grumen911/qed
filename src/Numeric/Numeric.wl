@@ -811,7 +811,7 @@ VerifyWaveFunction[model_Association, state_List] := Block[
           hHarmonic, subRules, hNumExpr, psi,
           UminSymbolic, Umin, energyVal, totalEnergy,
           gradQ0, invC, hessPsi, kineticPsi, potentialPsi, hPsi,
-          residualSym},
+          residualSym, dimCheck},
 
     m = QED`Model`$CurrentModel;
     topology = m["Topology"];
@@ -898,11 +898,16 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     ];
 
     residualSym = Simplify[hPsi - totalEnergy * psi];
+    
+    (* NEW: Dimensionless Check *)
+    (* Substitute phi -> phi * Phi0 into the residual expression *)
+    dimCheck = residualSym /. Thread[fluxVars -> fluxVars * QED`$Phi0Value];
 
     <|
       "State" -> state,
       "Status" -> "OK",
       "ResidualExpression" -> residualSym,
+      "DimensionlessResidual" -> dimCheck,
       "TotalEnergy" -> totalEnergy
     |>
   ]
