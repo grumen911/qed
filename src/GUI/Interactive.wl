@@ -52,16 +52,22 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
             Function[r, {
               r["State"], 
               If[r["Status"] === "OK", Style["OK", Green, Bold], Style["FAIL", Red, Bold]],
-              ScientificForm[r["MaxRelativeError"], 3],
-              r["NumPoints"]
+              Pane[ScientificForm[r["TotalEnergy"], 5], 100],
+              Pane[Short[r["ResidualExpression"], 3], {300, 60}, Scrollbars -> True] (* New Column *)
             }],
             report
           ],
-          {Style["State", Bold], Style["Status", Bold], Style["Max Rel Error", Bold], Style["Points", Bold]}
+          {
+            Style["State", Bold], 
+            Style["Status", Bold], 
+            Style["Total Energy (J)", Bold], 
+            Style["Residual (H\[Psi] - E\[Psi])", Bold]
+          }
         ],
         Frame -> All,
         Background -> {None, {Lighter[Gray, 0.8], None}},
-        ItemSize -> {Automatic, 1.5}
+        ItemSize -> {Automatic, 2.5},
+        Alignment -> {Left, Center}
       ]
     ]
   ]
