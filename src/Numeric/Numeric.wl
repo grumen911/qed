@@ -541,7 +541,7 @@ FindPotentialMinimumContinuation[
   For quadratic Hamiltonian H = (1/2) q^T C^(-1) q + (1/2) φ^T L^(-1) φ,
   normal modes satisfy:
   
-  ω_i^2 = eigenvalues(C^(-1) · L⁻¹)
+  ω_i^2 = eigenvalues(C⁻¹ · L⁻¹)
   
   Returns Association with:
   - "Frequencies": ω_i in rad/s (SI units), sorted. Complex if unstable modes exist.
