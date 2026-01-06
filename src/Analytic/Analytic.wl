@@ -11,19 +11,18 @@ builds symbolic gradient ∇U of potential energy U(φ) = H(q=0, φ). \
 Returns list of partial derivatives {∂U/∂φ₁, ∂U/∂φ₂, ...} for equilibrium analysis.";
 
 BuildHarmonicWavefunction::usage = 
-"BuildHarmonicWavefunction[topology, frequencies, effectiveCapacitances, projectionMatrix, quantumNumbers] \
+"BuildHarmonicWavefunction[topology, frequencies, effectiveCapacitances, transformationMatrix, quantumNumbers] \
 constructs the analytical harmonic oscillator wavefunction in the original flux coordinates.
 
 Arguments:
   topology: Association describing the circuit topology
   frequencies: List of normal mode frequencies {ω₁, ω₂, ...}
   effectiveCapacitances: List of effective capacitances {C₁, C₂, ...} for each mode
-  projectionMatrix: Matrix K such that q_normal = K · (φ - φ_min). 
-                    (Note: This is the inverse of the mode shape matrix).
+  transformationMatrix: Matrix T such that δφ = T · q_normal
   quantumNumbers: List of integers {n₁, n₂, ...} specifying the state
 
 Returns:
-  Symbolic expression Ψ(φ₁, φ₂, ...). Includes Jacobian normalization factor Sqrt[Det[K]].";
+  Symbolic expression Ψ(φ₁, φ₂, ...). Includes Jacobian normalization factor.";
 
 Begin["`Private`"];
 
@@ -90,199 +89,260 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
       
       (* Полный поток *)
       fluxTotal = flux + fluxExt;
-      fluxDot = D[fluxTotal, QED`$TimeSymbol];
       
-      params = Lookup[primaryParams, name, <||>];
+      fluxDot = flux /. Subscript[QED`$FluxSymbol, n_] :> 
+      					Derivative[1][Subscript[QED`$FluxSymbol, n]][t];
       
-      (* Лагранжиан компонента *)
+      params = primaryParams[tag];
+      
       Switch[type,
-        "Capacitor", 
-          0.5 * symbols["C"] * fluxDot^2,
-          
-        "Inductor", 
-          -0.5 * (1/symbols["L"]) * fluxTotal^2,
-          
-        "JosephsonJunction", 
-          symbols["EJ"] * Cos[2*Pi*fluxTotal/QED`$Phi0],
-          
+        "Capacitor",
+        params["C"]["Symbol"]/2 * fluxDot^2,
+        
+        "Inductor",
+        -fluxTotal^2/(2 * params["L"]["Symbol"]),
+        
+        "JosephsonJunction",
+        params["CJ"]["Symbol"]/2 * fluxDot^2 + 
+          params["EJ"]["Symbol"] * Cos[2 Pi fluxTotal / phi0],
+        
         _, 0
       ]
     ] &,
     components
   ];
   
-  Total[terms]
-];
+  Simplify[Total[terms] /. Subscript[QED`$FluxSymbol, groundNode] -> 0]
+ ];
 
 
-BuildCapacitanceMatrix[lagrangian_, topology_] := 
- Module[{nodes, fluxVars, fluxDots, n, capMatrix},
+BuildCapacitanceMatrix[lagrangian_, topology_Association] := 
+ Module[{nodes, phiDotVars, capacitanceMatrix},
+  nodes = getIndependentNodes[topology];
+  phiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ nodes;
+  capacitanceMatrix = Outer[
+    D[D[lagrangian, #1], #2] &,
+    phiDotVars,
+    phiDotVars
+  ];
+  capacitanceMatrix
+ ];
+
+
+(*
+  Physics: Inverse inductance matrix L⁻¹ (stiffness matrix) from direct Hessian.
+  
+  For harmonic approximation around equilibrium:
+  H ≈ H(φ_min) + (1/2) ∑ᵢⱼ L⁻¹ᵢⱼ (φᵢ - φᵢ,min)(φⱼ - φⱼ,min)
+  
+  where L⁻¹ᵢⱼ = ∂²H/∂φᵢ∂φⱼ|_{φ=φ_min} is the Hessian evaluated at equilibrium.
+  
+  CRITICAL: Must use direct Hessian from original Hamiltonian!
+  
+  Using Series-expanded harmonicHamiltonian produces incorrect matrix elements
+  due to numerical errors in mixed derivatives (~10⁻⁸), which corrupt the 
+  eigenspectrum and produce NON-PHYSICAL IMAGINARY FREQUENCIES.
+  
+  At a true minimum, Hessian must be positive-definite → all eigenvalues > 0.
+  Imaginary frequencies (λ < 0) indicate either:
+  1. Numerical artifact (if error ~ 10⁻⁸)
+  2. Saddle point instead of minimum (requires investigation)
+  
+  This implementation computes Hessian symbolically, then substitutes φ_min,
+  preserving positive-definiteness and avoiding imaginary frequencies.
+  
+  Reference: Devoret lectures, Les Houches (2004), Section 3.2
+             Koch et al., PRA 76, 042319 (2007)
+*)
+
+BuildInductanceMatrix[hamiltonian_, topology_Association] := 
+ Module[{nodes, phiVars, minSymbols, hessianSymbolic},
+  
+  nodes = getIndependentNodes[topology];
+  phiVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  
+  (* Step 1: Compute symbolic Hessian ∂²H/∂φᵢ∂φⱼ from original Hamiltonian *)
+  (* This avoids numerical errors from Series expansion *)
+  hessianSymbolic = D[hamiltonian, {phiVars, 2}];
+  
+  (* Step 2: Substitute φ → φ_min symbolically *)
+  hessianSymbolic = hessianSymbolic /. Thread[phiVars -> minSymbols];
+  
+  (* Step 3: Simplify coefficients *)
+  Simplify[hessianSymbolic]
+ ];
+
+
+BuildHamiltonian[lagrangian_, capMatrix_, topology_Association] := 
+ Module[{nodes, phiVars, phiDotVars, qVars, kineticEnergy, potentialEnergy},
+  nodes = getIndependentNodes[topology];
+  phiVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  phiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ nodes;
+  qVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+  
+  kineticEnergy = (1/2) * qVars . Inverse[capMatrix] . qVars;
+  potentialEnergy = -lagrangian /. Thread[phiDotVars -> 0];
+  
+  (*Долгая операция*)
+  Collect[kineticEnergy + potentialEnergy, Join[phiVars, qVars], Simplify]
+ ];
+
+
+(*
+  Physics: Gradient of potential energy for equilibrium conditions.
+  
+  Equilibrium fluxes satisfy ∇U = 0, where U(φ) is the potential energy.
+  For Josephson circuits:
+  
+  ∂U/∂φᵢ = ∑ⱼ (EJ/Φ₀) sin(2π(φᵢ - φⱼ)/Φ₀ + δᵢⱼ)
+  
+  where δᵢⱼ accounts for external flux in loops.
+  
+  This gradient is used in FindRoot-based numerical minimization to find
+  all equilibrium points (minima, maxima, saddles) by solving ∇U = 0.
+  
+  Reference: Devoret lectures (2004), Section 2.3
+*)
+
+BuildPotentialGradient[hamiltonian_, topology_Association] := 
+ Module[{nodes, fluxVars, potential, gradient},
   
   nodes = getIndependentNodes[topology];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  fluxDots = D[fluxVars, QED`$TimeSymbol];
-  n = Length[nodes];
   
-  (* C_ij = ∂²L / ∂φ̇_i ∂φ̇_j *)
-  capMatrix = Table[
-    D[lagrangian, fluxDots[[i]], fluxDots[[j]]],
-    {i, n}, {j, n}
-  ];
+  (* Потенциальная энергия: U(φ) = H(q=0, φ) *)
+  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
   
-  capMatrix
-];
+  (* Градиент: ∇U = {∂U/∂φ₁, ∂U/∂φ₂, ∂U/∂φ₃} *)
+  gradient = D[potential, #] & /@ fluxVars;
+  
+  Simplify[gradient]
+ ];
 
 
-BuildHamiltonian[lagrangian_, capMatrix_, topology_] := 
- Module[{nodes, fluxVars, chargeVars, n, kineticEnergy, potentialEnergy},
+(* ════════════════════════════════════════════════════════════════ *)
+(*                 HARMONIC APPROXIMATION                           *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+(*
+  Physics: Expand Hamiltonian to quadratic order around equilibrium.
+  
+  H(φ) ≈ H(φ_min) + (1/2) ∑ᵢⱼ Kᵢⱼ (φᵢ - φᵢ,min)(φⱼ - φⱼ,min)
+  
+  where Kᵢⱼ = ∂²H/∂φᵢ∂φⱼ|_min is the Hessian matrix.
+  
+  For Josephson junctions:
+  -E_J Cos[2πφ/Φ₀] ≈ -E_J + E_J(π/Φ₀)²(φ - φ_min)²
+  
+  Reference: Koch et al., PRA 76, 042319 (2007), Eq. (6-8)
+*)
+
+BuildHarmonicHamiltonian[hamiltonian_, topology_Association] := 
+ Module[{nodes, fluxVars, chargeVars, minSymbols, series, degree, result},
   
   nodes = getIndependentNodes[topology];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
-  n = Length[nodes];
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
   
-  (* Кинетическая энергия T = 0.5 * q^T * C^-1 * q *)
-  kineticEnergy = 0.5 * chargeVars . Inverse[capMatrix] . chargeVars;
+  (* Series expansion to O(φ²) around φ_min *)
+  series = Normal @ Series[
+    hamiltonian,
+    Sequence @@ MapThread[{#1, #2, 2} &, {fluxVars, minSymbols}]
+  ] // Expand;
   
-  (* Потенциальная энергия U = -L + T(φ̇ -> 0) *)
-  (* Внимание: L содержит T - U. Значит U = T - L. *)
-  (* Но T записана через φ̇. Нам нужно выражение от φ. *)
-  (* Для стандартных лагранжианов L = T(φ̇) - U(φ). *)
-  (* Значит U(φ) = - (L /. φ̇ -> 0) *)
+  (* Helper: total polynomial degree in flux variables *)
+  degree[term_] := Total @ Exponent[term, fluxVars];
   
-  potentialEnergy = -(lagrangian /. D[_, QED`$TimeSymbol] -> 0);
-  
-  kineticEnergy + potentialEnergy
-];
-
-
-BuildHarmonicHamiltonian[hamiltonian_, topology_] := 
- Module[{nodes, fluxVars, minFluxVars, potential, potentialExp, 
-         kinetic, hHarmonic, deltaPhi},
-  
-  nodes = getIndependentNodes[topology];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  minFluxVars = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
-  
-  (* Разделить гамильтониан *)
-  kinetic = hamiltonian /. _Subscript[QED`$FluxSymbol, _] -> 0; (* Приближенно *)
-  (* Точнее: выделить слагаемые с зарядом *)
-  kinetic = Select[hamiltonian, !FreeQ[#, QED`$ChargeSymbol] &];
-  potential = hamiltonian - kinetic;
-  
-  (* Разложение потенциала вокруг минимума *)
-  deltaPhi = fluxVars - minFluxVars;
-  
-  (* U ≈ U(φ_min) + 0.5 * (φ-φ_min)^T * H * (φ-φ_min) *)
-  (* Мы опускаем константу U(φ_min) для гармонического гамильтониана, 
-     но для спектра она важна. Добавим её? Обычно H_osc отсчитывают от дна. *)
-     
-  (* Вычисляем Гессиан в точке минимума (символьно) *)
-  (* Hessian_ij = ∂²U / ∂φ_i ∂φ_j *)
-  
-  (* Для символьного разложения просто берем 2-й порядок Series *)
-  (* Но Series по многим переменным сложен. Проще градиент и гессиан. *)
-  
-  (* Делаем замену φ -> φ_min + δφ и разлагаем по δφ до 2 порядка *)
-  potentialExp = Normal[Series[
-    potential /. Thread[fluxVars -> minFluxVars + deltaPhi],
-    {deltaPhi[[1]], 0, 2}, {deltaPhi[[2]], 0, 2} (* TODO: Generalize for N vars *)
-  ]];
-  
-  (* Оставляем только квадратичные члены (и константу?) *)
-  (* Гармонический гамильтониан = Кинетика + Квадратичный потенциал *)
-  
-  hHarmonic = kinetic + potentialExp;
-  
-  hHarmonic
-];
-
-
-BuildInductanceMatrix[hamiltonian_, topology_] := 
- Module[{nodes, fluxVars, potential, hessian, n},
-  
-  nodes = getIndependentNodes[topology];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  n = Length[nodes];
-  
-  potential = hamiltonian /. _Subscript[QED`$ChargeSymbol, _] -> 0;
-  
-  (* L^-1_ij = ∂²U / ∂φ_i ∂φ_j *)
-  hessian = Table[
-    D[potential, fluxVars[[i]], fluxVars[[j]]],
-    {i, n}, {j, n}
+  (* Keep only constant (degree 0) and quadratic (degree 2) terms *)
+  result = Total @ Cases[
+    If[Head[series] === Plus, List @@ series, {series}],
+    term_ /; degree[term] == 0 || degree[term] == 2
   ];
   
-  hessian
-];
-
-BuildPotentialGradient[hamiltonian_, topology_] := 
- Module[{nodes, fluxVars, potential},
-  nodes = getIndependentNodes[topology];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  
-  potential = hamiltonian /. _Subscript[QED`$ChargeSymbol, _] -> 0;
-  
-  D[potential, {fluxVars}]
-];
+  (* Collect by physical variables for readability, simplify coefficients *)
+  Collect[result, Join[fluxVars, chargeVars], Simplify]
+ ];
 
 
 (* ════════════════════════════════════════════════════════════════ *)
-(* ВОЛНОВЫЕ ФУНКЦИИ                                                 *)
+(*                 HARMONIC WAVEFUNCTIONS                           *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-BuildHarmonicWavefunction[topology_Association, frequencies_List, 
-                          effectiveCapacitances_List, projectionMatrix_?MatrixQ, 
-                          quantumNumbers_List] := 
- Module[{nodes, fluxVars, minFluxVars, deltaPhi, normalCoords, 
-         wavefunctions1D, normalization, psiTotal},
-  
-  nodes = getIndependentNodes[topology];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  minFluxVars = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
-  
-  (* Shift to equilibrium *)
-  deltaPhi = fluxVars - minFluxVars;
-  
-  (* Transform to normal coordinates q *)
-  (* projectionMatrix K: q_normal = K . deltaPhi *)
-  normalCoords = projectionMatrix . deltaPhi;
-  
-  (* Normalization factor: Jacobian of the transformation *)
-  (* Integral |psi|^2 dPhi = 1 *)
-  (* dPhi = (1/det K) dq *)
-  (* If psi(q) is normalized, then psi(Phi) = Sqrt[det K] * psi(K.Phi) *)
-  normalization = Sqrt[Abs[Det[projectionMatrix]]];
-  
-  (* 2. Build 1D wavefunctions for each mode *)
-  wavefunctions1D = MapThread[
-    Function[{q, n, omega, cap},
-      Module[{invLength2, hermite, gaussian, norm1D},
-        
-        (* Parameter alpha^2 = m*omega/hbar. Here mass m = cap *)
-        invLength2 = (cap * omega) / hbar;
-        
-        (* Hermite polynomial H_n(sqrt(alpha)*q) *)
-        hermite = HermiteH[n, Sqrt[invLength2] * q];
-        
-        (* Gaussian exp(-alpha*q^2/2) *)
-        gaussian = Exp[-invLength2 * q^2 / 2];
-        
-        (* Normalization for 1D oscillator: 1/sqrt(2^n * n! * sqrt(pi/alpha)) *)
-        (* Note: (pi/alpha)^(1/4) comes from integral. *)
-        norm1D = 1 / Sqrt[2^n * Factorial[n]] * (invLength2 / Pi)^(1/4);
-        
-        norm1D * hermite * gaussian
-      ]
-    ],
-    {normalCoords, quantumNumbers, frequencies, effectiveCapacitances}
-  ];
-  
-  (* Total wavefunction *)
-  psiTotal = normalization * Times @@ wavefunctions1D;
-  
-  psiTotal
+BuildHarmonicWavefunction[
+    topology_Association, 
+    frequencies_List, 
+    effectiveCapacitances_List, 
+    transformationMatrix_?MatrixQ, 
+    quantumNumbers_List
+] := Module[{
+    nodes, fluxVars, minFluxVars,
+    deltaPhi,     (* Vector of flux deviations *)
+    normalCoords, (* Vector of normal coordinates q *)
+    detT,         (* Jacobian determinant *)
+    wavefunctions1D,
+    psiTotal,
+    nDOF
+},
+    (* 0. Generate variables from topology *)
+    nodes = getIndependentNodes[topology];
+    fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+    minFluxVars = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+    nDOF = Length[nodes];
+    
+    (* Check consistency *)
+    If[Length[frequencies] != nDOF, Message[BuildHarmonicWavefunction::dim, "frequencies", Length[frequencies], nDOF]; Return[$Failed]];
+    If[Length[effectiveCapacitances] != nDOF, Message[BuildHarmonicWavefunction::dim, "effectiveCapacitances", Length[effectiveCapacitances], nDOF]; Return[$Failed]];
+    If[Length[transformationMatrix] != nDOF, Message[BuildHarmonicWavefunction::dim, "transformationMatrix", Length[transformationMatrix], nDOF]; Return[$Failed]];
+    
+    
+    (* 1. Coordinate Transformation *)
+    (* transformationMatrix now directly maps deltaPhi -> normalCoords *)
+    
+    deltaPhi = fluxVars - minFluxVars;
+    
+    (* Direct transformation: q = transformationMatrix . δφ *)
+    normalCoords = transformationMatrix . deltaPhi;
+    
+    (* Jacobian of transformation φ -> q *)
+    (* If q = K . φ, then dφ = (1/|det K|) dq *)
+    (* Normalization: ∫|ψ(φ)|² dφ = ∫|ψ(K·φ)|² (1/|det K|) dφ = 1 *)
+    (* So ψ(φ) = sqrt(|det K|) * ψ_normal(K·φ) *)
+    
+    detT = Abs[Det[transformationMatrix]];
+    
+    (* 2. Build 1D wavefunctions for each mode *)
+    wavefunctions1D = MapThread[
+        Function[{q, n, omega, cap},
+            Module[{invLength2, normFactor, gaussian, poly, xi},
+                (* m = cap, freq = omega *)
+                (* Width parameter α² = mω/ℏ *)
+                
+                invLength2 = (cap * omega) / hbar;
+                xi = Sqrt[invLength2] * q;
+                
+                (* Normalization factor for 1D oscillator *)
+                (* (α²/π)^(1/4) / sqrt(2^n n!) *)
+                normFactor = (invLength2 / Pi)^(1/4) / Sqrt[2^n * Factorial[n]];
+                
+                gaussian = Exp[-invLength2 * q^2 / 2];
+                poly = HermiteH[n, xi];
+                
+                normFactor * gaussian * poly
+            ]
+        ],
+        {normalCoords, quantumNumbers, frequencies, effectiveCapacitances}
+    ];
+    
+    (* 3. Combine with Jacobian factor *)
+    psiTotal = Sqrt[detT] * Times @@ wavefunctions1D;
+    
+    psiTotal
 ];
+
+BuildHarmonicWavefunction::dim = "Dimension mismatch: `1` has length `2`, expected `3`.";
+ 
 
 End[];
 EndPackage[];
