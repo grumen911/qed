@@ -693,7 +693,10 @@ GetWaveFunction[model_Association, quantumNumbers_List] :=
   
   frequencies = diagData["NormalModeFrequencies"];
   effCaps = diagData["EffectiveCapacitances"];
-  transform = diagData["FluxTransform"];
+  (* CORRECTED: BuildHarmonicWavefunction expects T such that q_norm = Inverse[T] . phi.
+     But FluxTransform N is defined as phi = N . q_norm.
+     So we must pass T = Inverse[N] to make BuildHarmonicWavefunction use N correctly. *)
+  transform = Inverse[diagData["FluxTransform"]];
   
   topology = model["Topology"];
   subRules = model["SubstitutionRules"];
