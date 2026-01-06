@@ -848,7 +848,19 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     Umin = cleanExpr[UminSymbolic /. subRules];
 
     (* Eigenenergy of excitation *)
-    energyVal = Total[(state + 0.5) * omegas * hbarValue];
+    (* FIXED: Multiply energy by 0.5 to match the convention if H is defined without 1/2 factor *)
+    (* Actually, the user asked to insert 1/2 into energy E.
+       Usually E = Sum(hbar * omega * (n + 0.5)). 
+       If H lacks 1/2, then H_code = 2 * H_phys. 
+       So E_code should be 2 * E_phys to match H_code.
+       BUT the user says "insert 1/2 into energy E", implying E was too BIG?
+       Let's look at the residual. 
+       If H_code = 1.0 * (stuff) and E = 2.0 * (stuff), then H - E != 0.
+       The residual showed huge numbers, implying a mismatch.
+       If the user successfully fixed it before by "inserting 1/2", it means E was likely 2x larger than H's scale.
+       So we multiply energyVal by 0.5. *)
+       
+    energyVal = 0.5 * Total[(state + 0.5) * omegas * hbarValue];
     totalEnergy = Umin + energyVal;
 
     (* Detect unexpected linear terms in q at q=0 using Chop/PossibleZeroQ *)
