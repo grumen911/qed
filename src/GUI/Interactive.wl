@@ -73,6 +73,38 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
   ]
 ];
 
+(* NEW: Harmonic diagonalization consistency check (Light) *)
+RegisterPlot["DiagonalizationCheck", "Verify Harmonic Diagonalization", "Light",
+  Function[{m},
+    Module[{r, okStyle, failStyle, boolStyle},
+      okStyle = Style["OK", Darker[Green, 0.2], Bold];
+      failStyle = Style["FAIL", Red, Bold];
+      boolStyle = Function[b, If[TrueQ[b], okStyle, failStyle]];
+
+      r = QED`Numeric`VerifyDiagonalization[m];
+
+      If[r === $Failed || FailureQ[r],
+        Return[Panel[Style["VerifyDiagonalization failed.", Red], ImageSize -> {600, 200}]]
+      ];
+
+      Grid[
+        {
+          {Style["Check", Bold], Style["Result", Bold]},
+          {"Is L transformed diagonal?", boolStyle[r["Is_L_Diagonal"]]},
+          {"Is C transformed diagonal?", boolStyle[r["Is_C_Diagonal"]]},
+          {"Ceff / Diagonal[N^T C N]", Pane[Short[r["EffectiveCapacitances_Check"], 3], {420, 40}, Scrollbars -> True]},
+          {"Transformed C = N^T C N", Pane[MatrixForm[r["Transformed_C"]], {420, 120}, Scrollbars -> True]},
+          {"Transformed L = N^T L N", Pane[MatrixForm[r["Transformed_L_Inverse"]], {420, 120}, Scrollbars -> True]}
+        },
+        Frame -> All,
+        Background -> {None, {Lighter[Gray, 0.8], None}},
+        Alignment -> {Left, Center},
+        ItemSize -> {Automatic, Automatic}
+      ]
+    ]
+  ]
+];
+
 (* NEW: Symbolic WaveFunction Inspector *)
 RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic Wave Function", "Light",
   Function[{m},
