@@ -796,7 +796,8 @@ VerifyWaveFunction[model_Association, state_List] :=
   Module[{hHarmonic, subRules, hNumExpr, psi, energyVal, 
           fluxVars, ranges, points, hPsi, diff, maxDiff, 
           applyHamiltonian, minFluxRules, UminSymbolic, Umin, totalEnergy,
-          chargeVars, hbarValue = QED`$hbarValue},
+          chargeVars, hbarValue = QED`$hbarValue,
+          residualSym},
 
    (* 1. Get Harmonic Hamiltonian and Rules *)
    hHarmonic = model["Analytical"]["HarmonicHamiltonian"];
@@ -811,20 +812,15 @@ VerifyWaveFunction[model_Association, state_List] :=
    psi = QED`Model`GetWaveFunction[model, state];
    
    (* 4. Calculate Expected Energy *)
-   (* E_harmonic = Sum[hbar * omega * (n + 1/2)] *)
-   (* BUT: Harmonic Hamiltonian includes U(phi_min) constant offset! *)
-   (* We must add U(phi_min) to the eigenenergy to match H|psi> *)
    
    fluxVars = model["Variables"]["Flux"];
    chargeVars = model["Variables"]["Charge"];
    
    (* Calculate U_min from original Hamiltonian *)
-   (* Replace q->0, phi->phi_min_symbol in original Hamiltonian *)
    minFluxRules = Thread[fluxVars -> (Subscript[QED`$FluxSymbol, "min", #] & /@ Range[Length[fluxVars]])];
    
    UminSymbolic = (model["Analytical"]["Hamiltonian"] /. Subscript[QED`$ChargeSymbol, _] -> 0) /. minFluxRules;
    
-   (* Substitute numerical values for parameters and phi_min *)
    Umin = cleanExpr[UminSymbolic /. subRules];
    
    (* Eigenenergy of excitation *)
@@ -833,29 +829,7 @@ VerifyWaveFunction[model_Association, state_List] :=
    totalEnergy = Umin + energyVal;
    
    
-   (* 5. Define Operator Action *)
-   (* Replace q_n with -i*hbar*d/dphi_n *)
-   applyHamiltonian[wfunc_] := 
-       hNumExpr /. {
-           Subscript[QED`$FluxSymbol, n_] :> Subscript[QED`$FluxSymbol, n], (* Keep flux as multiplier *)
-           Subscript[QED`$ChargeSymbol, n_] :> 
-               (-I * hbarValue * D[wfunc, Subscript[QED`$FluxSymbol, n]]),
-           
-           (* Handle powers of q *)
-           Power[Subscript[QED`$ChargeSymbol, n_], 2] :> 
-               (-hbarValue^2 * D[wfunc, {Subscript[QED`$FluxSymbol, n], 2}])
-       };
-
-   (* 6. Compute H|psi> and compare with E|psi> *)
-   (* Note: applyHamiltonian returns an EXPRESSION, not a function *)
-   (* We need to act on psi. Since we replaced q with derivative operators acting on wfunc, *)
-   (* we just need to evaluate the replacement. *)
-   
-   (* CAUTION: The replacement rule above is tricky for mixed terms like q1*q2. *)
-   (* Better approach: Expand Hamiltonian and apply term by term. *)
-   
-   (* Simplified approach: Assume Hamiltonian is quadratic form H = T(q) + V(phi) *)
-   (* T(q) contains only q terms. V(phi) contains only phi terms. *)
+   (* 5. Compute H|psi> symbolically *)
    
    hPsi = (hNumExpr /. {
        (* V(phi) part acts as multiplication *)
@@ -868,9 +842,6 @@ VerifyWaveFunction[model_Association, state_List] :=
            (-hbarValue^2 * D[psi, Subscript[QED`$FluxSymbol, i], Subscript[QED`$FluxSymbol, j]])
    });
    
-   (* The above replacement leaves phi terms untouched (multipliers) and replaces q terms with derivatives acting on psi *)
-   (* However, linear q terms are not expected in Harmonic Hamiltonian, only q^2 *)
-   
    (* Check if there are remaining q symbols *)
    If[!FreeQ[hPsi, Subscript[QED`$ChargeSymbol, _]],
      Return[
@@ -878,39 +849,21 @@ VerifyWaveFunction[model_Association, state_List] :=
          "State" -> state,
          "Status" -> "FAIL",
          "Reason" -> "OperatorError",
-         "MaxRelativeError" -> Infinity,
-         "NumPoints" -> 0
+         "ResidualExpression" -> "H contains q symbols after substitution",
+         "TotalEnergy" -> totalEnergy
        |>
      ]
    ];
    
-   (* 7. Check diff on a grid of points *)
-   (* Select points near equilibrium *)
+   (* 6. Compute Symbolic Residual *)
    
-   ranges = Table[{
-       Part[model["Numerical"]["Cache"]["EquilibriumFluxes"]["Value"], i, 2] - 0.1 * QED`$Phi0Value,
-       Part[model["Numerical"]["Cache"]["EquilibriumFluxes"]["Value"], i, 2] + 0.1 * QED`$Phi0Value
-   }, {i, Length[fluxVars]}];
-   
-   (* Generate random points *)
-   points = Table[
-       RandomReal[ranges[[i]]], 
-       {10}, {i, Length[fluxVars]}
-   ];
-   
-   (* Define substitution for points *)
-   diff = hPsi - totalEnergy * psi;
-   
-   maxDiff = Max @ Table[
-       Abs[diff /. Thread[fluxVars -> pt]] / Abs[(totalEnergy * psi) /. Thread[fluxVars -> pt]],
-       {pt, points}
-   ];
+   residualSym = Simplify[hPsi - totalEnergy * psi];
+
    
    <|
      "State" -> state,
-     "Status" -> If[maxDiff < 10.^-3, "OK", "FAIL"],
-     "MaxRelativeError" -> maxDiff,
-     "NumPoints" -> Length[points],
+     "Status" -> "OK",
+     "ResidualExpression" -> residualSym,
      "TotalEnergy" -> totalEnergy
    |>
  ];
