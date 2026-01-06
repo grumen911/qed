@@ -2,7 +2,6 @@ BeginPackage["QED`Model`"];
 
 Needs["QED`CircuitTopology`"];
 Needs["QED`Numeric`"];
-Needs["QED`Numeric`HarmonicOscillator`"]; (* FIX: Import explicitly to use DiagonalizeHarmonicHamiltonian *)
 Needs["QED`Analytic`"];
 
 CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]"
