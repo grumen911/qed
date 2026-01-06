@@ -280,6 +280,7 @@ BuildHarmonicWavefunction[
     nodes, fluxVars, minFluxVars,
     deltaPhi,     (* Vector of flux deviations *)
     normalCoords, (* Vector of normal coordinates q *)
+    invT,         (* Inverse transformation matrix *)
     detT,         (* Jacobian determinant *)
     wavefunctions1D,
     psiTotal,
@@ -298,17 +299,19 @@ BuildHarmonicWavefunction[
     
     
     (* 1. Coordinate Transformation *)
-    (* transformationMatrix now directly maps deltaPhi -> normalCoords *)
+    (* δφ = T . q  =>  q = T^-1 . δφ *)
     
     deltaPhi = fluxVars - minFluxVars;
     
-    (* Direct transformation: q = transformationMatrix . δφ *)
-    normalCoords = transformationMatrix . deltaPhi;
+    (* Inverse of T to express q in terms of φ *)
+    invT = Inverse[transformationMatrix];
+    normalCoords = invT . deltaPhi;
     
     (* Jacobian of transformation φ -> q *)
-    (* If q = K . φ, then dφ = (1/|det K|) dq *)
-    (* Normalization: ∫|ψ(φ)|² dφ = ∫|ψ(K·φ)|² (1/|det K|) dφ = 1 *)
-    (* So ψ(φ) = sqrt(|det K|) * ψ_normal(K·φ) *)
+    (* dφ = |det T| dq *)
+    (* Normalization condition: ∫|ψ(φ)|² dφ = 1 *)
+    (* ∫|ψ(q)|² |det T| dq = 1 *)
+    (* If ψ(q) is normalized as ∫|ψ(q)|² dq = 1, then we need factor 1/sqrt(|det T|) *)
     
     detT = Abs[Det[transformationMatrix]];
     
@@ -336,7 +339,7 @@ BuildHarmonicWavefunction[
     ];
     
     (* 3. Combine with Jacobian factor *)
-    psiTotal = Sqrt[detT] * Times @@ wavefunctions1D;
+    psiTotal = (1 / Sqrt[detT]) * Times @@ wavefunctions1D;
     
     psiTotal
 ];
