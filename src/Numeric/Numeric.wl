@@ -33,6 +33,10 @@ PlasmonFrequenciesVsFlux::usage =
 
 VerifyWaveFunction::usage = "VerifyWaveFunction[model, state] verifies that H|psi> = E|psi>.";
 
+VerifyDiagonalization::usage = "VerifyDiagonalization[model] numerically checks if the calculated \
+FluxTransform matrix correctly diagonalizes both Capacitance and Inductance matrices. \
+Returns <|'Is_L_Diagonal', 'Is_C_Diagonal', ...|>.";
+
 
 Begin["`Private`"];
 
@@ -911,6 +915,40 @@ VerifyWaveFunction[model_Association, state_List] := Block[
       "TotalEnergy" -> totalEnergy
     |>
   ]
+];
+
+(*
+  Verification: Check if transformation matrix correctly diagonalizes the system.
+  N^T L^-1 N should be diagonal.
+  N^T C N should be diagonal.
+*)
+VerifyDiagonalization[model_Association] := Module[
+  {capNum, invLNum, diagData, Nmat, matC_diag, matinvL_diag},
+  
+  capNum = QED`Model`GetNumericalQuantity[model, "CapacitanceMatrixNumerical"];
+  invLNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixInverseNumerical"];
+  diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
+  
+  If[AnyTrue[{capNum, invLNum, diagData}, FailureQ], Return[$Failed]];
+  
+  Nmat = diagData["FluxTransform"];
+  
+  (* Потенциал: phi^T L^-1 phi -> (N xi)^T L^-1 (N xi) = xi^T (N^T L^-1 N) xi *)
+  matinvL_diag = Transpose[Nmat] . invLNum . Nmat;
+  
+  (* Кинетика: Q^T C^-1 Q. 
+     Заряд Q связан с импульсом пи: Q = (N^T)^-1 pi.
+     pi^T (N^-1) C^-1 (N^T)^-1 pi = pi^T (N^T C N)^-1 pi.
+     Значит, проверяем N^T C N на диагональность. 
+  *)
+  matC_diag = Transpose[Nmat] . capNum . Nmat;
+  
+  <|
+    "Transformed_L_Inverse" -> Chop[matinvL_diag, 10^-20],
+    "Transformed_C" -> Chop[matC_diag, 10^-20],
+    "Is_L_Diagonal" -> DiagonalMatrixQ[Chop[matinvL_diag, 10^-10]],
+    "Is_C_Diagonal" -> DiagonalMatrixQ[Chop[matC_diag, 10^-10]]
+  |>
 ];
 
 
