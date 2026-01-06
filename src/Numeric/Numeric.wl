@@ -851,9 +851,9 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     energyVal = Total[(state + 0.5) * omegas * hbarValue];
     totalEnergy = Umin + energyVal;
 
-    (* Detect unexpected linear terms in q at q=0 *)
+    (* Detect unexpected linear terms in q at q=0 using Chop/PossibleZeroQ *)
     gradQ0 = cleanExpr[D[hNumExpr, {chargeVars, 1}] /. q0Rules];
-    If[!TrueQ[gradQ0 === ConstantArray[0, Length[chargeVars]]],
+    If[!AllTrue[gradQ0, PossibleZeroQ],
       Return[<|
         "State" -> state,
         "Status" -> "FAIL",
