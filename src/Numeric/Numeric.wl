@@ -933,25 +933,29 @@ VerifyDiagonalization[model_Association] := Module[
   invLNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixInverseNumerical"];
   diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
 
-  If[AnyTrue[{capNum, invLNum, diagData}, FailureQ],
+  If[AnyTrue[{capNum, invLNum, diagData}, # === $Failed || FailureQ[#] &],
     Return[$Failed]
   ];
 
-  Nmat = diagData["FluxTransform"];
+  If[!AssociationQ[diagData] || !MatrixQ[capNum] || !MatrixQ[invLNum],
+    Return[$Failed]
+  ];
 
-  matinvL_diag = Transpose[Nmat] . invLNum . Nmat;
-  matC_diag = Transpose[Nmat] . capNum . Nmat;
+    Nmat = diagData["FluxTransform"];
 
-  expectedCaps = diagData["EffectiveCapacitances"];
-  calculatedCaps = Diagonal[matC_diag];
+    matinvL_diag = Transpose[Nmat] . invLNum . Nmat;
+    matC_diag = Transpose[Nmat] . capNum . Nmat;
 
-  <|
-    "Transformed_L_Inverse" -> Chop[matinvL_diag, 10^-20],
-    "Transformed_C" -> Chop[matC_diag, 10^-20],
-    "Is_L_Diagonal" -> DiagonalMatrixQ[Chop[matinvL_diag, 10^-10]],
-    "Is_C_Diagonal" -> DiagonalMatrixQ[Chop[matC_diag, 10^-10]],
-    "EffectiveCapacitances_Check" -> expectedCaps / calculatedCaps
-  |>
+    expectedCaps = diagData["EffectiveCapacitances"];
+    calculatedCaps = Diagonal[matC_diag];
+
+    <|
+      "Transformed_L_Inverse" -> Chop[matinvL_diag, 10^-20],
+      "Transformed_C" -> Chop[matC_diag, 10^-20],
+      "Is_L_Diagonal" -> DiagonalMatrixQ[Chop[matinvL_diag, 10^-10]],
+      "Is_C_Diagonal" -> DiagonalMatrixQ[Chop[matC_diag, 10^-10]],
+      "EffectiveCapacitances_Check" -> expectedCaps / calculatedCaps
+    |>
 ];
 
 

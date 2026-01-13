@@ -215,7 +215,7 @@ ComputePlotData[plotId_, model_Association] :=
       graphic = If[MissingQ[info], 
          Graphics[{Red, Text["Unknown Plot ID"]}],
          func = info["Compute"];
-         Check[func[$CurrentModel], Graphics[{Red, Text["Computation Failed"]}]]
+         func[$CurrentModel]
       ];
       
       (* 3. Return Result AND The Updated Model State *)
