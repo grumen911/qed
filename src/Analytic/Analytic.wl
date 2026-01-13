@@ -18,7 +18,7 @@ Arguments:
   topology: Association describing the circuit topology
   frequencies: List of normal mode frequencies {ω₁, ω₂, ...}
   effectiveCapacitances: List of effective capacitances {C₁, C₂, ...} for each mode
-  transformationMatrix: Matrix T such that δφ = T · q_normal
+  transformationMatrix: Matrix T such that δφ_lab = T . q_normal, where δφ are flux deviations from equilibrium.
   quantumNumbers: List of integers {n₁, n₂, ...} specifying the state
 
 Returns:
@@ -299,19 +299,20 @@ BuildHarmonicWavefunction[
     
     
     (* 1. Coordinate Transformation *)
-    (* δφ = T . q  =>  q = T^-1 . δφ *)
-    
+    (* The transformationMatrix T (FluxTransform) converts from normal mode coordinates to lab coordinates: *)
+    (* δφ_lab = T . q_norm *)
+
     deltaPhi = fluxVars - minFluxVars;
     
-    (* Inverse of T to express q in terms of φ *)
-    invT = Inverse[transformationMatrix];
-    normalCoords = invT . deltaPhi;
+    (* To express normal coordinates q in terms of lab coordinates φ, use inverse of T *)
+    normalCoords = Inverse[transformationMatrix] . deltaPhi;
     
     (* Jacobian of transformation φ -> q *)
-    (* dφ = |det T| dq *)
-    (* Normalization condition: ∫|ψ(φ)|² dφ = 1 *)
-    (* ∫|ψ(q)|² |det T| dq = 1 *)
-    (* If ψ(q) is normalized as ∫|ψ(q)|² dq = 1, then we need factor 1/sqrt(|det T|) *)
+    (* The transformation from normal (q) to lab (φ) coordinates is δφ = T . q *)
+    (* The volume elements are related by dφ = |det(T)| dq *)
+    (* Normalization: ∫|ψ(φ)|² dφ = 1 => ∫|ψ_norm(q)|² |det(T)| dq = 1 *)
+    (* So, if ψ_norm(q) is the normalized wavefunction in normal coords, *)
+    (* the wavefunction in lab coords is ψ(φ) = ψ_norm(q(φ)) / Sqrt[Abs[Det[T]]] *)
     
     detT = Abs[Det[transformationMatrix]];
     
