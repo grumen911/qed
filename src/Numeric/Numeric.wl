@@ -926,7 +926,7 @@ VerifyWaveFunction[model_Association, state_List] := Block[
 
 VerifyDiagonalization[model_Association] := Module[
   {capNum, invLNum, diagData, 
-   Nmat, matC_diag, matinvL_diag, 
+   Nmat, matCDiag, matInvLDiag, 
    expectedCaps, calculatedCaps},
   
   capNum = QED`Model`GetNumericalQuantity[model, "CapacitanceMatrixNumerical"];
@@ -943,17 +943,17 @@ VerifyDiagonalization[model_Association] := Module[
 
     Nmat = diagData["FluxTransform"];
 
-    matinvL_diag = Transpose[Nmat] . invLNum . Nmat;
-    matC_diag = Transpose[Nmat] . capNum . Nmat;
+    matInvLDiag = Transpose[Nmat] . invLNum . Nmat;
+    matCDiag = Transpose[Nmat] . capNum . Nmat;
 
     expectedCaps = diagData["EffectiveCapacitances"];
-    calculatedCaps = Diagonal[matC_diag];
+    calculatedCaps = Diagonal[matCDiag];
 
     <|
-      "Transformed_L_Inverse" -> Chop[matinvL_diag, 10^-20],
-      "Transformed_C" -> Chop[matC_diag, 10^-20],
-      "Is_L_Diagonal" -> DiagonalMatrixQ[Chop[matinvL_diag, 10^-10]],
-      "Is_C_Diagonal" -> DiagonalMatrixQ[Chop[matC_diag, 10^-10]],
+      "Transformed_L_Inverse" -> Chop[matInvLDiag, 10^-20],
+      "Transformed_C" -> Chop[matCDiag, 10^-20],
+      "Is_L_Diagonal" -> DiagonalMatrixQ[Chop[matInvLDiag, 10^-10]],
+      "Is_C_Diagonal" -> DiagonalMatrixQ[Chop[matCDiag, 10^-10]],
       "EffectiveCapacitances_Check" -> expectedCaps / calculatedCaps
     |>
 ];
