@@ -534,12 +534,391 @@ FindPotentialMinimumContinuation[
 
 
 
-(*** NOTE: The remainder of the file is unchanged; only VerifyDiagonalization Print statements were removed. ***)
 
+(*
+  Physics: Normal mode frequencies from harmonic approximation.
+  
+  For quadratic Hamiltonian H = (1/2) q^T C^(-1) q + (1/2) φ^T L^(-1) φ,
+  normal modes satisfy:
+  
+  ω_i^2 = eigenvalues(C⁻¹ · L⁻¹)
+  
+  Returns Association with:
+  - "Frequencies": ω_i in rad/s (SI units), sorted. Complex if unstable modes exist.
+  - "IsStable": True if all ω² > 0 (stable equilibrium)
+  - "NumUnstableModes": Count of modes with ω² < 0 (saddle point indicator)
+  
+  Reference: Devoret lectures, Les Houches (2004), Section 3.3
+*)
+
+ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
+  {omega2, frequencies, threshold = 10^(-10)},
+  
+
+  (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
+  omega2 = Eigenvalues[invCap . invInd];
+
+  (* Вычислить sqrt, для отрицательных → комплексные *)
+  frequencies = Sort[Sqrt[omega2 + 0. I], Re[#1] < Re[#2] &];
+  
+  (* Вернуть с диагностикой *)
+  <|
+    "Frequencies" -> Chop[frequencies],
+    "IsStable" -> AllTrue[omega2, # > threshold &],
+    "NumUnstableModes" -> Count[omega2, x_ /; x < -threshold]
+  |>
+];
+
+
+
+(*
+  Physics: Plasmon frequencies as function of external flux.
+  
+  Returns pure function ω[φext_?NumericQ] where φext is dimensionless (in Φ₀ units).
+  For each flux value, performs:
+  1. FindPotentialMinimumContinuation to find equilibrium (fast: ~1ms)
+  2. Eigenvalue decomposition of C⁻¹·L⁻¹
+  3. Returns sorted frequencies ω_i in rad/s
+  
+  Performance: Uses continuation method by default (~43x faster than global search).
+  Fallback: If continuation derivatives unavailable, returns $Failed.
+  
+  Reference: Koch et al., PRA 76, 042319 (2007), Eq. 8
+*)
+
+
+PlasmonFrequenciesVsFlux[model_Association] := Module[
+  {
+    capSym, lindInvSym, topology, rulesBase, phiExtSym, phi0,
+    gradientRescaled, hessianRescaled, fluxVars, nodes,
+    callCounter = 0, totalContinuationTime = 0, totalEigenTime = 0, totalOverhead = 0,
+    useContinuation
+  },
+  
+  (* Аналитические матрицы из модели *)
+  capSym     = model["Analytical"]["CapacitanceMatrix"];
+  lindInvSym = model["Analytical"]["InductanceMatrix"];  (* L⁻¹ *)
+  topology   = model["Topology"];  
+
+  
+  (* Физические константы *)
+  phiExtSym = QED`$PhiExt;
+  phi0      = QED`$Phi0Value;
+  
+  (* Извлечь узлы и переменные *)
+  nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  
+  (* Базовые правила подстановки БЕЗ внешнего потока и φ_min *)
+  rulesBase = DeleteCases[
+    model["SubstitutionRules"],
+    (phiExtSym :> _) | (Subscript[QED`$FluxSymbol, "min", _] :> _)
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ИЗВЛЕЧЕНИЕ CONTINUATION DERIVATIVES ИЗ КЭША                      *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  useContinuation = KeyExistsQ[model, "Numerical"] && 
+                    KeyExistsQ[model["Numerical"], "Cache"] &&
+                    KeyExistsQ[model["Numerical"]["Cache"], "ContinuationDerivatives"];
+  
+  If[useContinuation,
+    Module[{cache},
+      cache = model["Numerical"]["Cache"]["ContinuationDerivatives"];
+      gradientRescaled = Lookup[cache, "Gradient", $Failed];
+      hessianRescaled = Lookup[cache, "Hessian", $Failed];
+      
+      If[gradientRescaled === $Failed || hessianRescaled === $Failed,
+        useContinuation = False;
+        Print["[WARNING] Continuation derivatives not found in cache. This should not happen!"];
+      ];
+    ];
+  ];
+  
+  If[!useContinuation,
+    Print["[ERROR] PlasmonFrequenciesVsFlux requires continuation derivatives in model cache."];
+    Print["[ERROR] Make sure ComputeNumericalHarmonicPerturbation has been called."];
+    Return[$Failed];
+  ];
+  
+  (* ════════════════════════════════════════════════════════════════ *)
+  (* ВОЗВРАЩАЕМ ЧИСЛЕННУЮ ФУНКЦИЮ С ПРОФИЛИРОВАНИЕМ                   *)
+  (* ════════════════════════════════════════════════════════════════ *)
+  
+  Function[{phiExtDimensionless},
+    Module[{phiExtPhysical, rulesWithFlux, capNum, lindInvNum, 
+            invCapNum, omega2, frequencies, equilibriumRules,
+            tStart, tAfterContinuation, tAfterEigen, tEnd},
+      
+      If[!NumericQ[phiExtDimensionless],
+        Return[$Failed, Module]
+      ];
+
+      tStart = AbsoluteTime[];
+      callCounter++;
+      
+      (* Конвертировать φext из единиц Φ₀ в Weber *)
+      phiExtPhysical = phiExtDimensionless * phi0;
+      
+      (* Подставить текущее значение внешнего потока *)
+      rulesWithFlux = Append[rulesBase, phiExtSym -> phiExtPhysical];
+      
+      (* ════════════════════════════════════════════════════════════════ *)
+      (* ПРОФИЛИРОВАНИЕ: FindPotentialMinimumContinuation                 *)
+      (* ════════════════════════════════════════════════════════════════ *)
+      
+      equilibriumRules = FindPotentialMinimumContinuation[
+        gradientRescaled,
+        hessianRescaled,
+        fluxVars,
+        topology,
+        phiExtPhysical
+      ];
+
+      tAfterContinuation = AbsoluteTime[];
+      
+      rulesWithFlux = Join[rulesWithFlux, equilibriumRules];
+      
+      If[$DebugPlasmonFrequencies === True,
+        Print["lindInvSym before substitution:"];
+        Print[Short[lindInvSym, 2]];
+        Print["Contains φ_min? ", !FreeQ[lindInvSym, Subscript[QED`$FluxSymbol, "min", _]]];
+        Print["Contains PhiExt? ", !FreeQ[lindInvSym, QED`$PhiExt]];
+      ];
+
+      (* Численные матрицы *)
+      capNum     = capSym //. rulesWithFlux;
+      lindInvNum = lindInvSym //. rulesWithFlux;
+      
+      If[$DebugPlasmonFrequencies === True,
+        Print["lindInvNum after substitution:"];
+        Print[Short[lindInvNum, 2]];
+        Print["Contains symbols? ", !FreeQ[lindInvNum, _Symbol]];
+        Print["Numerical? ", MatrixQ[lindInvNum, NumericQ]];
+      ];
+
+      (* C⁻¹ *)
+      If[Det[capNum] == 0, Return[$Failed]];
+      invCapNum = Inverse[capNum];
+      
+      (* ════════════════════════════════════════════════════════════════ *)
+      (* ПРОФИЛИРОВАНИЕ: Eigenvalue computation                           *)
+      (* ════════════════════════════════════════════════════════════════ *)
+      
+      (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
+      omega2 = Eigenvalues[N[invCapNum . lindInvNum]];
+      
+      tAfterEigen = AbsoluteTime[];
+      
+      (* √ω² с сортировкой, комплексные если неустойчивость *)
+      frequencies = Sort[Sqrt[omega2 + 0. I], Re[#1] < Re[#2] &];
+      
+      tEnd = AbsoluteTime[];
+      
+      
+      (* ════════════════════════════════════════════════════════════════ *)
+      (* ПРОФИЛИРОВАНИЕ: Накопление статистики                            *)
+      (* ════════════════════════════════════════════════════════════════ *)
+      If[$DebugPlasmonFrequencies === True,
+        Module[{dtContinuation, dtEigen, dtOverhead, dtTotal},
+          dtContinuation = (tAfterContinuation - tStart) * 1000;
+          dtEigen = (tAfterEigen - tAfterContinuation) * 1000;
+          dtTotal = (tEnd - tStart) * 1000;
+          dtOverhead = dtTotal - dtContinuation - dtEigen;
+          
+          totalContinuationTime += dtContinuation;
+          totalEigenTime += dtEigen;
+          totalOverhead += dtOverhead;
+          
+          
+          (* Вывод для первой и каждой 10-й точки *)
+          If[callCounter == 1 || Mod[callCounter, 10] == 0,
+            Print["[PROFILE Point ", callCounter, "]"];
+            Print["  Continuation: ", Round[dtContinuation, 0.1], " ms"];
+            Print["  Eigenvalues: ", Round[dtEigen, 0.1], " ms"];
+            Print["  Overhead: ", Round[dtOverhead, 0.1], " ms"];
+            Print["  Total: ", Round[dtTotal, 0.1], " ms"];
+          ];
+          
+          (* Итоговый отчёт после 25 и 50 вызовов *)
+          If[callCounter > 20 && Mod[callCounter, 25] == 0,
+            Print[""];
+            Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
+            Print["  Continuation: ", Round[totalContinuationTime, 0.1], " ms (", 
+                  Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
+                  Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  Overhead: ", Round[totalOverhead, 0.1], " ms (", 
+                  Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  TOTAL: ", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], " ms"];
+            Print["  Average per point: ", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
+          ];
+        ];
+      ];
+
+      Chop[frequencies]
+    ]
+  ]
+];
+
+(* ════════════════════════════════════════════════════════════════ *)
+(*                       DEBUG FLAG                                 *)
+(* ════════════════════════════════════════════════════════════════ *)
+  
+
+PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},
+  (* подготовка численных функций из символики *)
+  sol
+];
+
+ComputeEvolution[model_, tmax_?NumericQ] := Module[{sol},
+  (* NDSolve *)
+  sol
+];
+
+
+(* Извлечь значение из записи кэша, вычисляя если нужно *)
+GetCacheEntry[cacheEntry_Association, model_Association] := Module[
+  {state, thunk},
+  
+  state = Lookup[cacheEntry, "State", "Unknown"];
+  
+  Which[
+    state === "Ready",
+      Lookup[cacheEntry, "Value", $Failed],
+    
+    state === "Lazy",
+      thunk = Lookup[cacheEntry, "Thunk", $Failed];
+      If[thunk === $Failed, $Failed, thunk[model]],
+    
+    True,
+      $Failed
+  ]
+];
 
 cleanExpr[expr_] := expr /. {Abs'[x_] :> Sign[x], Conjugate'[x_] :> Conjugate[x]};
 
-(*** VerifyWaveFunction definition unchanged in this commit ***)
+(*
+  VerifyWaveFunction:
+
+  Instead of pattern-based replacement of q_i q_j -> d/dphi_i d/dphi_j,
+  build the kinetic operator from the exact Hessian in charge variables.
+
+  If H(q,phi) = 1/2 q^T C^{-1} q + V(phi), then
+    H psi = -(hbar^2/2) Sum_{ij} (C^{-1})_{ij} d_i d_j psi + V(phi) psi.
+
+  This avoids fragile Times[...] pattern matching (Times is Flat/Orderless) [web:9][web:18].
+*)
+
+VerifyWaveFunction[model_Association, state_List] := Block[
+  {QED`Model`$CurrentModel = model},
+  Module[{m, topology, nodes, fluxVars, chargeVars, q0Rules,
+          diagData, omegas, hbarValue = QED`$hbarValue,
+          hHarmonic, subRules, hNumExpr, psi,
+          UminSymbolic, Umin, energyVal, totalEnergy,
+          gradQ0, invC, hessPsi, kineticPsi, potentialPsi, hPsi,
+          residualSym, dimCheck},
+
+    m = QED`Model`$CurrentModel;
+    topology = m["Topology"];
+    nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+
+    fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+    chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+    q0Rules = Thread[chargeVars -> 0];
+
+    (* Ensure harmonic diagonalization exists *)
+    diagData = QED`Model`GetNumericalQuantity[m, "HarmonicDiagonalization"];
+    omegas = diagData["NormalModeFrequencies"];
+
+    (* Harmonic Hamiltonian with numeric substitutions *)
+    hHarmonic = m["Analytical"]["HarmonicHamiltonian"];
+    subRules = m["SubstitutionRules"];
+    hNumExpr = cleanExpr[hHarmonic /. subRules];
+
+    (* Wavefunction *)
+    psi = QED`Model`GetWaveFunction[m, state];
+    If[FailureQ[psi],
+      Return[<|
+        "State" -> state,
+        "Status" -> "FAIL",
+        "Reason" -> "WaveFunctionError",
+        "ResidualExpression" -> "Failed to generate wavefunction",
+        "TotalEnergy" -> $Failed
+      |>]
+    ];
+
+    (* Potential energy at equilibrium (q->0, phi->phi_min) *)
+    UminSymbolic = (m["Analytical"]["Hamiltonian"] /. Subscript[QED`$ChargeSymbol, _] -> 0) /. 
+      Thread[fluxVars -> (Subscript[QED`$FluxSymbol, "min", #] & /@ nodes)];
+    Umin = cleanExpr[UminSymbolic /. subRules];
+
+    (* Eigenenergy of excitation *)
+    energyVal = Total[(state + 0.5) * omegas * hbarValue];
+    totalEnergy = Umin + energyVal;
+
+    (* Detect unexpected linear terms in q at q=0 using Chop/PossibleZeroQ *)
+    gradQ0 = cleanExpr[D[hNumExpr, {chargeVars, 1}] /. q0Rules];
+    If[!AllTrue[gradQ0, PossibleZeroQ],
+      Return[<|
+        "State" -> state,
+        "Status" -> "FAIL",
+        "Reason" -> "LinearChargeTerms",
+        "ResidualExpression" -> gradQ0,
+        "TotalEnergy" -> totalEnergy
+      |>]
+    ];
+
+    (* Kinetic matrix invC_{ij} = d^2H / dq_i dq_j at q=0 *)
+    invC = cleanExpr[D[hNumExpr, {chargeVars, 2}] /. q0Rules];
+    If[!MatrixQ[invC],
+      Return[<|
+        "State" -> state,
+        "Status" -> "FAIL",
+        "Reason" -> "KineticMatrixError",
+        "ResidualExpression" -> invC,
+        "TotalEnergy" -> totalEnergy
+      |>]
+    ];
+
+    (* Build operator action *)
+    hessPsi = Table[
+      D[psi, fluxVars[[i]], fluxVars[[j]]],
+      {i, Length[fluxVars]},
+      {j, Length[fluxVars]}
+    ];
+
+    kineticPsi = -(hbarValue^2/2) * Total[Flatten[invC * hessPsi]];
+    potentialPsi = (hNumExpr /. q0Rules) * psi;
+
+    hPsi = Simplify[kineticPsi + potentialPsi];
+
+    If[!FreeQ[hPsi, Subscript[QED`$ChargeSymbol, _]],
+      Return[<|
+        "State" -> state,
+        "Status" -> "FAIL",
+        "Reason" -> "OperatorError",
+        "ResidualExpression" -> "H contains q symbols after operator construction",
+        "TotalEnergy" -> totalEnergy
+      |>]
+    ];
+
+    residualSym = Simplify[hPsi - totalEnergy * psi];
+    
+    (* NEW: Dimensionless Check *)
+    (* Substitute phi -> phi * Phi0 into the residual expression *)
+    dimCheck = residualSym /. Thread[fluxVars -> fluxVars * QED`$Phi0Value];
+
+    <|
+      "State" -> state,
+      "Status" -> "OK",
+      "ResidualExpression" -> residualSym,
+      "DimensionlessResidual" -> dimCheck,
+      "TotalEnergy" -> totalEnergy
+    |>
+  ]
+];
 
 (* ════════════════════════════════════════════════════════════════ *)
 (* 		VERIFICATION                                                *)
@@ -555,14 +934,14 @@ VerifyDiagonalization[model_Association] := Module[
   diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
 
   If[AnyTrue[{capNum, invLNum, diagData}, FailureQ],
-     Return[$Failed]
+    Return[$Failed]
   ];
-  
+
   Nmat = diagData["FluxTransform"];
-  
+
   matinvL_diag = Transpose[Nmat] . invLNum . Nmat;
   matC_diag = Transpose[Nmat] . capNum . Nmat;
-  
+
   expectedCaps = diagData["EffectiveCapacitances"];
   calculatedCaps = Diagonal[matC_diag];
 
