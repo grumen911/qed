@@ -238,31 +238,37 @@ BuildPotentialGradient[hamiltonian_, topology_Association] :=
   Reference: Koch et al., PRA 76, 042319 (2007), Eq. (6-8)
 *)
 
+(* В src/Analytic/Analytic.wl *)
+
 BuildHarmonicHamiltonian[hamiltonian_, topology_Association] := 
- Module[{nodes, fluxVars, chargeVars, minSymbols, series, degree, result},
+ Module[{nodes, fluxVars, minSymbols, deltas, t, seriesTotalDeg},
   
   nodes = getIndependentNodes[topology];
+  
+  (* Исходные переменные потока *)
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+  
+  (* Символы минимума *)
   minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
   
-  (* Series expansion to O(φ²) around φ_min *)
-  series = Normal @ Series[
-    hamiltonian,
-    Sequence @@ MapThread[{#1, #2, 2} &, {fluxVars, minSymbols}]
-  ] // Expand;
+  (* Отклонения от минимума: d_i = phi_i - phi_min_i *)
+  deltas = fluxVars - minSymbols;
   
-  (* Helper: total polynomial degree in flux variables *)
-  degree[term_] := Total @ Exponent[term, fluxVars];
+  (* Метод t-scaling (Total Degree Truncation):
+     1. Параметризуем смещение: phi = phi_min + t * delta
+     2. Раскладываем по t до 2-го порядка.
+     3. Полагаем t -> 1.
+     Это гарантирует, что остаются только члены с суммарной степенью 
+     отклонений <= 2.
+  *)
   
-  (* Keep only constant (degree 0) and quadratic (degree 2) terms *)
-  result = Total @ Cases[
-    If[Head[series] === Plus, List @@ series, {series}],
-    term_ /; degree[term] == 0 || degree[term] == 2
-  ];
-  
-  (* Collect by physical variables for readability, simplify coefficients *)
-  Collect[result, Join[fluxVars, chargeVars], Simplify]
+  seriesTotalDeg = Normal @ Series[
+    hamiltonian /. Thread[fluxVars -> (minSymbols + t * deltas)],
+    {t, 0, 2}
+  ] /. t -> 1;
+
+  (* Группируем результат для читаемости *)
+  Collect[seriesTotalDeg, Join[fluxVars, Subscript[QED`$ChargeSymbol, #] & /@ nodes], Simplify]
  ];
 
 
