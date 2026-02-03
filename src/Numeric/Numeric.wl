@@ -34,7 +34,7 @@ PlasmonFrequenciesVsFlux::usage =
   "PlasmonFrequenciesVsFlux[model] возвращает численную функцию ω[φext_?NumericQ], \
 где φext в единицах Φ₀. Возвращает список частот {ω₁, ω₂, ...} в rad/s.";
 
-VerifyWaveFunction::usage = "VerifyWaveFunction[model, state] verifies that H|psi> = E|psi>.";
+VerifyWaveFunction::usage = "VerifyWaveFunction[model, state] verifies that H_harm|psi> = E_harm|psi>.";
 
 VerifyDiagonalization::usage = "VerifyDiagonalization[model] numerically checks if the calculated \
 FluxTransform matrix correctly diagonalizes both Capacitance and Inductance matrices. \
@@ -552,8 +552,7 @@ FindPotentialMinimumContinuation[
 *)
 
 ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
-  {omega2, frequencies, threshold = 10^(-10)},
-  
+  {omega2, frequencies, threshold = 10^(-10)},\n  
 
   (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
   omega2 = Eigenvalues[invCap . invInd];
@@ -744,15 +743,15 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
           (* Итоговый отчёт после 25 и 50 вызовов *)
           If[callCounter > 20 && Mod[callCounter, 25] == 0,
             Print[""];
-            Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
-            Print["  Continuation: ", Round[totalContinuationTime, 0.1], " ms (", 
-                  Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-            Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
-                  Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-            Print["  Overhead: ", Round[totalOverhead, 0.1], " ms (", 
-                  Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-            Print["  TOTAL: ", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], " ms"];
-            Print["  Average per point: ", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
+            Print[\"[PROFILE SUMMARY after \", callCounter, \" calls]\"];
+            Print[\"  Continuation: \", Round[totalContinuationTime, 0.1], \" ms (\", 
+                  Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], \"%) \"];
+            Print[\"  Eigenvalues: \", Round[totalEigenTime, 0.1], \" ms (\", 
+                  Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], \"%) \"];
+            Print[\"  Overhead: \", Round[totalOverhead, 0.1], \" ms (\", 
+                  Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], \"%) \"];
+            Print[\"  TOTAL: \", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], \" ms \"];
+            Print[\"  Average per point: \", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], \" ms \"];
           ];
         ];
       ];
@@ -802,49 +801,59 @@ cleanExpr[expr_] := expr /. {Abs'[x_] :> Sign[x], Conjugate'[x_] :> Conjugate[x]
 (*
   VerifyWaveFunction:
   
-  Verifies that the numerical Hamiltonian H (with substituted parameters) 
-  satisfies H|psi> = E|psi> when charges are replaced by derivatives:
-  q_i -> -i*hbar*d/dphi_i.
+  Verifies that the HARMONIC Hamiltonian H_harm (with substituted parameters) 
+  satisfies H_harm|psi> = E_harm|psi> when charges are replaced by derivatives.
   
-  Uses already computed "HamiltonianNumerical" from model cache to ensure consistency.
+  NOTE: This uses the harmonic approximation Hamiltonian, not the full non-linear one,
+  because the wavefunctions are eigenstates of the harmonic oscillator.
 *)
 
 VerifyWaveFunction[model_Association, state_List] := Block[
   {QED`Model`$CurrentModel = model},
   Module[{
-    hamNum, topology, nodes, fluxVars, 
+    hamSym, subRules, eqFluxes, hamNum,
+    topology, nodes, fluxVars, 
     potentialNumeric, kineticNumeric,
     diagData, omegas, hbarValue = QED`$hbarValue,
-    psi, Umin, energyVal, totalEnergy,
-    hPsi, ePsi, residual, minFluxRules, phiToMinVal
+    psi, constTerm, energyVal,
+    hPsi, ePsi, residual, phiToMinVal
   },
 
-    (* 1. Get Numerical Hamiltonian (parameters already substituted) *)
-    hamNum = QED`Model`GetNumericalQuantity[model, "HamiltonianNumerical"];
-    If[FailureQ[hamNum], Return[<|"Status" -> "FAIL", "Reason" -> "NumericalHamiltonianMissing"|>]];
+    (* 1. Get Symbolic Harmonic Hamiltonian *)
+    hamSym = model["Analytical"]["HarmonicHamiltonian"];
+    If[MissingQ[hamSym], Return[<|"Status" -> "FAIL", "Reason" -> "HarmonicHamiltonianMissing"|>]];
 
-    (* 2. Extract Topology Variables *)
+    (* 2. Get Substitution Rules and Equilibrium Fluxes *)
+    subRules = model["SubstitutionRules"];
+    eqFluxes = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
+    If[FailureQ[eqFluxes], Return[<|"Status" -> "FAIL", "Reason" -> "EquilibriumFluxesMissing"|>]];
+    
+    (* 3. Substitute to get Numerical Harmonic Hamiltonian *)
+    (* Note: eqFluxes rules replace Subscript[φ, "min", i] which appear in H_harm *)
+    hamNum = hamSym /. subRules /. eqFluxes;
+
+    (* 4. Extract Topology Variables *)
     topology = model["Topology"];
     nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
     fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
     
-    (* 3. Separate Kinetic and Potential parts *)
+    (* 5. Separate Kinetic and Potential parts *)
     (* Potential: set charges to 0 *)
     potentialNumeric = hamNum /. Subscript[QED`$ChargeSymbol, _] -> 0;
     
     (* Kinetic: subtract potential from total *)
     kineticNumeric = hamNum - potentialNumeric;
 
-    (* 4. Get Diagonalization Data *)
+    (* 6. Get Diagonalization Data (for omegas) *)
     diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
     If[FailureQ[diagData], Return[<|"Status" -> "FAIL", "Reason" -> "DiagDataMissing"|>]];
     omegas = diagData["NormalModeFrequencies"];
     
-    (* 5. Get Wavefunction *)
+    (* 7. Get Wavefunction *)
     psi = QED`Model`GetWaveFunction[model, state];
     If[FailureQ[psi], Return[<|"Status" -> "FAIL", "Reason" -> "WaveFunctionError"|>]];
 
-    (* 6. Construct Kinetic Operator Action *)
+    (* 8. Construct Kinetic Operator Action *)
     (* Replace q_i * q_j -> -hbar^2 * D[psi, phi_i, phi_j] *)
     
     hPsi = kineticNumeric /. {
@@ -857,22 +866,22 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     (* Add Potential Energy part *)
     hPsi = hPsi + potentialNumeric * psi;
 
-    (* 7. Calculate Total Energy *)
-    (* E_total = U(phi_min) + sum(hbar * omega * (n + 1/2)) *)
+    (* 9. Calculate Expected Energy *)
+    (* E_harm = U_harm(min) + sum(hbar * omega * (n + 1/2)) *)
+    (* Check for constant term in potentialNumeric by setting all phi variables to their min values *)
+    (* Wait, H_harm is expanded around phi_min. If we set phi -> phi_min_val, we should get the constant term *)
     
-    minFluxRules = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
-    
-    (* Map phi_i -> phi_min_i_val *)
     phiToMinVal = Table[
-       Subscript[QED`$FluxSymbol, n] -> (Subscript[QED`$FluxSymbol, "min", n] /. minFluxRules),
+       Subscript[QED`$FluxSymbol, n] -> (Subscript[QED`$FluxSymbol, "min", n] /. eqFluxes),
        {n, nodes}
     ];
     
-    Umin = potentialNumeric /. phiToMinVal;
-    energyVal = Umin + Total[(state + 0.5) * omegas * hbarValue];
+    constTerm = potentialNumeric /. phiToMinVal;
+    
+    energyVal = constTerm + Total[(state + 0.5) * omegas * hbarValue];
     ePsi = energyVal * psi;
 
-    (* 8. Residual *)
+    (* 10. Residual *)
     residual = Simplify[hPsi - ePsi];
 
     <|
