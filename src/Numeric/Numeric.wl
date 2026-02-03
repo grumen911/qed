@@ -552,7 +552,7 @@ FindPotentialMinimumContinuation[
 *)
 
 ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
-  {omega2, frequencies, threshold = 10^(-10)},\n  
+  {omega2, frequencies, threshold = 10^(-10)},
 
   (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
   omega2 = Eigenvalues[invCap . invInd];
@@ -743,15 +743,15 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
           (* Итоговый отчёт после 25 и 50 вызовов *)
           If[callCounter > 20 && Mod[callCounter, 25] == 0,
             Print[""];
-            Print[\"[PROFILE SUMMARY after \", callCounter, \" calls]\"];
-            Print[\"  Continuation: \", Round[totalContinuationTime, 0.1], \" ms (\", 
-                  Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], \"%) \"];
-            Print[\"  Eigenvalues: \", Round[totalEigenTime, 0.1], \" ms (\", 
-                  Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], \"%) \"];
-            Print[\"  Overhead: \", Round[totalOverhead, 0.1], \" ms (\", 
-                  Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], \"%) \"];
-            Print[\"  TOTAL: \", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], \" ms \"];
-            Print[\"  Average per point: \", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], \" ms \"];
+            Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
+            Print["  Continuation: ", Round[totalContinuationTime, 0.1], " ms (", 
+                  Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
+                  Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  Overhead: ", Round[totalOverhead, 0.1], " ms (", 
+                  Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
+            Print["  TOTAL: ", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], " ms"];
+            Print["  Average per point: ", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
           ];
         ];
       ];
@@ -856,7 +856,7 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     (* 8. Construct Kinetic Operator Action *)
     (* Replace q_i * q_j -> -hbar^2 * D[psi, phi_i, phi_j] *)
     
-    hPsi = kineticNumeric /. {
+    hPsi = Expand[kineticNumeric] /. {
         Times[x___, Subscript[QED`$ChargeSymbol, i_], Subscript[QED`$ChargeSymbol, j_], y___] :> 
             x * (-hbarValue^2 * D[psi, Subscript[QED`$FluxSymbol, i], Subscript[QED`$FluxSymbol, j]]) * y,
         Power[Subscript[QED`$ChargeSymbol, i_], 2] :> 
@@ -864,7 +864,7 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     };
     
     (* Add Potential Energy part *)
-    hPsi = hPsi + potentialNumeric * psi;
+    hPsi = hPsi + potentialNumeric * psi // Simplify;
 
     (* 9. Calculate Expected Energy *)
     (* E_harm = U_harm(min) + sum(hbar * omega * (n + 1/2)) *)
