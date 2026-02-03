@@ -1,4 +1,3 @@
-(*BeginPackage["QED`Model`", {"QED`CircuitTopology`","QED`Numeric`","QED`Analytic`"}];*)
 BeginPackage["QED`Model`"];
 
 Needs["QED`CircuitTopology`"];
@@ -13,6 +12,8 @@ GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]"
 UpdatePrimaryParam::usage = "UpdatePrimaryParam[model, path, value]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
+GetWaveFunction::usage = "GetWaveFunction[model, quantumNumbers] returns the analytical wavefunction \
+Psi[phi1, phi2, ...] for the specified state {n1, n2, ...} in physical flux coordinates.";
 
 $CurrentModel::usage = "Global reference to the active circuit model for substitution rules";
 
@@ -76,7 +77,9 @@ BuildSubstitutionRules[primary_Association, topology_Association] := Module[
   (* ════════════════════════════════════════════════════════════════ *)
   
   constantRules = {
-    QED`$Phi0 :> QED`$Phi0Value
+    QED`$Phi0 -> QED`$Phi0Value,
+    QED`$hbar -> QED`$hbarValue,
+    QED`$e -> QED`$eValue
   };
   
   (* ════════════════════════════════════════════════════════════════ *)
@@ -473,7 +476,7 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     (* ════════════════════════════════════════════════════════════ *)
     
     If[cache["InverseCapacitanceMatrix"]["State"] === "Ready" && 
-       cache["InductanceMatrixNumerical"]["State"] === "Ready",
+       cache["InductanceMatrixInverseNumerical"]["State"] === "Ready",
       
       Module[{invC, invL, result},
         invC = cache["InverseCapacitanceMatrix"]["Value"];
@@ -675,6 +678,40 @@ UpdatePrimaryParam[model_Association, path_List, newValue_] :=
   ];
   
 GetAnalyticalParams[model_Association] := model["Analytical"]
+
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║             API: WAVEFUNCTIONS                                 ║ *)
+(* ╚════════════════════════════════════════════════════════════════ *)
+
+GetWaveFunction[model_Association, quantumNumbers_List] := 
+ Module[{diagData, frequencies, effCaps, transform, topology, subRules, psiSymbolic},
+  
+  (* 1. Получить данные диагонализации *)
+  diagData = GetNumericalQuantity[model, "HarmonicDiagonalization"];
+  If[diagData === $Failed, Return[$Failed]];
+  
+  frequencies = diagData["NormalModeFrequencies"];
+  effCaps = diagData["EffectiveCapacitances"];
+  transform = diagData["FluxTransform"];
+  
+  topology = model["Topology"];
+  subRules = model["SubstitutionRules"];
+  
+  (* 2. Построить символьное выражение с подставленными коэффициентами *)
+  psiSymbolic = QED`Analytic`BuildHarmonicWavefunction[
+    topology,
+    frequencies,
+    effCaps,
+    transform,
+    quantumNumbers
+  ];
+  
+  (* 3. Подставить значения равновесных потоков (φ_min), чтобы получить чистую функцию от φ *)
+  (* Используем subRules, которые содержат правила для minSymbols *)
+  psiSymbolic //. subRules
+ ];
+
 
 (* Удобный доступ ко всем параметрам *)
 GetAllParams[model_Association] := <|

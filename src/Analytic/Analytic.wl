@@ -10,11 +10,26 @@ BuildPotentialGradient::usage = "BuildPotentialGradient[hamiltonian, topology] \
 builds symbolic gradient ∇U of potential energy U(φ) = H(q=0, φ). \
 Returns list of partial derivatives {∂U/∂φ₁, ∂U/∂φ₂, ...} for equilibrium analysis.";
 
+BuildHarmonicWavefunction::usage = 
+"BuildHarmonicWavefunction[topology, frequencies, effectiveCapacitances, transformationMatrix, quantumNumbers] \
+constructs the analytical harmonic oscillator wavefunction in the original flux coordinates.
+
+Arguments:
+  topology: Association describing the circuit topology
+  frequencies: List of normal mode frequencies {ω₁, ω₂, ...}
+  effectiveCapacitances: List of effective capacitances {C₁, C₂, ...} for each mode
+  transformationMatrix: Matrix T such that δφ_lab = T . q_normal, where δφ are flux deviations from equilibrium.
+  quantumNumbers: List of integers {n₁, n₂, ...} specifying the state
+
+Returns:
+  Symbolic expression Ψ(φ₁, φ₂, ...). Includes Jacobian normalization factor.";
+
 Begin["`Private`"];
 
 
 (* Используем глобальные константы из QED` *)
 phi0 = QED`$Phi0;  
+hbar = QED`$hbar;
 
 
 (* Вспомогательная функция для получения независимых узлов *)
@@ -223,32 +238,120 @@ BuildPotentialGradient[hamiltonian_, topology_Association] :=
   Reference: Koch et al., PRA 76, 042319 (2007), Eq. (6-8)
 *)
 
+(* В src/Analytic/Analytic.wl *)
+
 BuildHarmonicHamiltonian[hamiltonian_, topology_Association] := 
- Module[{nodes, fluxVars, chargeVars, minSymbols, series, degree, result},
+ Module[{nodes, fluxVars, minSymbols, deltas, t, seriesTotalDeg},
   
   nodes = getIndependentNodes[topology];
+  
+  (* Исходные переменные потока *)
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+  
+  (* Символы минимума *)
   minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
   
-  (* Series expansion to O(φ²) around φ_min *)
-  series = Normal @ Series[
-    hamiltonian,
-    Sequence @@ MapThread[{#1, #2, 2} &, {fluxVars, minSymbols}]
-  ] // Expand;
+  (* Отклонения от минимума: d_i = phi_i - phi_min_i *)
+  deltas = fluxVars - minSymbols;
   
-  (* Helper: total polynomial degree in flux variables *)
-  degree[term_] := Total @ Exponent[term, fluxVars];
+  (* Метод t-scaling (Total Degree Truncation):
+     1. Параметризуем смещение: phi = phi_min + t * delta
+     2. Раскладываем по t до 2-го порядка.
+     3. Полагаем t -> 1.
+     Это гарантирует, что остаются только члены с суммарной степенью 
+     отклонений <= 2.
+  *)
   
-  (* Keep only constant (degree 0) and quadratic (degree 2) terms *)
-  result = Total @ Cases[
-    If[Head[series] === Plus, List @@ series, {series}],
-    term_ /; degree[term] == 0 || degree[term] == 2
-  ];
-  
-  (* Collect by physical variables for readability, simplify coefficients *)
-  Collect[result, Join[fluxVars, chargeVars], Simplify]
+  seriesTotalDeg = Normal @ Series[
+    hamiltonian /. Thread[fluxVars -> (minSymbols + t * deltas)],
+    {t, 0, 2}
+  ] /. t -> 1;
+
+  (* Группируем результат для читаемости *)
+  Collect[seriesTotalDeg, Join[fluxVars, Subscript[QED`$ChargeSymbol, #] & /@ nodes], Simplify]
  ];
+
+
+(* ════════════════════════════════════════════════════════════════ *)
+(*                 HARMONIC WAVEFUNCTIONS                           *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+BuildHarmonicWavefunction[
+    topology_Association, 
+    frequencies_List, 
+    effectiveCapacitances_List, 
+    transformationMatrix_?MatrixQ, 
+    quantumNumbers_List
+] := Module[{
+    nodes, fluxVars, minFluxVars,
+    deltaPhi,     (* Vector of flux deviations *)
+    normalCoords, (* Vector of normal coordinates q *)
+    invT,         (* Inverse transformation matrix *)
+    detT,         (* Jacobian determinant *)
+    wavefunctions1D,
+    psiTotal,
+    nDOF
+},
+    (* 0. Generate variables from topology *)
+    nodes = getIndependentNodes[topology];
+    fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+    minFluxVars = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+    nDOF = Length[nodes];
+    
+    (* Check consistency *)
+    If[Length[frequencies] != nDOF, Message[BuildHarmonicWavefunction::dim, "frequencies", Length[frequencies], nDOF]; Return[$Failed]];
+    If[Length[effectiveCapacitances] != nDOF, Message[BuildHarmonicWavefunction::dim, "effectiveCapacitances", Length[effectiveCapacitances], nDOF]; Return[$Failed]];
+    If[Length[transformationMatrix] != nDOF, Message[BuildHarmonicWavefunction::dim, "transformationMatrix", Length[transformationMatrix], nDOF]; Return[$Failed]];
+    
+    
+    (* 1. Coordinate Transformation *)
+    (* The transformationMatrix T (FluxTransform) converts from normal mode coordinates to lab coordinates: *)
+    (* δφ_lab = T . q_norm *)
+
+    deltaPhi = fluxVars - minFluxVars;
+    
+    (* To express normal coordinates q in terms of lab coordinates φ, use inverse of T *)
+    normalCoords = Inverse[transformationMatrix] . deltaPhi;
+    
+    (* Jacobian of transformation φ -> q *)
+    (* The transformation from normal (q) to lab (φ) coordinates is δφ = T . q *)
+    (* The volume elements are related by dφ = |det(T)| dq *)
+    (* Normalization: ∫|ψ(φ)|² dφ = 1 => ∫|ψ_norm(q)|² |det(T)| dq = 1 *)
+    (* So, if ψ_norm(q) is the normalized wavefunction in normal coords, *)
+    (* the wavefunction in lab coords is ψ(φ) = ψ_norm(q(φ)) / Sqrt[Abs[Det[T]]] *)
+    
+    detT = Abs[Det[transformationMatrix]];
+    
+    (* 2. Build 1D wavefunctions for each mode *)
+    wavefunctions1D = MapThread[
+        Function[{q, n, omega, cap},
+            Module[{invLength2, normFactor, gaussian, poly, xi},
+                (* m = cap, freq = omega *)
+                (* Width parameter α² = mω/ℏ *)
+                
+                invLength2 = (cap * omega) / hbar;
+                xi = Sqrt[invLength2] * q;
+                
+                (* Normalization factor for 1D oscillator *)
+                (* (α²/π)^(1/4) / sqrt(2^n n!) *)
+                normFactor = (invLength2 / Pi)^(1/4) / Sqrt[2^n * Factorial[n]];
+                
+                gaussian = Exp[-invLength2 * q^2 / 2];
+                poly = HermiteH[n, xi];
+                
+                normFactor * gaussian * poly
+            ]
+        ],
+        {normalCoords, quantumNumbers, frequencies, effectiveCapacitances}
+    ];
+    
+    (* 3. Combine with Jacobian factor *)
+    psiTotal = (1 / Sqrt[detT]) * Times @@ wavefunctions1D;
+    
+    psiTotal
+];
+
+BuildHarmonicWavefunction::dim = "Dimension mismatch: `1` has length `2`, expected `3`.";
  
 
 End[];

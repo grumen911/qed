@@ -1,4 +1,4 @@
-BeginPackage["QED`Interactive`", {"QED`Model`"}];
+BeginPackage["QED`Interactive`", {"QED`Model`", "QED`Numeric`"}];
 
 QubitDashboard::usage = "QubitDashboard[{models..}] - интерактивная панель управления для списка моделей.";
 RegisterPlot::usage = "RegisterPlot[id, label, type, computeFunc] регистрирует новый тип графика.";
@@ -25,6 +25,114 @@ RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light",
 
 RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy", 
   Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
+];
+
+(* NEW: Schrödinger Equation Verification Tool *)
+RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
+  Function[{m},
+    Module[{states, report, grid, nDOF},
+      nDOF = m["Topology"]["DegreesOfFreedom"];
+      
+      states = {{0,0,0}, {1,0,0}, {0,1,0}, {0,0,1}}; (* Default states to check *)
+      (* Adjust for actual DOF *)
+      states = Select[states, Length[#] == nDOF &];
+      If[states === {}, states = {ConstantArray[0, nDOF]}];
+      
+      report = Map[
+        Function[s, 
+          QED`Numeric`VerifyWaveFunction[m, s]
+        ],
+        states
+      ];
+      
+      (* Render Report Table *)
+      Grid[
+        Prepend[
+          Map[
+            Function[r, {
+              r["State"],
+              If[r["Status"] === "OK", Style["OK", Green, Bold], Style["FAIL", Red, Bold]],
+              Pane[ScientificForm[r["TotalEnergy"], 5], 100],
+              Pane[r["Norm"], 100],
+              Pane[r["H_psi"], {250, 120}, Scrollbars -> True], (* H\[Psi] Column *)
+              Pane[r["E_psi"], {250, 120}, Scrollbars -> True]  (* E\[Psi] Column *)
+            }],
+            report
+          ],
+          {
+            Style["State", Bold],
+            Style["Status", Bold],
+            Style["Total Energy (J)", Bold],
+            Style["Norm \[Psi]", Bold],
+            Style["H\[Psi]", Bold],
+            Style["E\[Psi]", Bold]
+          }
+        ],
+        Frame -> All,
+        Background -> {None, {Lighter[Gray, 0.8], None}},
+        ItemSize -> {Automatic, 2.5},
+        Alignment -> {Left, Center}
+      ]
+    ]
+  ]
+];
+
+(* NEW: Harmonic diagonalization consistency check (Light) *)
+RegisterPlot["DiagonalizationCheck", "Verify Harmonic Diagonalization", "Light",
+  Function[{m},
+    Module[{r, okStyle, failStyle, boolStyle},
+      okStyle = Style["OK", Darker[Green, 0.2], Bold];
+      failStyle = Style["FAIL", Red, Bold];
+      boolStyle = Function[b, If[TrueQ[b], okStyle, failStyle]];
+
+      r = QED`Numeric`VerifyDiagonalization[m];
+
+      If[r === $Failed || FailureQ[r],
+        Return[Panel[Style["VerifyDiagonalization failed.", Red], ImageSize -> {600, 200}]]
+      ];
+
+      Grid[
+        {
+          {Style["Check", Bold], Style["Result", Bold]},
+          {"Is L transformed diagonal?", boolStyle[r["Is_L_Diagonal"]]},
+          {"Is C transformed diagonal?", boolStyle[r["Is_C_Diagonal"]]},
+          {"Ceff / Diagonal[N^T C N]", Pane[Short[r["EffectiveCapacitances_Check"], 3], {420, 40}, Scrollbars -> True]},
+          {"Transformed C = N^T C N", Pane[MatrixForm[r["Transformed_C"]], {420, 120}, Scrollbars -> True]},
+          {"Transformed L = N^T L^-1 N", Pane[MatrixForm[r["Transformed_L_Inverse"]], {420, 120}, Scrollbars -> True]}
+        },
+        Frame -> All,
+        Background -> {None, {Lighter[Gray, 0.8], None}},
+        Alignment -> {Left, Center},
+        ItemSize -> {Automatic, Automatic}
+      ]
+    ]
+  ]
+];
+
+(* NEW: Symbolic WaveFunction Inspector *)
+RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic Wave Function", "Light",
+  Function[{m},
+    Module[{state, psiFormula, nDOF},
+      (* Default to ground state *)
+      nDOF = m["Topology"]["DegreesOfFreedom"];
+      state = ConstantArray[0, nDOF];
+      
+      (* Get the wavefunction expression *)
+      psiFormula = QED`Model`GetWaveFunction[m, state];
+      
+      If[FailureQ[psiFormula], 
+        Return["Failed to generate wavefunction."]
+      ];
+
+      (* Keep expression on one line: horizontal scrolling instead of wrapping *)
+      Pane[
+        psiFormula,
+        ImageSize -> {700, 300},
+        Scrollbars -> True,
+        BaseStyle -> {LineBreakWithin -> False}
+      ]
+    ]
+  ]
 ];
 
 (* DEBUG PLOT: Инспектор кэша (Read-only) *)
@@ -98,6 +206,11 @@ ComputePlotData[plotId_, model_Association] :=
     If[plotId === "Potential3D",
        QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]
     ];
+
+    (* Explicit warmup for DiagonalizationCheck using GetNumericalQuantity *)
+    If[plotId === "DiagonalizationCheck",
+       QED`Model`GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"]
+    ];
     
     (* 2. Compute Graphic using warmed model *)
     Module[{info, func, graphic},
@@ -106,7 +219,7 @@ ComputePlotData[plotId_, model_Association] :=
       graphic = If[MissingQ[info], 
          Graphics[{Red, Text["Unknown Plot ID"]}],
          func = info["Compute"];
-         Check[func[$CurrentModel], Graphics[{Red, Text["Computation Failed"]}]]
+         func[$CurrentModel]
       ];
       
       (* 3. Return Result AND The Updated Model State *)
@@ -201,7 +314,7 @@ SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
       Column[{
         Style[Lookup[modelSymbol["Topology"], "Name", "Circuit"], Bold, 12],
         Show[modelSymbol["Image"], ImageSize -> {180, 180}, AspectRatio->1]
-      }, Alignment->Center]
+      }, Alignment -> Center]
     ]
   }];
 

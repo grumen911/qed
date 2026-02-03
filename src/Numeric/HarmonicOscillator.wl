@@ -13,6 +13,8 @@ Output Association:
   \"ChargeTransform\" -> M        : q_new = M · q_old
   \"FluxTransform\" -> N          : φ_new = N · φ_old  
   \"DiagonalizedInductance\" -> j : Diagonal L^(-1) in normal modes
+  \"EffectiveCapacitances\" -> Cs : Diagonal effective capacitances C_k [F]
+  \"NormalModeFrequencies\" -> w  : Eigenfrequencies [rad/s]
   \"RotationMatrix\" -> d1        : Orthogonal rotation matrix
 
 Physics: Simultaneous diagonalization preserving [q_i, φ_j] = iℏδ_ij. \
@@ -31,7 +33,7 @@ $DebugHarmonicDiagonalization = False;
 DiagonalizeHarmonicHamiltonian[invC_?MatrixQ, invL_?MatrixQ] := 
  Module[{omega0, C0, L0, invCscaled, invLscaled, 
          M, N1, s1, s2, d1, j, Ntransform, Mtransform, signCorrection,
-         jScaled, CdiagScaled, LdiagScaled, omega2Scaled},
+         jScaled, CdiagScaled, LdiagScaled, omega2Scaled, effectiveCaps},
   
   If[$DebugHarmonicDiagonalization,
     Print["=== DiagonalizeHarmonicHamiltonian ==="];
@@ -132,10 +134,14 @@ DiagonalizeHarmonicHamiltonian[invC_?MatrixQ, invL_?MatrixQ] :=
   LdiagScaled = Transpose[Ntransform] . invL . Ntransform;
   omega2Scaled = Diagonal[CdiagScaled] * Diagonal[LdiagScaled];
   
+  (* Calculate effective capacitances: C_k = 1 / (M^T C^-1 M)_kk *)
+  effectiveCaps = 1.0 / Diagonal[CdiagScaled];
+  
   If[$DebugHarmonicDiagonalization,
     Print["\n--- Step 6: Restore physical dimensions ---"];
     Print["j_physical = j / L_0 (dimension [H^-1])"];
     Print["omega^2 computed from physical C^-1 and L^-1"];
+    Print["Effective Caps: ", effectiveCaps];
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
@@ -207,6 +213,7 @@ DiagonalizeHarmonicHamiltonian[invC_?MatrixQ, invL_?MatrixQ] :=
     "ChargeTransform" -> Mtransform,
     "FluxTransform" -> Ntransform,
     "DiagonalizedInductance" -> jScaled,
+    "EffectiveCapacitances" -> effectiveCaps,
     "NormalModeFrequencies" -> Sqrt[omega2Scaled],
     "RotationMatrix" -> d1,
     "Scales" -> <|

@@ -1,5 +1,8 @@
 BeginPackage["QED`Numeric`", {"QED`Numeric`HarmonicOscillator`"}];
 
+Needs["QED`Model`"];
+
+(* Экспорт символов *)
 PrepareNumericModel::usage = "PrepareNumericModel[symModel, params] prepares numeric functions.";
 ComputeEvolution::usage = "ComputeEvolution[model, tmax] computes NDSolve solution.";
 
@@ -30,6 +33,13 @@ Returns frequencies in rad/s (SI units), sorted by increasing frequency.";
 PlasmonFrequenciesVsFlux::usage = 
   "PlasmonFrequenciesVsFlux[model] возвращает численную функцию ω[φext_?NumericQ], \
 где φext в единицах Φ₀. Возвращает список частот {ω₁, ω₂, ...} в rad/s.";
+
+VerifyWaveFunction::usage = "VerifyWaveFunction[model, state] verifies that H_harm|psi> = E_harm|psi>.";
+
+VerifyDiagonalization::usage = "VerifyDiagonalization[model] numerically checks if the calculated \
+FluxTransform matrix correctly diagonalizes both Capacitance and Inductance matrices. \
+Returns <|'Is_L_Diagonal', 'Is_C_Diagonal', ...|>.";
+
 
 Begin["`Private`"];
 
@@ -345,7 +355,7 @@ If[$DebugFindEquilibriumPoints === True,
   
   (* Энергии всех решений *)
   Module[{energies, Emin, Emax, dE},
-    energies = Sort[#["Energy"] & /@ solutions];
+    energies = Sort[#"Energy" & /@ solutions];
     Emin = First[energies];
     Emax = Last[energies];
     dE = Emax - Emin;
@@ -358,14 +368,14 @@ If[$DebugFindEquilibriumPoints === True,
   
   (* Группировка по энергиям (вырожденность) - НЕ округлять! *)
   Module[{grouped, degeneracies},
-    grouped = GroupBy[solutions, Round[#["Energy"], 10^-25] &];  (* <-- FIX *)
+    grouped = GroupBy[solutions, Round[#"Energy", 10^-25] &];  (* <-- FIX *)
     degeneracies = Sort[Tally[Length /@ Values[grouped]][[All, 1]], Greater];
     Print["Degeneracies: ", Take[degeneracies, UpTo[5]], " solutions per level"];
   ];
   
   (* Топ-3 минимума *)
   Module[{top3},
-    top3 = Take[SortBy[solutions, #["Energy"] &], UpTo[3]];
+    top3 = Take[SortBy[solutions, #"Energy" &], UpTo[3]];
     Print["=== TOP 3 MINIMA ==="];
     MapIndexed[
       Print["#", #2[[1]], ": E = ", ScientificForm[#1["Energy"], 4], 
@@ -531,7 +541,7 @@ FindPotentialMinimumContinuation[
   For quadratic Hamiltonian H = (1/2) q^T C^(-1) q + (1/2) φ^T L^(-1) φ,
   normal modes satisfy:
   
-  ω_i^2 = eigenvalues(C^(-1) · L^(-1))
+  ω_i^2 = eigenvalues(C⁻¹ · L⁻¹)
   
   Returns Association with:
   - "Frequencies": ω_i in rad/s (SI units), sorted. Complex if unstable modes exist.
@@ -543,7 +553,6 @@ FindPotentialMinimumContinuation[
 
 ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
   {omega2, frequencies, threshold = 10^(-10)},
-  
 
   (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
   omega2 = Eigenvalues[invCap . invInd];
@@ -785,6 +794,174 @@ GetCacheEntry[cacheEntry_Association, model_Association] := Module[
     True,
       $Failed
   ]
+];
+
+cleanExpr[expr_] := expr /. {Abs'[x_] :> Sign[x], Conjugate'[x_] :> Conjugate[x]};
+
+(*
+  VerifyWaveFunction:
+  
+  Verifies that the HARMONIC Hamiltonian H_harm (with substituted parameters) 
+  satisfies H_harm|psi> = E_harm|psi> when charges are replaced by derivatives.
+  
+  NOTE: This uses the harmonic approximation Hamiltonian, not the full non-linear one,
+  because the wavefunctions are eigenstates of the harmonic oscillator.
+*)
+
+VerifyWaveFunction[model_Association, state_List] := Block[
+  {QED`Model`$CurrentModel = model},
+  Module[{
+    hamSym, subRules, eqFluxes, hamNum,
+    topology, nodes, fluxVars, 
+    potentialNumeric, kineticNumeric,
+    diagData, omegas, hbarValue = QED`$hbarValue,
+    psi, constTerm, energyVal,
+    hPsi, ePsi, residual, phiToMinVal, normVal
+  },
+
+    (* 1. Get Symbolic Harmonic Hamiltonian *)
+    hamSym = model["Analytical"]["HarmonicHamiltonian"];
+    If[MissingQ[hamSym], Return[<|"Status" -> "FAIL", "Reason" -> "HarmonicHamiltonianMissing"|>]];
+
+    (* 2. Get Substitution Rules and Equilibrium Fluxes *)
+    subRules = model["SubstitutionRules"];
+    eqFluxes = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
+    If[FailureQ[eqFluxes], Return[<|"Status" -> "FAIL", "Reason" -> "EquilibriumFluxesMissing"|>]];
+    
+    (* 3. Substitute to get Numerical Harmonic Hamiltonian *)
+    (* Note: eqFluxes rules replace Subscript[φ, "min", i] which appear in H_harm *)
+    hamNum = hamSym /. subRules /. eqFluxes;
+
+    (* 4. Extract Topology Variables *)
+    topology = model["Topology"];
+    nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+    fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+    
+    (* 5. Separate Kinetic and Potential parts *)
+    (* Potential: set charges to 0 *)
+    potentialNumeric = hamNum /. Subscript[QED`$ChargeSymbol, _] -> 0;
+    
+    (* Kinetic: subtract potential from total *)
+    kineticNumeric = hamNum - potentialNumeric;
+
+    (* 6. Get Diagonalization Data (for omegas) *)
+    diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
+    If[FailureQ[diagData], Return[<|"Status" -> "FAIL", "Reason" -> "DiagDataMissing"|>]];
+    omegas = diagData["NormalModeFrequencies"];
+    
+    (* 7. Get Wavefunction *)
+    psi = QED`Model`GetWaveFunction[model, state];
+    If[FailureQ[psi], Return[<|"Status" -> "FAIL", "Reason" -> "WaveFunctionError"|>]];
+
+    (* 8. Construct Kinetic Operator Action *)
+    (* Replace q_i * q_j -> -hbar^2 * D[psi, phi_i, phi_j] *)
+    
+    hPsi = Expand[kineticNumeric] /. {
+        Times[x___, Subscript[QED`$ChargeSymbol, i_], Subscript[QED`$ChargeSymbol, j_], y___] :> 
+            x * (-hbarValue^2 * D[psi, Subscript[QED`$FluxSymbol, i], Subscript[QED`$FluxSymbol, j]]) * y,
+        Power[Subscript[QED`$ChargeSymbol, i_], 2] :> 
+            (-hbarValue^2 * D[psi, {Subscript[QED`$FluxSymbol, i], 2}])
+    };
+    
+    (* Add Potential Energy part *)
+    hPsi = Simplify[hPsi + potentialNumeric * psi 
+          /.{Subscript[QED`$FluxSymbol, i_] :> 
+          QED`$Phi0Value*Subscript[QED`$FluxSymbol, i]}] // Chop // Simplify;
+
+    (* 9. Calculate Expected Energy *)
+    (* E_harm = U_harm(min) + sum(hbar * omega * (n + 1/2)) *)
+    (* Check for constant term in potentialNumeric by setting all phi variables to their min values *)
+    (* Wait, H_harm is expanded around phi_min. If we set phi -> phi_min_val, we should get the constant term *)
+    
+    phiToMinVal = Table[
+       Subscript[QED`$FluxSymbol, n] -> (Subscript[QED`$FluxSymbol, "min", n] /. eqFluxes),
+       {n, nodes}
+    ];
+    
+    constTerm = potentialNumeric /. phiToMinVal;
+    
+    energyVal = constTerm + Total[(state + 0.5) * omegas * hbarValue];
+    ePsi = Simplify[energyVal * psi /.{Subscript[QED`$FluxSymbol, i_] :> QED`$Phi0Value*Subscript[QED`$FluxSymbol, i]}] // Chop;
+
+    (* 10. Residual *)
+    residual = Chop[Simplify[hPsi - ePsi]];
+
+    (* 11. Verify Normalization *)
+    Module[{phiMinVals, phi0 = QED`$Phi0Value, range, tempVars, psiRescaled, jacobian},
+        
+        (* 1. Extract numeric equilibrium values *)
+        phiMinVals = Values[Flatten[{eqFluxes}]]; (* Flatten handles single rule case *)
+
+        (* 2. Define dimensionless variables xi (order of 1) *)
+        tempVars = Table[Unique["xi"], {Length[fluxVars]}];
+        
+        (* 3. Substitute phi -> phi_min + xi * Phi0 into psi *)
+        (* Also ensure psi itself is numeric (substitute L, C, etc.) *)
+        psiRescaled = psi /. subRules /. eqFluxes /. Thread[
+            fluxVars -> (phiMinVals + tempVars * phi0)
+        ];
+        
+        (* 4. Jacobian for d(phi) -> d(xi): Phi0^D *)
+        jacobian = phi0^Length[fluxVars];
+        
+        (* 5. Integrate over [-8, 8] - comfortable range for NIntegrate *)
+        normVal = NIntegrate[
+           Abs[psiRescaled]^2, 
+           Evaluate[Sequence @@ Table[{xi, -8., 8.}, {xi, tempVars}]],
+           Method -> "GlobalAdaptive", (* Fast for smooth functions *)
+           MaxRecursion -> 3
+        ] * jacobian;
+    ];
+
+
+    <|
+      "State" -> state,
+      "Status" -> If[PossibleZeroQ[residual], "OK", "CheckResidual"],
+      "TotalEnergy" -> energyVal,
+      "ResidualExpression" -> residual,
+      "H_psi" -> hPsi,
+      "E_psi" -> ePsi,
+      "Norm" -> normVal
+    |>
+  ]
+];
+
+(* ════════════════════════════════════════════════════════════════ *)
+(* 		VERIFICATION                                                *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+VerifyDiagonalization[model_Association] := Module[
+  {capNum, invLNum, diagData, 
+   Nmat, matCDiag, matInvLDiag, 
+   expectedCaps, calculatedCaps},
+  
+  capNum = QED`Model`GetNumericalQuantity[model, "CapacitanceMatrixNumerical"];
+  invLNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixInverseNumerical"];
+  diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
+
+  If[AnyTrue[{capNum, invLNum, diagData}, # === $Failed || FailureQ[#] &],
+    Return[$Failed]
+  ];
+
+  If[!AssociationQ[diagData] || !MatrixQ[capNum] || !MatrixQ[invLNum],
+    Return[$Failed]
+  ];
+
+    Nmat = diagData["FluxTransform"];
+
+    matInvLDiag = Transpose[Nmat] . invLNum . Nmat;
+    matCDiag = Transpose[Nmat] . capNum . Nmat;
+
+    expectedCaps = diagData["EffectiveCapacitances"];
+    calculatedCaps = Diagonal[matCDiag];
+
+    <|
+      "Transformed_L_Inverse" -> Chop[matInvLDiag, 10^-20],
+      "Transformed_C" -> Chop[matCDiag, 10^-20],
+      "Is_L_Diagonal" -> DiagonalMatrixQ[Chop[matInvLDiag, 10^-10]],
+      "Is_C_Diagonal" -> DiagonalMatrixQ[Chop[matCDiag, 10^-10]],
+      "EffectiveCapacitances_Check" -> expectedCaps / calculatedCaps
+    |>
 ];
 
 
