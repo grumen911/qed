@@ -864,7 +864,9 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     };
     
     (* Add Potential Energy part *)
-    hPsi = hPsi + potentialNumeric * psi // Simplify;
+    hPsi = Simplify[hPsi + potentialNumeric * psi 
+          /.{Subscript[QED`$FluxSymbol, i_] :> 
+          QED`$Phi0Value*Subscript[QED`$FluxSymbol, i]}] // Chop;
 
     (* 9. Calculate Expected Energy *)
     (* E_harm = U_harm(min) + sum(hbar * omega * (n + 1/2)) *)
@@ -879,10 +881,10 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     constTerm = potentialNumeric /. phiToMinVal;
     
     energyVal = constTerm + Total[(state + 0.5) * omegas * hbarValue];
-    ePsi = energyVal * psi;
+    ePsi = Simplify[energyVal * psi /.{Subscript[QED`$FluxSymbol, i_] :> QED`$Phi0Value*Subscript[QED`$FluxSymbol, i]}] // Chop;
 
     (* 10. Residual *)
-    residual = Simplify[hPsi - ePsi];
+    residual = Chop[Simplify[hPsi - ePsi]];
 
     <|
       "State" -> state,
