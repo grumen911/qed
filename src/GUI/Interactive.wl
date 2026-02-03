@@ -53,7 +53,7 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
               r["State"],
               If[r["Status"] === "OK", Style["OK", Green, Bold], Style["FAIL", Red, Bold]],
               Pane[ScientificForm[r["TotalEnergy"], 5], 100],
-              Pane[r["EPsiScale"], 100],
+              Pane[r["Norm"], 100],
               Pane[r["H_psi"], {250, 120}, Scrollbars -> True], (* H\[Psi] Column *)
               Pane[r["E_psi"], {250, 120}, Scrollbars -> True]  (* E\[Psi] Column *)
             }],
@@ -63,7 +63,7 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
             Style["State", Bold],
             Style["Status", Bold],
             Style["Total Energy (J)", Bold],
-            Style["Scale E\[Psi]", Bold],
+            Style["Norm \[Psi]", Bold],
             Style["H\[Psi]", Bold],
             Style["E\[Psi]", Bold]
           }

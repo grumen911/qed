@@ -816,7 +816,7 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     potentialNumeric, kineticNumeric,
     diagData, omegas, hbarValue = QED`$hbarValue,
     psi, constTerm, energyVal,
-    hPsi, ePsi, residual, phiToMinVal
+    hPsi, ePsi, residual, phiToMinVal, normVal
   },
 
     (* 1. Get Symbolic Harmonic Hamiltonian *)
@@ -886,13 +886,29 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     (* 10. Residual *)
     residual = Chop[Simplify[hPsi - ePsi]];
 
+    (* 11. Verify Normalization *)
+    Module[{phi0 = QED`$Phi0Value, range, integrationLimits},
+        range = 50.0 * phi0; (* Sufficient range for localized wavefunction *)
+        
+        integrationLimits = Table[
+           {fluxVars[[k]], phiToMinVal[[k]] - range, phiToMinVal[[k]] + range}, 
+           {k, Length[fluxVars]}
+        ];
+        
+        normVal = NIntegrate[
+           Abs[psi]^2, 
+           Evaluate[Sequence @@ integrationLimits]
+        ];
+    ];
+
     <|
       "State" -> state,
       "Status" -> If[PossibleZeroQ[residual], "OK", "CheckResidual"],
       "TotalEnergy" -> energyVal,
       "ResidualExpression" -> residual,
       "H_psi" -> hPsi,
-      "E_psi" -> ePsi
+      "E_psi" -> ePsi,
+      "Norm" -> normVal
     |>
   ]
 ];
