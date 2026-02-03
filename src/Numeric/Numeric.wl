@@ -866,7 +866,7 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     (* Add Potential Energy part *)
     hPsi = Simplify[hPsi + potentialNumeric * psi 
           /.{Subscript[QED`$FluxSymbol, i_] :> 
-          QED`$Phi0Value*Subscript[QED`$FluxSymbol, i]}] // Chop;
+          QED`$Phi0Value*Subscript[QED`$FluxSymbol, i]}] // Chop // Simplify;
 
     (* 9. Calculate Expected Energy *)
     (* E_harm = U_harm(min) + sum(hbar * omega * (n + 1/2)) *)

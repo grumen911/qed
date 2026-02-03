@@ -33,7 +33,7 @@ RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
     Module[{states, report, grid, nDOF},
       nDOF = m["Topology"]["DegreesOfFreedom"];
       
-      states = {{0,0,0}, {1,0,0}, {0,1,0}}; (* Default states to check *)
+      states = {{0,0,0}, {1,0,0}, {0,1,0}, {0,0,1}}; (* Default states to check *)
       (* Adjust for actual DOF *)
       states = Select[states, Length[#] == nDOF &];
       If[states === {}, states = {ConstantArray[0, nDOF]}];
