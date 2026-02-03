@@ -98,7 +98,7 @@ RegisterPlot["DiagonalizationCheck", "Verify Harmonic Diagonalization", "Light",
           {"Is C transformed diagonal?", boolStyle[r["Is_C_Diagonal"]]},
           {"Ceff / Diagonal[N^T C N]", Pane[Short[r["EffectiveCapacitances_Check"], 3], {420, 40}, Scrollbars -> True]},
           {"Transformed C = N^T C N", Pane[MatrixForm[r["Transformed_C"]], {420, 120}, Scrollbars -> True]},
-          {"Transformed L = N^T L N", Pane[MatrixForm[r["Transformed_L_Inverse"]], {420, 120}, Scrollbars -> True]}
+          {"Transformed L = N^T L^-1 N", Pane[MatrixForm[r["Transformed_L_Inverse"]], {420, 120}, Scrollbars -> True]}
         },
         Frame -> All,
         Background -> {None, {Lighter[Gray, 0.8], None}},
