@@ -887,19 +887,32 @@ VerifyWaveFunction[model_Association, state_List] := Block[
     residual = Chop[Simplify[hPsi - ePsi]];
 
     (* 11. Verify Normalization *)
-    Module[{phi0 = QED`$Phi0Value, range, integrationLimits},
-        range = 50.0 * phi0; (* Sufficient range for localized wavefunction *)
+    Module[{phiMinVals, phi0 = QED`$Phi0Value, range, tempVars, psiRescaled, jacobian},
         
-        integrationLimits = Table[
-           {fluxVars[[k]], phiToMinVal[[k]] - range, phiToMinVal[[k]] + range}, 
-           {k, Length[fluxVars]}
+        (* 1. Extract numeric equilibrium values *)
+        phiMinVals = Values[Flatten[{eqFluxes}]]; (* Flatten handles single rule case *)
+
+        (* 2. Define dimensionless variables xi (order of 1) *)
+        tempVars = Table[Unique["xi"], {Length[fluxVars]}];
+        
+        (* 3. Substitute phi -> phi_min + xi * Phi0 into psi *)
+        (* Also ensure psi itself is numeric (substitute L, C, etc.) *)
+        psiRescaled = psi /. subRules /. eqFluxes /. Thread[
+            fluxVars -> (phiMinVals + tempVars * phi0)
         ];
         
+        (* 4. Jacobian for d(phi) -> d(xi): Phi0^D *)
+        jacobian = phi0^Length[fluxVars];
+        
+        (* 5. Integrate over [-8, 8] - comfortable range for NIntegrate *)
         normVal = NIntegrate[
-           Abs[psi]^2, 
-           Evaluate[Sequence @@ integrationLimits]
-        ];
+           Abs[psiRescaled]^2, 
+           Evaluate[Sequence @@ Table[{xi, -8., 8.}, {xi, tempVars}]],
+           Method -> "GlobalAdaptive", (* Fast for smooth functions *)
+           MaxRecursion -> 3
+        ] * jacobian;
     ];
+
 
     <|
       "State" -> state,
