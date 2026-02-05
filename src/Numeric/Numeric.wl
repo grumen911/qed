@@ -40,6 +40,20 @@ VerifyDiagonalization::usage = "VerifyDiagonalization[model] numerically checks 
 FluxTransform matrix correctly diagonalizes both Capacitance and Inductance matrices. \
 Returns <|'Is_L_Diagonal', 'Is_C_Diagonal', ...|>.";
 
+CreateAnnihilationMatrix::usage = 
+"CreateAnnihilationMatrix[dim] returns a sparse matrix (dim x dim) for the annihilation operator.
+Matrix elements: <n-1|a|n> = Sqrt[n].";
+
+EmbedOperator::usage = 
+"EmbedOperator[op, modeIndex, dimensions] computes the Kronecker product 
+to embed a single-mode operator 'op' into the full Hilbert space defined by 'dimensions'.
+Example: EmbedOperator[a, 2, {dim1, dim2, dim3}] -> I_1 \[Tensor] a_2 \[Tensor] I_3";
+
+GetBasisOperators::usage = 
+"GetBasisOperators[dimensions] returns an Association containing the annihilation ('a') 
+and creation ('ad') operators for each mode, embedded in the full Hilbert space.
+Input: dimensions = {dim_1, dim_2, ...} (truncation levels for each mode).
+Output: <| \"a\" -> {A_1, A_2, ...}, \"ad\" -> {Ad_1, Ad_2, ...}, \"Identity\" -> I_total |>";
 
 Begin["`Private`"];
 
@@ -964,6 +978,43 @@ VerifyDiagonalization[model_Association] := Module[
     |>
 ];
 
+CreateAnnihilationMatrix[dim_Integer] := 
+  SparseArray[{i_, j_} /; i == j - 1 -> Sqrt[N[j - 1]], {dim, dim}];
+
+EmbedOperator[op_?MatrixQ, modeIndex_Integer, dims_List] := Module[{ops},
+  (* Проверка размерности *)
+  If[Dimensions[op] != {dims[[modeIndex]], dims[[modeIndex]]},
+     Return[Failure["DimensionMismatch", <|"Message" -> "Operator dimension does not match target mode dimension"|>]]
+  ];
+  
+  (* Создаем список единичных матриц *)
+  ops = Table[IdentityMatrix[d, SparseArray], {d, dims}];
+  
+  (* Подменяем нужную на наш оператор *)
+  ops[[modeIndex]] = SparseArray[op];
+  
+  (* Вычисляем тензорное произведение *)
+  Apply[KroneckerProduct, ops]
+];
+
+GetBasisOperators[dims_List] := Module[{nModes, singleModeOps, fullOps},
+  nModes = Length[dims];
+  
+  (* Генерируем "маленькие" операторы для каждой моды *)
+  singleModeOps = CreateAnnihilationMatrix /@ dims;
+  
+  (* Расширяем их до полного пространства *)
+  fullOps = <|
+    "a" -> Table[EmbedOperator[singleModeOps[[k]], k, dims], {k, nModes}],
+    "Identity" -> IdentityMatrix[Times @@ dims, SparseArray]
+  |>;
+  
+  (* Добавляем операторы рождения (эрмитово сопряжение) *)
+  (* Используем ConjugateTranspose для корректности с комплексными числами, хотя a вещественна *)
+  AppendTo[fullOps, "ad" -> (ConjugateTranspose /@ fullOps["a"])];
+  
+  fullOps
+];
 
 End[];
 EndPackage[];
