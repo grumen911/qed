@@ -186,6 +186,101 @@ RegisterPlot["DebugCache", "Debug Cache Inspector", "Light",
   ]
 ];
 
+(* NEW: Spectroscopy Scanner (Real-time) *)
+RegisterPlot["SpectroscopyScanner", "Spectroscopy Scanner", "Light",
+  Function[{m},
+    Module[{
+        truncationDim = 5, (* Оптимизация для UI: 5 уровней на моду *)
+        numLevels = 8,     (* Показываем первые 8 собственных чисел *)
+        basis, fluxOps, hTotal, 
+        evals, evecs, energies, states,
+        numModes, nOps, groundEnergy, hbar,
+        rows, freqStr, assignStr, nVals, rowStyle,
+        diagData
+    },
+      (* 1. ПОЛУЧЕНИЕ ДАННЫХ МОДЕЛИ *)
+      diagData = QED`Model`GetNumericalQuantity[m, "HarmonicDiagonalization"];
+      If[MissingQ[diagData] || FailureQ[diagData], 
+         Return[Panel[Style["Model analysis failed. Check parameters.", Red], ImageSize -> {300, 50}]]
+      ];
+      
+      numModes = Length[diagData["NormalModeFrequencies"]];
+      If[numModes == 0, Return[Panel["No modes found."]]];
+
+      (* 2. ВЫЧИСЛЕНИЕ ГАМИЛЬТОНИАНА *)
+      Quiet[
+          basis = QED`Numeric`GetBasisOperators[ConstantArray[truncationDim, numModes]];
+          fluxOps = QED`Numeric`ConstructFluxOperators[m, basis];
+          
+          (* Вызываем исправленную функцию с учетом Hlin и SubstitutionRules *)
+          hTotal = QED`Numeric`BuildNumericalHamiltonian[m, basis, fluxOps];
+      ];
+
+      (* Защита от старых ошибок в Numeric.wl *)
+      If[!FreeQ[hTotal, Complex], 
+         Return[Panel[Style["Error: Hamiltonian is Complex!", Red, Bold]]]
+      ];
+
+      (* 3. ДИАГОНАЛИЗАЦИЯ *)
+      {evals, evecs} = Eigensystem[hTotal, -numLevels];
+      
+      (* Сортировка по возрастанию энергии *)
+      With[{ord = Ordering[evals]},
+          energies = evals[[ord]];
+          states = evecs[[ord]];
+      ];
+
+      groundEnergy = energies[[1]];
+      (* Операторы числа фотонов для анализа состава состояний *)
+      nOps = Table[basis["ad"][[k]] . basis["a"][[k]], {k, numModes}];
+      hbar = QED`$hbarValue;
+
+      (* 4. ФОРМАТИРОВАНИЕ ТАБЛИЦЫ *)
+      rows = {{
+          Style["Idx", Bold], 
+          Style["Freq (GHz)", Bold], 
+          Sequence @@ Table[Style["<n" <> ToString[k] <> ">", Bold], {k, numModes}],
+          Style["State", Bold]
+      }};
+
+      Do[
+          (* Вычисляем средние числа заполнения <n> для каждой моды *)
+          nVals = Table[Re[states[[i]] . nOps[[k]] . states[[i]]], {k, numModes}];
+          
+          (* Частота перехода 0 -> i в ГГц *)
+          freqStr = NumberForm[(energies[[i]] - groundEnergy) / hbar / 2. / Pi / 10^9, {5, 3}];
+          
+          (* Строковое представление состояния, например |0,1,0> *)
+          assignStr = "|" <> StringRiffle[Round[nVals], ","] <> ">";
+          
+          (* Логика валидации: Если основное состояние (Idx=1) содержит фотоны -> ОШИБКА *)
+          rowStyle = If[i == 1 && Total[nVals] > 0.15, Red, Black];
+
+          AppendTo[rows, {
+              Style[i, rowStyle],
+              Style[freqStr, rowStyle],
+              Sequence @@ (Style[NumberForm[#, {3, 2}], rowStyle] & /@ nVals),
+              Style[assignStr, rowStyle]
+          }];
+      , {i, Length[energies]}];
+
+      (* Возврат Grid для отображения в Dashboard *)
+      Column[{
+         Text[Style["Spectroscopy Scanner", 16, FontFamily -> "Helvetica"]],
+         Text[Style["(Real-time update)", Gray, 10]],
+         Spacer[5],
+         Grid[rows, 
+              Frame -> All, 
+              Background -> {None, {1 -> LightGray}}, 
+              ItemStyle -> {Automatic, Automatic},
+              Alignment -> {Center, Center},
+              Spacings -> {1.2, 0.8}
+         ]
+      }, Alignment -> Center]
+    ]
+  ]
+];
+
 
 (* 
    COMPUTE WORKER (FUNCTIONAL STYLE)
