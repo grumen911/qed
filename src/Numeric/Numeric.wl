@@ -60,6 +60,11 @@ ConstructFluxOperators::usage =
 Returns a list of SparseArray matrices {Phi_1, Phi_2, ...} corresponding to the nodes.
 Requires 'HarmonicDiagonalization' to be present in the model.";
 
+BuildNumericalHamiltonian::usage = 
+"BuildNumericalHamiltonian[model, basisOps, fluxOps] constructs the full Hamiltonian matrix.
+It adds the harmonic part (sum hbar*w*ad*a) and the non-linear Josephson terms.
+Subtracts the quadratic part of the cosine potential to avoid double-counting (since it's included in H_harm).";
+
 Begin["`Private`"];
 
 
@@ -1065,6 +1070,81 @@ ConstructFluxOperators[model_Association, basisOps_Association] := Module[
   phiLabOps = Nmat . phiNormalOps;
   
   phiLabOps
+];
+
+BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List] := Module[
+  {independentNodes, fluxVars, 
+   hamNum, indNum, eqRules, 
+   Upot, UquadOp, UpotOp, 
+   phiRules, idOp, dim,
+   freqs, hbar, H0, Hnl,
+   safeCos, safeSin},
+
+  (* 1. Получаем закэшированные данные из модели *)
+  hamNum = QED`Model`GetNumericalQuantity[model, "HamiltonianNumerical"];
+  indNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixInverseNumerical"];
+  eqRules = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
+  
+  If[AnyTrue[{hamNum, indNum, eqRules}, MissingQ[#] || # === $Failed &],
+     Return[Failure["MissingData", <|"Message" -> "Ensure model is computed (Method -> HarmonicPerturbation)"|>]]
+  ];
+
+  (* 2. Определяем переменные *)
+  independentNodes = Sort[Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]]];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ independentNodes;
+  
+  dim = Dimensions[fluxOps[[1]]][[1]];
+  idOp = basisOps["Identity"];
+
+  (* 3. Формируем потенциал U(phi) из Гамильтониана (зануляем заряды) *)
+  Upot = hamNum /. Subscript[QED`$ChargeSymbol, _] -> 0;
+
+  (* 4. Вычисляем оператор квадратичной части U_quad = 0.5 * phi_op . L^-1 . phi_op *)
+  (* Используем fluxOps напрямую, так как они представляют отклонение dPhi *)
+  UquadOp = 0.5 * Sum[
+     indNum[[i, j]] * (fluxOps[[i]] . fluxOps[[j]]),
+     {i, Length[independentNodes]}, {j, Length[independentNodes]}
+  ];
+
+  (* 5. Правила подстановки: phi_sym -> (phi_min * I + phi_op) *)
+  phiRules = Table[
+    With[{
+      sym = fluxVars[[i]],
+      val = (sym /. eqRules), (* Скалярное значение равновесия *)
+      op = fluxOps[[i]]       (* Матрица флуктуаций *)
+    },
+      sym -> (val * idOp + op)
+    ],
+    {i, Length[independentNodes]}
+  ];
+
+  (* 6. Вычисляем матрицу потенциала с правильной обработкой Cos/Sin *)
+  (* Сначала защищаем тригонометрию от поэлементного вычисления *)
+  Upot = Upot /. {Cos -> safeCos, Sin -> safeSin, Power[x_, n_Integer] :> MatrixPower[x, n]};
+  
+  (* Подставляем матрицы *)
+  UpotOp = Upot /. phiRules;
+  
+  (* Раскрываем матричные функции *)
+  UpotOp = UpotOp /. {
+     safeCos[mat_] :> 0.5 * (MatrixExp[I * mat] + MatrixExp[-I * mat]),
+     safeSin[mat_] :> -0.5 * I * (MatrixExp[I * mat] - MatrixExp[-I * mat])
+  };
+  
+  (* Нелинейная добавка *)
+  Hnl = UpotOp - UquadOp;
+
+  (* 7. Гармоническая часть (H_harm) *)
+  freqs = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"]["NormalModeFrequencies"];
+  hbar = QED`$hbarValue;
+  
+  H0 = Sum[
+    hbar * freqs[[k]] * (basisOps["ad"][[k]] . basisOps["a"][[k]]),
+    {k, Length[freqs]}
+  ];
+
+  (* Возвращаем полный гамильтониан *)
+  H0 + Hnl
 ];
 
 End[];
