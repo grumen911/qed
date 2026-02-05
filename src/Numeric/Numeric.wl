@@ -1078,15 +1078,24 @@ BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List]
    Upot, terms, 
    dim, idOp,
    freqs, hbar, H0, Hnl, Hquad,
-   phiRules, processTerm},
+   phiRules, processTerm,
+   eqPositions, shiftVector},
 
   (* 1. Данные модели *)
   hamNum = QED`Model`GetNumericalQuantity[model, "HamiltonianNumerical"];
   indNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixInverseNumerical"];
   eqRules = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
   
+  (* Попытка 1: Ищем явный ключ EquilibriumPosition (которого у вас нет) *)
+  (* Попытка 2: Используем Missing, чтобы сработал фоллбэк *)
+  eqPositions = Lookup[
+      QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"], 
+      "EquilibriumPosition", 
+      Missing[]
+  ];
+
   If[AnyTrue[{hamNum, indNum, eqRules}, MissingQ[#] || # === $Failed &],
-     Return[Failure["MissingData", <|"Message" -> "Model data missing."|>]]
+     Return[Failure["MissingData", <|"Message" -> "Critical model data (Ham, Ind, or EqRules) is missing."|>]]
   ];
 
   independentNodes = Sort[Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]]];
@@ -1095,16 +1104,34 @@ BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List]
   dim = Dimensions[fluxOps[[1]]][[1]];
   idOp = basisOps["Identity"];
 
+  (* БЛОК 3: Умное определение сдвига (Shift Vector) *)
+  shiftVector = If[ListQ[eqPositions] && Length[eqPositions] == Length[fluxVars],
+      (* Если ключ есть и он правильный - используем его *)
+      eqPositions,
+      
+      (* ИНАЧЕ: Извлекаем значения из eqRules *)
+      (* Применяем правила к переменным потока. Если правила нет, заменяем на 0. *)
+      (fluxVars /. eqRules) /. Subscript[QED`$FluxSymbol, _] -> 0.0
+  ];
+  
+  (* Важно: убедимся, что shiftVector - это список чисел, а не символов *)
+  shiftVector = N[shiftVector];
+
+  (* Создаем правило: Phi_sym -> (Shift * I + Phi_op) *)
+  phiRules = AssociationThread[fluxVars -> Table[
+     shiftVector[[i]] * idOp + fluxOps[[i]], 
+     {i, Length[fluxVars]}
+  ]];
+
   (* 2. Символьный потенциал *)
   Upot = hamNum /. Subscript[QED`$ChargeSymbol, _] -> 0;
   Upot = Upot /. eqRules; 
   Upot = Expand[Upot];
 
-  (* 3. Правила для операторов *)
-  phiRules = AssociationThread[fluxVars -> fluxOps];
-
+  (* ... ДАЛЕЕ КОД БЕЗ ИЗМЕНЕНИЙ (processTerm, Hnl, Hquad, Re[...]) ... *)
+  
   (* 4. Обработка слагаемых *)
-  processTerm[term_] := Module[{match, arg, coeff, argOp, cosMat, polyTerm},
+  processTerm[term_] := Module[{match, arg, coeff, argOp, cosMat},
     match = Cases[term, Cos[x_] :> {x, term/Cos[x]}, 1, 1];
     
     If[Length[match] > 0,
@@ -1117,10 +1144,8 @@ BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List]
       coeff * cosMat
       ,
       (* === ПОЛИНОМ (L или Const) === *)
-      (* Важно: Заменяем Power[x, n] на MatrixPower, чтобы не возводить поэлементно *)
       If[FreeQ[term, Alternatives @@ fluxVars],
-         term * idOp, (* Константа -> Const * Identity *)
-         (* Замена переменных с учетом матричных степеней *)
+         term * idOp, 
          term /. {
             Power[base_, exp_Integer] :> MatrixPower[base /. phiRules, exp],
             v_ /; MemberQ[fluxVars, v] :> (v /. phiRules)
@@ -1132,7 +1157,7 @@ BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List]
   terms = If[Head[Upot] === Plus, List @@ Upot, {Upot}];
   Hnl = Sum[processTerm[t], {t, terms}];
 
-  (* 5. Квадратичная часть U_quad *)
+  (* 5. Квадратичная часть U_quad (используем только флуктуации fluxOps) *)
   Hquad = 0.5 * Sum[
      indNum[[i, j]] * (fluxOps[[i]] . fluxOps[[j]]),
      {i, Length[independentNodes]}, {j, Length[independentNodes]}
@@ -1147,10 +1172,7 @@ BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List]
     {k, Length[freqs]}
   ];
 
-  (* 7. Итог БЕЗ агрессивного Chop *)
-  (* Складываем части. Мнимая часть должна быть мала (~1e-20), но реальная часть (~1e-24) важна *)
-  (* Используем Re только для мнимой части*)
-  
+  (* 7. Итог *)
   Re[H0 + (Hnl - Hquad)]
 ];
 
