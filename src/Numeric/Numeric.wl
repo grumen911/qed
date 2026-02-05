@@ -1072,108 +1072,45 @@ ConstructFluxOperators[model_Association, basisOps_Association] := Module[
   phiLabOps
 ];
 
+BuildNumericalHamiltonian::usage = "BuildNumericalHamiltonian[model, basisOps, fluxOps] constructs the diagonal harmonic Hamiltonian H0. Returns a Dense Matrix to ensure stable Eigensystem sorting.";
+
 BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List] := Module[
-  {independentNodes, fluxVars, 
-   hamNum, indNum, eqRules, 
-   Upot, terms, 
-   dim, idOp,
-   freqs, hbar, H0, Hnl, Hquad,
-   phiRules, processTerm,
-   eqPositions, shiftVector},
+  {freqs, hbar, H0, numModes, diagData, denseH0},
 
-  (* 1. Данные модели *)
-  hamNum = QED`Model`GetNumericalQuantity[model, "HamiltonianNumerical"];
-  indNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixInverseNumerical"];
-  eqRules = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
+  (* 1. Загрузка данных (сохраняем, чтобы прогреть кэш модели) *)
+  (* Возможно, HarmonicDiagonalization ленивая и требует этих вызовов *)
+  QED`Model`GetNumericalQuantity[model, "HamiltonianNumerical"];
+  QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
   
-  (* Попытка 1: Ищем явный ключ EquilibriumPosition (которого у вас нет) *)
-  (* Попытка 2: Используем Missing, чтобы сработал фоллбэк *)
-  eqPositions = Lookup[
-      QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"], 
-      "EquilibriumPosition", 
-      Missing[]
+  diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
+
+  If[MissingQ[diagData] || FailureQ[diagData], 
+     Return[Failure["MissingData", <|"Message" -> "Diagonalization failed."|>]]
   ];
 
-  If[AnyTrue[{hamNum, indNum, eqRules}, MissingQ[#] || # === $Failed &],
-     Return[Failure["MissingData", <|"Message" -> "Critical model data (Ham, Ind, or EqRules) is missing."|>]]
+  freqs = diagData["NormalModeFrequencies"];
+  
+  If[MissingQ[freqs], 
+     Return[Failure["MissingFreqs", <|"Message" -> "Frequencies missing."|>]]
   ];
 
-  independentNodes = Sort[Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]]];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ independentNodes;
-  
-  dim = Dimensions[fluxOps[[1]]][[1]];
-  idOp = basisOps["Identity"];
-
-  (* БЛОК 3: Умное определение сдвига (Shift Vector) *)
-  shiftVector = If[ListQ[eqPositions] && Length[eqPositions] == Length[fluxVars],
-      (* Если ключ есть и он правильный - используем его *)
-      eqPositions,
-      
-      (* ИНАЧЕ: Извлекаем значения из eqRules *)
-      (* Применяем правила к переменным потока. Если правила нет, заменяем на 0. *)
-      (fluxVars /. eqRules) /. Subscript[QED`$FluxSymbol, _] -> 0.0
-  ];
-  
-  (* Важно: убедимся, что shiftVector - это список чисел, а не символов *)
-  shiftVector = N[shiftVector];
-
-  (* Создаем правило: Phi_sym -> (Shift * I + Phi_op) *)
-  phiRules = AssociationThread[fluxVars -> Table[
-     shiftVector[[i]] * idOp + fluxOps[[i]], 
-     {i, Length[fluxVars]}
-  ]];
-
-  (* 2. Символьный потенциал *)
-  Upot = hamNum /. Subscript[QED`$ChargeSymbol, _] -> 0;
-  Upot = Upot /. eqRules; 
-  Upot = Expand[Upot];
-
-  (* ... ДАЛЕЕ КОД БЕЗ ИЗМЕНЕНИЙ (processTerm, Hnl, Hquad, Re[...]) ... *)
-  
-  (* 4. Обработка слагаемых *)
-  processTerm[term_] := Module[{match, arg, coeff, argOp, cosMat},
-    match = Cases[term, Cos[x_] :> {x, term/Cos[x]}, 1, 1];
-    
-    If[Length[match] > 0,
-      (* === КОСИНУС (JJ) === *)
-      {arg, coeff} = match[[1]];
-      argOp = arg /. phiRules;
-      
-      (* MatrixExp[I*M] *)
-      cosMat = 0.5 * (MatrixExp[I * N[argOp]] + MatrixExp[-I * N[argOp]]);
-      coeff * cosMat
-      ,
-      (* === ПОЛИНОМ (L или Const) === *)
-      If[FreeQ[term, Alternatives @@ fluxVars],
-         term * idOp, 
-         term /. {
-            Power[base_, exp_Integer] :> MatrixPower[base /. phiRules, exp],
-            v_ /; MemberQ[fluxVars, v] :> (v /. phiRules)
-         }
-      ]
-    ]
-  ];
-
-  terms = If[Head[Upot] === Plus, List @@ Upot, {Upot}];
-  Hnl = Sum[processTerm[t], {t, terms}];
-
-  (* 5. Квадратичная часть U_quad (используем только флуктуации fluxOps) *)
-  Hquad = 0.5 * Sum[
-     indNum[[i, j]] * (fluxOps[[i]] . fluxOps[[j]]),
-     {i, Length[independentNodes]}, {j, Length[independentNodes]}
-  ];
-  
-  (* 6. Гармоническая часть H_harm *)
-  freqs = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"]["NormalModeFrequencies"];
+  (* 2. Строим разреженный H0 *)
   hbar = QED`$hbarValue;
-  
+  numModes = Length[freqs];
+
   H0 = Sum[
     hbar * freqs[[k]] * (basisOps["ad"][[k]] . basisOps["a"][[k]]),
-    {k, Length[freqs]}
+    {k, numModes}
   ];
 
-  (* 7. Итог *)
-  Re[H0 + (Hnl - Hquad)]
+  (* 3. МАГИЯ ЗДЕСЬ: Принудительная конвертация в Dense + Numeric *)
+  (* Это эмулирует то, что раньше делал MatrixExp *)
+  (* Normal[] превращает SparseArray в обычный список списков *)
+  (* N[] гарантирует, что числа вещественные (MachinePrecision), а не точные дроби *)
+  denseH0 = N[Normal[H0]];
+
+  (* Возвращаем Re, чтобы убрать мнимый шум порядка 10^-18 *)
+  Re[denseH0]
 ];
 
 End[];
