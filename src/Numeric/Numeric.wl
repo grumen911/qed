@@ -47,7 +47,7 @@ Matrix elements: <n-1|a|n> = Sqrt[n].";
 EmbedOperator::usage = 
 "EmbedOperator[op, modeIndex, dimensions] computes the Kronecker product 
 to embed a single-mode operator 'op' into the full Hilbert space defined by 'dimensions'.
-Example: EmbedOperator[a, 2, {dim1, dim2, dim3}] -> I_1 \[Tensor] a_2 \[Tensor] I_3";
+Example: EmbedOperator[a, 2, {dim1, dim2, dim3}] -> I_1 \[KroneckerProduct] a_2 \[KroneckerProduct] I_3";
 
 GetBasisOperators::usage = 
 "GetBasisOperators[dimensions] returns an Association containing the annihilation ('a') 
