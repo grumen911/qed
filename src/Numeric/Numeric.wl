@@ -55,6 +55,11 @@ and creation ('ad') operators for each mode, embedded in the full Hilbert space.
 Input: dimensions = {dim_1, dim_2, ...} (truncation levels for each mode).
 Output: <| \"a\" -> {A_1, A_2, ...}, \"ad\" -> {Ad_1, Ad_2, ...}, \"Identity\" -> I_total |>";
 
+ConstructFluxOperators::usage = 
+"ConstructFluxOperators[model, basisOps] constructs the flux operators for each node in the laboratory frame.
+Returns a list of SparseArray matrices {Phi_1, Phi_2, ...} corresponding to the nodes.
+Requires 'HarmonicDiagonalization' to be present in the model.";
+
 Begin["`Private`"];
 
 
@@ -1014,6 +1019,52 @@ GetBasisOperators[dims_List] := Module[{nModes, singleModeOps, fullOps},
   AppendTo[fullOps, "ad" -> (ConjugateTranspose /@ fullOps["a"])];
   
   fullOps
+];
+
+ConstructFluxOperators[model_Association, basisOps_Association] := Module[
+  {diagData, Nmat, freqs, caps, nModes, hbar, zpf, phiNormalOps, phiLabOps},
+  
+  (* 1. Извлекаем параметры диагонализации *)
+  diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
+  
+  (* Если диагонализация еще не выполнена *)
+  If[MissingQ[diagData], 
+    Return[Failure["MissingDiagonalization", <|"Message" -> "Run CreateCircuitModel and ensure diagonalization is successful first."|>]]
+  ];
+
+  Nmat = diagData["FluxTransform"];
+  freqs = diagData["NormalModeFrequencies"];
+  caps = diagData["EffectiveCapacitances"];
+  hbar = QED`$hbarValue; (* Глобальная константа *)
+  
+  nModes = Length[freqs];
+  
+  (* Проверка соответствия размерностей *)
+  If[Length[basisOps["a"]] != nModes,
+     Return[Failure["DimensionMismatch", <|"Message" -> "Number of modes in basisOps does not match model diagonalization."|>]]
+  ];
+
+  (* 2. Строим операторы нормальных мод: Phi_k = ZPF_k * (a_k + ad_k) *)
+  phiNormalOps = Table[
+    With[{
+      (* ZPF = Sqrt[hbar / (2 C w)] *)
+      (* Добавляем защиту от деления на ноль для 0-й моды, если она есть *)
+      coeff = If[TrueQ[freqs[[k]] == 0], 
+                0, (* Или обработка для свободного ротатора/заряда, если нужно *)
+                Sqrt[hbar / (2 * caps[[k]] * freqs[[k]])]
+              ]
+      },
+      coeff * (basisOps["a"][[k]] + basisOps["ad"][[k]])
+    ],
+    {k, nModes}
+  ];
+  
+  (* 3. Переходим в лабораторную систему: Phi_lab = N . Phi_normal *)
+  (* Nmat - это матрица (Nodes x Modes), phiNormalOps - список матриц (Modes) *)
+  (* Dot (.) корректно свернет это в список матриц для узлов *)
+  phiLabOps = Nmat . phiNormalOps;
+  
+  phiLabOps
 ];
 
 End[];
