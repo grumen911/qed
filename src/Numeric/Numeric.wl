@@ -1075,66 +1075,70 @@ ConstructFluxOperators[model_Association, basisOps_Association] := Module[
 BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List] := Module[
   {independentNodes, fluxVars, 
    hamNum, indNum, eqRules, 
-   Upot, UquadOp, UpotOp, 
-   phiRules, idOp, dim,
-   freqs, hbar, H0, Hnl,
-   safeCos, safeSin},
+   Upot, terms, 
+   dim, idOp,
+   freqs, hbar, H0, Hnl, Hquad,
+   phiRules, processTerm},
 
-  (* 1. Получаем закэшированные данные из модели *)
+  (* 1. Данные модели *)
   hamNum = QED`Model`GetNumericalQuantity[model, "HamiltonianNumerical"];
   indNum = QED`Model`GetNumericalQuantity[model, "InductanceMatrixInverseNumerical"];
   eqRules = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
   
   If[AnyTrue[{hamNum, indNum, eqRules}, MissingQ[#] || # === $Failed &],
-     Return[Failure["MissingData", <|"Message" -> "Ensure model is computed (Method -> HarmonicPerturbation)"|>]]
+     Return[Failure["MissingData", <|"Message" -> "Model data missing."|>]]
   ];
 
-  (* 2. Определяем переменные *)
   independentNodes = Sort[Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]]];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ independentNodes;
   
   dim = Dimensions[fluxOps[[1]]][[1]];
   idOp = basisOps["Identity"];
 
-  (* 3. Формируем потенциал U(phi) из Гамильтониана (зануляем заряды) *)
+  (* 2. Символьный потенциал *)
   Upot = hamNum /. Subscript[QED`$ChargeSymbol, _] -> 0;
+  Upot = Upot /. eqRules; 
+  Upot = Expand[Upot];
 
-  (* 4. Вычисляем оператор квадратичной части U_quad = 0.5 * phi_op . L^-1 . phi_op *)
-  (* Используем fluxOps напрямую, так как они представляют отклонение dPhi *)
-  UquadOp = 0.5 * Sum[
+  (* 3. Правила для операторов *)
+  phiRules = AssociationThread[fluxVars -> fluxOps];
+
+  (* 4. Обработка слагаемых *)
+  processTerm[term_] := Module[{match, arg, coeff, argOp, cosMat, polyTerm},
+    match = Cases[term, Cos[x_] :> {x, term/Cos[x]}, 1, 1];
+    
+    If[Length[match] > 0,
+      (* === КОСИНУС (JJ) === *)
+      {arg, coeff} = match[[1]];
+      argOp = arg /. phiRules;
+      
+      (* MatrixExp[I*M] *)
+      cosMat = 0.5 * (MatrixExp[I * N[argOp]] + MatrixExp[-I * N[argOp]]);
+      coeff * cosMat
+      ,
+      (* === ПОЛИНОМ (L или Const) === *)
+      (* Важно: Заменяем Power[x, n] на MatrixPower, чтобы не возводить поэлементно *)
+      If[FreeQ[term, Alternatives @@ fluxVars],
+         term * idOp, (* Константа -> Const * Identity *)
+         (* Замена переменных с учетом матричных степеней *)
+         term /. {
+            Power[base_, exp_Integer] :> MatrixPower[base /. phiRules, exp],
+            v_ /; MemberQ[fluxVars, v] :> (v /. phiRules)
+         }
+      ]
+    ]
+  ];
+
+  terms = If[Head[Upot] === Plus, List @@ Upot, {Upot}];
+  Hnl = Sum[processTerm[t], {t, terms}];
+
+  (* 5. Квадратичная часть U_quad *)
+  Hquad = 0.5 * Sum[
      indNum[[i, j]] * (fluxOps[[i]] . fluxOps[[j]]),
      {i, Length[independentNodes]}, {j, Length[independentNodes]}
   ];
-
-  (* 5. Правила подстановки: phi_sym -> (phi_min * I + phi_op) *)
-  phiRules = Table[
-    With[{
-      sym = fluxVars[[i]],
-      val = (sym /. eqRules), (* Скалярное значение равновесия *)
-      op = fluxOps[[i]]       (* Матрица флуктуаций *)
-    },
-      sym -> (val * idOp + op)
-    ],
-    {i, Length[independentNodes]}
-  ];
-
-  (* 6. Вычисляем матрицу потенциала с правильной обработкой Cos/Sin *)
-  (* Сначала защищаем тригонометрию от поэлементного вычисления *)
-  Upot = Upot /. {Cos -> safeCos, Sin -> safeSin, Power[x_, n_Integer] :> MatrixPower[x, n]};
   
-  (* Подставляем матрицы *)
-  UpotOp = Upot /. phiRules;
-  
-  (* Раскрываем матричные функции *)
-  UpotOp = UpotOp /. {
-     safeCos[mat_] :> 0.5 * (MatrixExp[I * mat] + MatrixExp[-I * mat]),
-     safeSin[mat_] :> -0.5 * I * (MatrixExp[I * mat] - MatrixExp[-I * mat])
-  };
-  
-  (* Нелинейная добавка *)
-  Hnl = UpotOp - UquadOp;
-
-  (* 7. Гармоническая часть (H_harm) *)
+  (* 6. Гармоническая часть H_harm *)
   freqs = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"]["NormalModeFrequencies"];
   hbar = QED`$hbarValue;
   
@@ -1143,8 +1147,11 @@ BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List]
     {k, Length[freqs]}
   ];
 
-  (* Возвращаем полный гамильтониан *)
-  H0 + Hnl
+  (* 7. Итог БЕЗ агрессивного Chop *)
+  (* Складываем части. Мнимая часть должна быть мала (~1e-20), но реальная часть (~1e-24) важна *)
+  (* Используем Re только для мнимой части*)
+  
+  Re[H0 + (Hnl - Hquad)]
 ];
 
 End[];
