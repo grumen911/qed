@@ -281,6 +281,11 @@ RegisterPlot["SpectroscopyScanner", "Spectroscopy Scanner", "Light",
   ]
 ];
 
+RegisterPlot[
+  "LabMatrixElements", 
+  "Label" -> "Matrix Elements (Lab Basis)", 
+  "Function" -> Function[{m}, QED`Plots`PlotLabMatrixElements[m]]
+];
 
 (* 
    COMPUTE WORKER (FUNCTIONAL STYLE)

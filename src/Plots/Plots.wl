@@ -561,6 +561,82 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
   ]
 ];
 
+PlotLabMatrixElements[model_Association] := Module[
+  {data, nodes, modes, makeGrid, gridFlux, gridCharge},
+
+  (* 1. Получаем данные *)
+  data = QED`Numeric`GetLabMatrixElements[model];
+  
+  (* Обработка ошибок, если диагонализация еще не запущена *)
+  If[FailureQ[data], 
+    Return[Style["Model not diagonalized yet. Please Run Analysis.", Red, Italic]]
+  ];
+
+  (* Извлекаем индексы *)
+  nodes = Keys[data["Flux"]];
+  modes = Keys[data["Flux"][First[nodes]]];
+
+  (* 2. Вспомогательная функция для генерации таблицы *)
+  makeGrid[type_, unit_] := Module[{header, rows, val},
+    
+    (* Заголовок: Node \ Mode 1 | Mode 2 ... *)
+    header = Prepend[
+      Table[Style["Mode " <> ToString[m], Bold, Darker[Blue]], {m, modes}],
+      Style["Node \\ Mode", Bold, Italic]
+    ];
+
+    (* Строки данных *)
+    rows = Table[
+      Prepend[
+        Table[
+          val = data[type][n][m];
+          (* Форматирование числа: 3 значащие цифры, научная нотация *)
+          Item[
+            ScientificForm[val, 3], 
+            Alignment -> Center
+          ],
+          {m, modes}
+        ],
+        Style["Node " <> ToString[n], Bold] (* Метка строки *)
+      ],
+      {n, nodes}
+    ];
+
+    (* Сборка Grid с оформлением *)
+    Grid[
+      Prepend[rows, header], 
+      Frame -> All, 
+      FrameStyle -> LightGray,
+      Background -> {
+         {1 -> LightGray}, (* Первый столбец серый *)
+         {1 -> LightGray}, (* Первая строка серая *)
+         {1, 1} -> White    (* Угловая ячейка белая *)
+      },
+      Spacings -> {1.5, 1.2},
+      ItemSize -> {Automatic, Automatic}
+    ]
+  ];
+
+  (* 3. Формируем TabView для переключения между Flux и Charge *)
+  TabView[{
+    "Flux (<0|\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(i\)]\)|1k>)" -> 
+      Column[{
+        Text[Style["Transition Matrix Elements (Flux)", Large, Bold]], 
+        Text[Style["Unit: " <> data["Units"]["Flux"] <> " (Weber)", Gray]],
+        Spacer[10],
+        makeGrid["Flux", "Wb"]
+      }, Alignment -> Center],
+      
+    "Charge (<0|\!\(\*SubscriptBox[\(Q\), \(i\)]\)|1k>)" -> 
+      Column[{
+        Text[Style["Transition Matrix Elements (Charge)", Large, Bold]], 
+        Text[Style["Unit: " <> data["Units"]["Charge"] <> " (Coulomb)", Gray]],
+        Spacer[10],
+        makeGrid["Charge", "C"]
+      }, Alignment -> Center]
+  }, Alignment -> Center]
+];
+
 
 End[];
 EndPackage[];
