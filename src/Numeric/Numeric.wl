@@ -70,14 +70,16 @@ GetLabMatrixElements::usage = "GetLabMatrixElements[model] computes the transiti
 Returns an Association: <| \"Flux\" -> <| node -> <| mode -> val |> |>, ... |>.";
 
 CalculateFermiRates::usage = "CalculateFermiRates[model, options] calculates relaxation rates (Gamma = 1/T1) \
-using Fermi's Golden Rule for Flux and Charge noise channels. \
-Returns an Association with rates for each mode.";
+using Fermi's Golden Rule. Includes 1/f Flux noise and Capacitive coupling to output port (Purcell).";
+
 
 Begin["`Private`"];
 
 Options[CalculateFermiRates] = {
-  "FluxNoiseAmplitude" -> (10.^-6 * 2.0678*10^-15)^2, (* A_Phi ~ (1 uPhi0)^2 typ. *)
-  "ChargeNoiseResistance" -> 50.0 (* R_eff ~ 50 Ohm typ. environment *)
+  "FluxNoiseAmplitude" -> (10.^-6 * 2.0678*10^-15)^2, (* A_Phi ~ (1 uPhi0)^2 *)
+  "CouplingCapacitance" -> 1.0*^-15, (* Cc ~ 1 fF *)
+  "LoadResistance" -> 50.0,          (* R_load ~ 50 Ohm *)
+  "PortNode" -> 1                    (* Default: port connected to Node 1 *)
 };
 
 Options[FindPotentialMinimumContinuation] = {
@@ -1187,10 +1189,9 @@ GetLabMatrixElements[model_Association] := Module[
 
 CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   {elements, freqs, hbar, numModes, numNodes, 
-   fluxAmp, rShunt, fluxRates, ohmicRates, w, 
-   gammaFlux, gammaOhmic},
+   fluxAmp, cCoupling, rLoad, portNode,
+   fluxRates, purcellRates, w},
 
-  (* 1. Получаем матричные элементы *)
   elements = GetLabMatrixElements[model];
   If[FailureQ[elements], Return[$Failed]];
 
@@ -1200,12 +1201,12 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   numNodes = Length[Keys[elements["Flux"]]];
   numModes = Length[freqs];
 
-  (* Параметры *)
   fluxAmp = OptionValue["FluxNoiseAmplitude"]; 
-  rShunt = OptionValue["ChargeNoiseResistance"]; (* Теперь это R_shunt *)
+  cCoupling = OptionValue["CouplingCapacitance"];
+  rLoad = OptionValue["LoadResistance"];
+  portNode = OptionValue["PortNode"]; 
 
-  (* 2. Flux Noise (1/f) - Здесь все было верно *)
-  (* S_Phi(w) = A / (w/2Pi) *)
+  (* 1. Flux Noise (1/f) - Global *)
   fluxRates = Table[
     w = freqs[[k]];
     If[w == 0, 0.,
@@ -1221,39 +1222,41 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     {k, numModes}
   ];
 
-  (* 3. Ohmic Loss (Parallel Resistor) - ИСПРАВЛЕНО *)
-  (* Используем связь через Flux: H = -Phi * I_noise *)
-  (* S_I(w) = 2 * hbar * w / R (Quantum Noise at T=0) *)
-  (* Gamma = (1/hbar^2) * |<Phi>|^2 * S_I *)
-  
-  ohmicRates = Table[
+  (* 2. Purcell Relaxation - Local to PortNode *)
+  purcellRates = Table[
     w = freqs[[k]];
     If[w == 0, 0.,
-      Sum[
-        Module[{phiElem, sCurrent},
-          (* Берем матричный элемент ПОТОКА, так как он сопряжен с током в резисторе *)
-          phiElem = elements["Flux"][n][k]; 
-          
-          (* Спектральная плотность тока резистора *)
-          sCurrent = (2.0 * hbar * w) / rShunt;
-          
-          (1/hbar^2) * Abs[phiElem]^2 * sCurrent
-        ],
-        {n, numNodes}
+      Module[{nodesToSum, yRe, sCurrent},
+        
+        (* Если PortNode -> Automatic, суммируем по всем. Иначе только указанный узел *)
+        nodesToSum = If[IntegerQ[portNode], {portNode}, Range[numNodes]];
+        
+        (* Re[Y] для последовательной RC-цепочки *)
+        yRe = (rLoad * w^2 * cCoupling^2) / (1.0 + w^2 * cCoupling^2 * rLoad^2);
+        
+        (* S_I = 2 * hbar * w * Re[Y] *)
+        sCurrent = 2.0 * hbar * w * yRe;
+
+        Sum[
+          Module[{phiElem},
+            phiElem = elements["Flux"][n][k];
+            (1/hbar^2) * Abs[phiElem]^2 * sCurrent
+          ],
+          {n, nodesToSum}
+        ]
       ]
     ],
     {k, numModes}
   ];
 
-  (* 4. Возвращаем результат *)
   <|
     "Modes" -> Range[numModes],
     "Frequencies" -> freqs,
     "FluxRelaxationRate" -> fluxRates,    
-    "OhmicRelaxationRate" -> ohmicRates,   (* Бывший ChargeRelaxationRate *)
+    "PurcellRelaxationRate" -> purcellRates,
     "TotalT1" -> Table[
        Module[{gammaTot},
-         gammaTot = fluxRates[[k]] + ohmicRates[[k]];
+         gammaTot = fluxRates[[k]] + purcellRates[[k]];
          If[gammaTot == 0, Infinity, 1.0 / gammaTot]
        ],
        {k, numModes}

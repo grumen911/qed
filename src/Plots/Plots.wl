@@ -656,57 +656,45 @@ PlotLabMatrixElements[model_Association] := Module[
 ];
 
 PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
-  {data, modes, freqs, fluxGamma, ohmicGamma, totalT1, rows, header, formatTime},
+  {data, modes, freqs, fluxGamma, purcellGamma, totalT1, rows, header, formatTime},
   
-  (* 1. Вычисляем скорости *)
   data = QED`Numeric`CalculateFermiRates[model];
   
   If[FailureQ[data], 
-    Return[Style["Error: Could not calculate Fermi rates. Check model parameters.", Red]]
+    Return[Style["Error: Could not calculate Fermi rates.", Red]]
   ];
 
   modes = data["Modes"];
   freqs = data["Frequencies"];
   fluxGamma = data["FluxRelaxationRate"];
-  ohmicGamma = data["OhmicRelaxationRate"];
+  purcellGamma = data["PurcellRelaxationRate"]; (* Новое имя *)
   totalT1 = data["TotalT1"];
 
-  (* Вспомогательная функция: переводит Gamma (1/s) в T1 (us) и обрабатывает 0 *)
-  formatTime[rate_] := If[rate <= 1.0*^-20, 
-    Infinity, 
-    ScientificForm[1.0 / rate * 10^6, 3] (* s -> us *)
-  ];
-  
-  (* Обработка общего времени (которое уже в секундах или Infinity) *)
-  formatTotalTime[t_] := If[t === Infinity, 
-    Infinity, 
-    ScientificForm[t * 10^6, 3]
-  ];
+  formatTime[rate_] := If[rate <= 1.0*^-20, Infinity, ScientificForm[1.0 / rate * 10^6, 3]];
+  formatTotalTime[t_] := If[t === Infinity, Infinity, ScientificForm[t * 10^6, 3]];
 
-  (* 2. Формируем таблицу *)
   header = {
     Style["Mode", Bold, Darker[Blue]],
     Style["Freq\n(GHz)", Bold],
-    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Flux\n(\[Mu]s)", Bold],  (* Limit T1 Flux *)
-    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Ohmic\n(\[Mu]s)", Bold], (* Limit T1 Ohmic *)
+    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Flux\n(\[Mu]s)", Bold],
+    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Purcell\n(\[Mu]s)", Bold], (* Новое имя *)
     Style["Total \!\(\*SubscriptBox[\(T\), \(1\)]\)\n(\[Mu]s)", Bold]
   };
 
   rows = Table[
     {
       m,
-      ScientificForm[freqs[[m]] / (2 Pi * 10^9), 3], (* Hz -> GHz *)
+      ScientificForm[freqs[[m]] / (2 Pi * 10^9), 3],
       formatTime[fluxGamma[[m]]],
-      formatTime[ohmicGamma[[m]]],
+      formatTime[purcellGamma[[m]]],
       formatTotalTime[totalT1[[m]]]
     },
     {m, modes}
   ];
 
-  (* 3. Вывод *)
   Column[{
-    Text[Style["Relaxation Times by Channel (Fermi's Golden Rule)", Medium, Bold]],
-    Text[Style["Parameters: Flux Noise A=10^-6, Ohmic R=50 \[CapitalOmega]", Gray]],
+    Text[Style["Relaxation Times (Fermi Rule)", Large, Bold]],
+    Text[Style["Flux Noise: 1/f (A=10^-6) | Purcell: C_c=1 fF to 50 \[CapitalOmega]", Gray]],
     Spacer[10],
     Grid[
       Prepend[rows, header], 
