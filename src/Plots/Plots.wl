@@ -583,10 +583,23 @@ PlotLabMatrixElements[model_Association] := Module[
   (* 2. Вспомогательная функция для генерации таблицы *)
   makeGrid[type_, unit_] := Module[{header, rows, val},
     
-    (* Заголовок: Node \ Mode 1 | Mode 2 ... *)
+    (* Определяем количество мод для формирования векторов *)
+    numModes = Length[modes];
+
+    (* Заголовок: Node \ State |1,0,0> |0,1,0> ... *)
     header = Prepend[
-      Table[Style["Mode " <> ToString[m], Bold, Darker[Blue]], {m, modes}],
-      Style["Node \\ Mode", Bold, Italic]
+      Table[
+        (* Создаем список из нулей и ставим 1 на место текущей моды m *)
+        (* Пример: для моды 2 из 3 это будет {0, 1, 0} *)
+        stateVec = ReplacePart[ConstantArray[0, numModes], m -> 1];
+        
+        (* Формируем строку вида "|0,1,0>" *)
+        label = "|" <> StringRiffle[ToString /@ stateVec, ","] <> ">";
+        
+        Style[label, Bold, Darker[Blue]], 
+        {m, modes}
+      ],
+      Style["Node \\ State", Bold, Italic]
     ];
 
     (* Строки данных *)
@@ -624,7 +637,7 @@ PlotLabMatrixElements[model_Association] := Module[
   (* 3. Формируем единую колонку с двумя таблицами *)
   Column[{
     (* --- FLUX SECTION --- *)
-    Text[Style["Transition Matrix Elements (Flux) <0|\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(i\)]\)|1k>", Large, Bold]], 
+    Text[Style["Transition Matrix Elements (Flux) <0|\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(i\)]\)|1k>", Medium, Bold]], 
     Text[Style["Unit: " <> data["Units"]["Flux"] <> " (Weber)", Gray]],
     Spacer[10],
     makeGrid["Flux", "Wb"],
@@ -632,7 +645,7 @@ PlotLabMatrixElements[model_Association] := Module[
     Spacer[30], (* Отступ между таблицами *)
     
     (* --- CHARGE SECTION --- *)
-    Text[Style["Transition Matrix Elements (Charge) <0|\!\(\*SubscriptBox[\(Q\), \(i\)]\)|1k>", Large, Bold]], 
+    Text[Style["Transition Matrix Elements (Charge) <0|\!\(\*SubscriptBox[\(Q\), \(i\)]\)|1k>", Medium, Bold]], 
     Text[Style["Unit: " <> data["Units"]["Charge"] <> " (Coulomb)", Gray]],
     Spacer[10],
     makeGrid["Charge", "C"]
