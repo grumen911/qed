@@ -567,12 +567,11 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
 ];
 
 PlotLabMatrixElements[model_Association] := Module[
-  {data, nodes, modes, makeGrid, gridFlux, gridCharge},
+  {data, nodes, modes, makeGrid},
 
   (* 1. Получаем данные *)
   data = QED`Numeric`GetLabMatrixElements[model];
   
-  (* Обработка ошибок, если диагонализация еще не запущена *)
   If[FailureQ[data], 
     Return[Style["Model not diagonalized yet. Please Run Analysis.", Red, Italic]]
   ];
@@ -595,50 +594,48 @@ PlotLabMatrixElements[model_Association] := Module[
       Prepend[
         Table[
           val = data[type][n][m];
-          (* Форматирование числа: 3 значащие цифры, научная нотация *)
+          (* Форматирование: 3 значащие цифры, научная нотация *)
           Item[
             ScientificForm[val, 3], 
             Alignment -> Center
           ],
           {m, modes}
         ],
-        Style["Node " <> ToString[n], Bold] (* Метка строки *)
+        Style["Node " <> ToString[n], Bold]
       ],
       {n, nodes}
     ];
 
-    (* Сборка Grid с оформлением *)
+    (* Сборка Grid *)
     Grid[
       Prepend[rows, header], 
       Frame -> All, 
       FrameStyle -> LightGray,
       Background -> {
-         {1 -> LightGray}, (* Первый столбец серый *)
-         {1 -> LightGray}, (* Первая строка серая *)
-         {1, 1} -> White    (* Угловая ячейка белая *)
+         {1 -> LightGray}, 
+         {1 -> LightGray}, 
+         {1, 1} -> White
       },
       Spacings -> {1.5, 1.2},
       ItemSize -> {Automatic, Automatic}
     ]
   ];
 
-  (* 3. Формируем TabView для переключения между Flux и Charge *)
-  TabView[{
-    "Flux (<0|\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(i\)]\)|1k>)" -> 
-      Column[{
-        Text[Style["Transition Matrix Elements (Flux)", Large, Bold]], 
-        Text[Style["Unit: " <> data["Units"]["Flux"] <> " (Weber)", Gray]],
-        Spacer[10],
-        makeGrid["Flux", "Wb"]
-      }, Alignment -> Center],
-      
-    "Charge (<0|\!\(\*SubscriptBox[\(Q\), \(i\)]\)|1k>)" -> 
-      Column[{
-        Text[Style["Transition Matrix Elements (Charge)", Large, Bold]], 
-        Text[Style["Unit: " <> data["Units"]["Charge"] <> " (Coulomb)", Gray]],
-        Spacer[10],
-        makeGrid["Charge", "C"]
-      }, Alignment -> Center]
+  (* 3. Формируем единую колонку с двумя таблицами *)
+  Column[{
+    (* --- FLUX SECTION --- *)
+    Text[Style["Transition Matrix Elements (Flux) <0|\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(i\)]\)|1k>", Large, Bold]], 
+    Text[Style["Unit: " <> data["Units"]["Flux"] <> " (Weber)", Gray]],
+    Spacer[10],
+    makeGrid["Flux", "Wb"],
+    
+    Spacer[30], (* Отступ между таблицами *)
+    
+    (* --- CHARGE SECTION --- *)
+    Text[Style["Transition Matrix Elements (Charge) <0|\!\(\*SubscriptBox[\(Q\), \(i\)]\)|1k>", Large, Bold]], 
+    Text[Style["Unit: " <> data["Units"]["Charge"] <> " (Coulomb)", Gray]],
+    Spacer[10],
+    makeGrid["Charge", "C"]
   }, Alignment -> Center]
 ];
 
