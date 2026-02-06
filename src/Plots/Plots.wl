@@ -656,18 +656,16 @@ PlotLabMatrixElements[model_Association] := Module[
 ];
 
 PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
-  {data, modes, freqs, fluxGamma, purcellGamma, totalT1, rows, header, formatTime},
+  {data, modes, freqs, indGamma, capGamma, totalT1, rows, header, formatTime},
   
   data = QED`Numeric`CalculateFermiRates[model];
   
-  If[FailureQ[data], 
-    Return[Style["Error: Could not calculate Fermi rates.", Red]]
-  ];
+  If[FailureQ[data], Return[Style["Error calculating rates.", Red]]];
 
   modes = data["Modes"];
   freqs = data["Frequencies"];
-  fluxGamma = data["FluxRelaxationRate"];
-  purcellGamma = data["PurcellRelaxationRate"]; (* Новое имя *)
+  indGamma = data["InductiveRelaxationRate"];
+  capGamma = data["CapacitiveRelaxationRate"];
   totalT1 = data["TotalT1"];
 
   formatTime[rate_] := If[rate <= 1.0*^-20, Infinity, ScientificForm[1.0 / rate * 10^6, 3]];
@@ -676,8 +674,8 @@ PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   header = {
     Style["Mode", Bold, Darker[Blue]],
     Style["Freq\n(GHz)", Bold],
-    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Flux\n(\[Mu]s)", Bold],
-    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Purcell\n(\[Mu]s)", Bold], (* Новое имя *)
+    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Inductive\n(RL, \[Mu]s)", Bold],
+    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Capacitive\n(RC, \[Mu]s)", Bold],
     Style["Total \!\(\*SubscriptBox[\(T\), \(1\)]\)\n(\[Mu]s)", Bold]
   };
 
@@ -685,16 +683,16 @@ PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     {
       m,
       ScientificForm[freqs[[m]] / (2 Pi * 10^9), 3],
-      formatTime[fluxGamma[[m]]],
-      formatTime[purcellGamma[[m]]],
+      formatTime[indGamma[[m]]],
+      formatTime[capGamma[[m]]],
       formatTotalTime[totalT1[[m]]]
     },
     {m, modes}
   ];
 
   Column[{
-    Text[Style["Relaxation Times (Fermi Rule)", Large, Bold]],
-    Text[Style["Flux Noise: 1/f (A=10^-6) | Purcell: C_c=1 fF to 50 \[CapitalOmega]", Gray]],
+    Text[Style["Relaxation Times (Coupling to 50 \[CapitalOmega] Ports)", Large, Bold]],
+    Text[Style["Inductive: M=2pH | Capacitive: Cc=1fF", Gray]],
     Spacer[10],
     Grid[
       Prepend[rows, header], 

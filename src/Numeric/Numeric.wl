@@ -69,17 +69,24 @@ GetLabMatrixElements::usage = "GetLabMatrixElements[model] computes the transiti
 (<0|Phi_lab|1_k>, <0|Q_lab|1_k>) for each node and each normal mode k. \
 Returns an Association: <| \"Flux\" -> <| node -> <| mode -> val |> |>, ... |>.";
 
-CalculateFermiRates::usage = "CalculateFermiRates[model, options] calculates relaxation rates (Gamma = 1/T1) \
-using Fermi's Golden Rule. Includes 1/f Flux noise and Capacitive coupling to output port (Purcell).";
+CalculateFermiRates::usage = "CalculateFermiRates[model, options] calculates relaxation rates (T1). \
+Channels included: \n\
+1. Inductive Coupling (RL): Relaxation via mutual inductance M to a resistor R (Flux bias line). \n\
+2. Capacitive Coupling (RC): Relaxation via capacitor Cc to a resistor R (Readout line / Purcell).";
 
 
 Begin["`Private`"];
 
 Options[CalculateFermiRates] = {
-  "FluxNoiseAmplitude" -> (10.^-6 * 2.0678*10^-15)^2, (* A_Phi ~ (1 uPhi0)^2 *)
+  (* Inductive Channel parameters *)
+  "MutualInductance" -> 2.0*^-12, (* M ~ 2 pH *)
+  "InductiveLineResistance" -> 50.0,
+  
+  (* Capacitive Channel parameters *)
   "CouplingCapacitance" -> 1.0*^-15, (* Cc ~ 1 fF *)
-  "LoadResistance" -> 50.0,          (* R_load ~ 50 Ohm *)
-  "PortNode" -> 1                    (* Default: port connected to Node 1 *)
+  "CapacitiveLineResistance" -> 50.0,
+  
+  "PortNode" -> 1 (* Node connected to readout/control *)
 };
 
 Options[FindPotentialMinimumContinuation] = {
@@ -1189,8 +1196,9 @@ GetLabMatrixElements[model_Association] := Module[
 
 CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   {elements, freqs, hbar, numModes, numNodes, 
-   fluxAmp, cCoupling, rLoad, portNode,
-   fluxRates, purcellRates, w},
+   mInd, rInd, cCap, rCap, portNode,
+   inductiveRates, capacitiveRates, w, 
+   nodesToSum},
 
   elements = GetLabMatrixElements[model];
   If[FailureQ[elements], Return[$Failed]];
@@ -1201,40 +1209,40 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   numNodes = Length[Keys[elements["Flux"]]];
   numModes = Length[freqs];
 
-  fluxAmp = OptionValue["FluxNoiseAmplitude"]; 
-  cCoupling = OptionValue["CouplingCapacitance"];
-  rLoad = OptionValue["LoadResistance"];
+  mInd = OptionValue["MutualInductance"];      (* M ~ 2 pH *)
+  rInd = OptionValue["InductiveLineResistance"]; (* R ~ 50 Ohm *)
+  cCap = OptionValue["CouplingCapacitance"];
+  rCap = OptionValue["CapacitiveLineResistance"];
   portNode = OptionValue["PortNode"]; 
 
-  (* 1. Flux Noise (1/f) - Global *)
-  fluxRates = Table[
+  nodesToSum = If[IntegerQ[portNode], {portNode}, Range[numNodes]];
+
+  (* 1. Inductive Relaxation (Flux Bias Line) *)
+  (* Uses Charge matrix elements because <I> ~ w <Q> *)
+  inductiveRates = Table[
     w = freqs[[k]];
     If[w == 0, 0.,
       Sum[
-        Module[{phiElem, sPhi},
-          phiElem = elements["Flux"][n][k];
-          sPhi = fluxAmp / (w / (2*Pi));
-          (1/hbar^2) * Abs[phiElem]^2 * sPhi
+        Module[{qElem, rate},
+          qElem = elements["Charge"][n][k]; 
+          (* Gamma = (2 * w^3 * M^2 * |<Q>|^2) / (hbar * R) *)
+          rate = (2.0 * w^3 * mInd^2 * Abs[qElem]^2) / (hbar * rInd);
+          rate
         ],
-        {n, numNodes}
+        {n, nodesToSum}
       ]
     ],
     {k, numModes}
   ];
 
-  (* 2. Purcell Relaxation - Local to PortNode *)
-  purcellRates = Table[
+  (* 2. Capacitive Relaxation (Purcell Readout) *)
+  (* Uses Flux matrix elements because <V> ~ w <Phi> or via admittance logic *)
+  capacitiveRates = Table[
     w = freqs[[k]];
     If[w == 0, 0.,
-      Module[{nodesToSum, yRe, sCurrent},
-        
-        (* Если PortNode -> Automatic, суммируем по всем. Иначе только указанный узел *)
-        nodesToSum = If[IntegerQ[portNode], {portNode}, Range[numNodes]];
-        
-        (* Re[Y] для последовательной RC-цепочки *)
-        yRe = (rLoad * w^2 * cCoupling^2) / (1.0 + w^2 * cCoupling^2 * rLoad^2);
-        
-        (* S_I = 2 * hbar * w * Re[Y] *)
+      Module[{yRe, sCurrent},
+        (* Re[Y] for RC series *)
+        yRe = (rCap * w^2 * cCap^2) / (1.0 + w^2 * cCap^2 * rCap^2);
         sCurrent = 2.0 * hbar * w * yRe;
 
         Sum[
@@ -1252,11 +1260,11 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   <|
     "Modes" -> Range[numModes],
     "Frequencies" -> freqs,
-    "FluxRelaxationRate" -> fluxRates,    
-    "PurcellRelaxationRate" -> purcellRates,
+    "InductiveRelaxationRate" -> inductiveRates, 
+    "CapacitiveRelaxationRate" -> capacitiveRates,
     "TotalT1" -> Table[
        Module[{gammaTot},
-         gammaTot = fluxRates[[k]] + purcellRates[[k]];
+         gammaTot = inductiveRates[[k]] + capacitiveRates[[k]];
          If[gammaTot == 0, Infinity, 1.0 / gammaTot]
        ],
        {k, numModes}
