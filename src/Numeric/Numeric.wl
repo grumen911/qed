@@ -65,6 +65,10 @@ BuildNumericalHamiltonian::usage =
 It adds the harmonic part (sum hbar*w*ad*a) and the non-linear Josephson terms.
 Subtracts the quadratic part of the cosine potential to avoid double-counting (since it's included in H_harm).";
 
+GetLabMatrixElements::usage = "GetLabMatrixElements[model] computes the transition matrix elements \
+(<0|Phi_lab|1_k>, <0|Q_lab|1_k>) for each node and each normal mode k. \
+Returns an Association: <| \"Flux\" -> <| node -> <| mode -> val |> |>, ... |>.";
+
 Begin["`Private`"];
 
 
@@ -1111,6 +1115,67 @@ BuildNumericalHamiltonian[model_Association, basisOps_Association, fluxOps_List]
 
   (* Возвращаем Re, чтобы убрать мнимый шум порядка 10^-18 *)
   Re[denseH0]
+];
+
+GetLabMatrixElements[model_Association] := Module[
+  {diagData, Nmat, Mmat, freqs, caps, hbar, numModes, numNodes, 
+   fluxZPFCoeffs, chargeZPFCoeffs, fluxElements, chargeElements},
+
+  (* 1. Fetch Diagonalization Data *)
+  diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
+  
+  If[MissingQ[diagData] || FailureQ[diagData], 
+     Return[Failure["MissingData", <|"Message" -> "HarmonicDiagonalization not found."|>]]
+  ];
+
+  Nmat = diagData["FluxTransform"];   (* shape: [NumNodes, NumModes] *)
+  Mmat = diagData["ChargeTransform"]; (* shape: [NumNodes, NumModes] *)
+  freqs = diagData["NormalModeFrequencies"];
+  caps = diagData["EffectiveCapacitances"];
+  hbar = QED`$hbarValue;
+
+  {numNodes, numModes} = Dimensions[Nmat];
+
+  (* 2. Calculate Normalization Scalars (ZPF of the mode itself) *)
+  (* phi_zpf_k = Sqrt[hbar / (2 * C_k * w_k)] *)
+  fluxZPFCoeffs = Table[
+    If[TrueQ[freqs[[k]] == 0], 0., Sqrt[hbar / (2.0 * caps[[k]] * freqs[[k]])]], 
+    {k, numModes}
+  ];
+  
+  (* q_zpf_k = Sqrt[(hbar * C_k * w_k) / 2] *)
+  chargeZPFCoeffs = Table[
+    If[TrueQ[freqs[[k]] == 0], 0., Sqrt[(hbar * caps[[k]] * freqs[[k]]) / 2.0]], 
+    {k, numModes}
+  ];
+
+  (* 3. Compute Matrix Elements (ZPF projected to nodes) *)
+  (* Using Association to prevent Part::partw errors during lookup *)
+  
+  (* Flux Elements: <0 | Phi_node_i | 1_mode_k> *)
+  fluxElements = Association @ Table[
+    i -> Association @ Table[
+       k -> Nmat[[i, k]] * fluxZPFCoeffs[[k]], 
+       {k, numModes}
+    ],
+    {i, numNodes}
+  ];
+
+  (* Charge Elements: <0 | Q_node_i | 1_mode_k> *)
+  (* Note: The operator is i(a^dagger - a), so element <0|Q|1> is -i * coeff *)
+  chargeElements = Association @ Table[
+    i -> Association @ Table[
+       k -> -I * Mmat[[i, k]] * chargeZPFCoeffs[[k]], 
+       {k, numModes}
+    ],
+    {i, numNodes}
+  ];
+
+  <|
+    "Flux" -> fluxElements,
+    "Charge" -> chargeElements,
+    "Units" -> <|"Flux" -> "Wb", "Charge" -> "C"|>
+  |>
 ];
 
 End[];
