@@ -69,9 +69,16 @@ GetLabMatrixElements::usage = "GetLabMatrixElements[model] computes the transiti
 (<0|Phi_lab|1_k>, <0|Q_lab|1_k>) for each node and each normal mode k. \
 Returns an Association: <| \"Flux\" -> <| node -> <| mode -> val |> |>, ... |>.";
 
+CalculateFermiRates::usage = "CalculateFermiRates[model, options] calculates relaxation rates (Gamma = 1/T1) \
+using Fermi's Golden Rule for Flux and Charge noise channels. \
+Returns an Association with rates for each mode.";
+
 Begin["`Private`"];
 
-
+Options[CalculateFermiRates] = {
+  "FluxNoiseAmplitude" -> (10.^-6 * 2.0678*10^-15)^2, (* A_Phi ~ (1 uPhi0)^2 typ. *)
+  "ChargeNoiseResistance" -> 50.0 (* R_eff ~ 50 Ohm typ. environment *)
+};
 
 Options[FindPotentialMinimumContinuation] = {
   "StepSize" -> 0.05,          (* Δφ в единицах Φ₀ *)
@@ -1175,6 +1182,82 @@ GetLabMatrixElements[model_Association] := Module[
     "Flux" -> fluxElements,
     "Charge" -> chargeElements,
     "Units" -> <|"Flux" -> "Wb", "Charge" -> "C"|>
+  |>
+];
+
+CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
+  {elements, freqs, hbar, numModes, numNodes, 
+   fluxAmp, rShunt, fluxRates, ohmicRates, w, 
+   gammaFlux, gammaOhmic},
+
+  (* 1. Получаем матричные элементы *)
+  elements = GetLabMatrixElements[model];
+  If[FailureQ[elements], Return[$Failed]];
+
+  freqs = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"]["NormalModeFrequencies"];
+  hbar = QED`$hbarValue;
+  
+  numNodes = Length[Keys[elements["Flux"]]];
+  numModes = Length[freqs];
+
+  (* Параметры *)
+  fluxAmp = OptionValue["FluxNoiseAmplitude"]; 
+  rShunt = OptionValue["ChargeNoiseResistance"]; (* Теперь это R_shunt *)
+
+  (* 2. Flux Noise (1/f) - Здесь все было верно *)
+  (* S_Phi(w) = A / (w/2Pi) *)
+  fluxRates = Table[
+    w = freqs[[k]];
+    If[w == 0, 0.,
+      Sum[
+        Module[{phiElem, sPhi},
+          phiElem = elements["Flux"][n][k];
+          sPhi = fluxAmp / (w / (2*Pi));
+          (1/hbar^2) * Abs[phiElem]^2 * sPhi
+        ],
+        {n, numNodes}
+      ]
+    ],
+    {k, numModes}
+  ];
+
+  (* 3. Ohmic Loss (Parallel Resistor) - ИСПРАВЛЕНО *)
+  (* Используем связь через Flux: H = -Phi * I_noise *)
+  (* S_I(w) = 2 * hbar * w / R (Quantum Noise at T=0) *)
+  (* Gamma = (1/hbar^2) * |<Phi>|^2 * S_I *)
+  
+  ohmicRates = Table[
+    w = freqs[[k]];
+    If[w == 0, 0.,
+      Sum[
+        Module[{phiElem, sCurrent},
+          (* Берем матричный элемент ПОТОКА, так как он сопряжен с током в резисторе *)
+          phiElem = elements["Flux"][n][k]; 
+          
+          (* Спектральная плотность тока резистора *)
+          sCurrent = (2.0 * hbar * w) / rShunt;
+          
+          (1/hbar^2) * Abs[phiElem]^2 * sCurrent
+        ],
+        {n, numNodes}
+      ]
+    ],
+    {k, numModes}
+  ];
+
+  (* 4. Возвращаем результат *)
+  <|
+    "Modes" -> Range[numModes],
+    "Frequencies" -> freqs,
+    "FluxRelaxationRate" -> fluxRates,    
+    "OhmicRelaxationRate" -> ohmicRates,   (* Бывший ChargeRelaxationRate *)
+    "TotalT1" -> Table[
+       Module[{gammaTot},
+         gammaTot = fluxRates[[k]] + ohmicRates[[k]];
+         If[gammaTot == 0, Infinity, 1.0 / gammaTot]
+       ],
+       {k, numModes}
+    ]
   |>
 ];
 
