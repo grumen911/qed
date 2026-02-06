@@ -70,6 +70,11 @@ Example:
   PlotPotentialSlices3D[$CurrentModel, PlotPoints -> 15, Contours -> 10]
 ";
 
+PlotLabMatrixElements::usage = 
+"PlotLabMatrixElements[model] строит таблицу матричных элементов \
+(<0|Φ|1> и <0|Q|1>) для лабораторных узлов и нормальных мод.
+Отображает вклад каждой моды в колебания на конкретном узле.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
