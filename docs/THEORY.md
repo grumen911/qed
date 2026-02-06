@@ -71,3 +71,40 @@ The self-energy $\Sigma(\omega)$ due to the non-linearity can be computed using 
 
 ---
 *Reference: S. E. Nigg et al., "Black-Box Superconducting Circuit Quantization", Phys. Rev. Lett. 108, 240502 (2012).*
+## 7. Validity Limits & RWA Justification
+
+The transition from the raw $\Phi^4$ interaction to the diagonal Effective Hamiltonian relies on the **Rotating Wave Approximation (RWA)**. It is crucial to understand which terms are discarded and why, especially for multi-mode systems.
+
+### 7.1. Secular vs. Non-Secular Terms
+Expanding the potential $V \propto (\hat{a}_A + \hat{a}_A^\dagger + \hat{a}_B + \hat{a}_B^\dagger)^4$ generates terms with different time dependencies in the interaction picture: $\hat{O}(t) \propto e^{i \Delta \omega t}$.
+
+1.  **Secular Terms ($\Delta \omega = 0$):**
+    * These terms effectively average to a non-zero constant.
+    * They constitute the diagonal Hamiltonian ($H_{eff}$).
+    * **Example:** Cross-Kerr interaction $\hat{n}_A \hat{n}_B$.
+        $$\hat{a}_A^\dagger \hat{a}_A \hat{a}_B^\dagger \hat{a}_B \propto e^{i\omega_A t} e^{-i\omega_A t} e^{i\omega_B t} e^{-i\omega_B t} = 1$$
+
+2.  **Non-Secular Terms ($\Delta \omega \neq 0$):**
+    * These terms oscillate rapidly and average to zero over the system's timescales.
+    * They are discarded in the first-order approximation (standard BBQ).
+    * **Example:** Pair-Exchange $\hat{a}_A^\dagger \hat{a}_A^\dagger \hat{a}_B \hat{a}_B$.
+        $$\hat{a}_A^\dagger \hat{a}_A^\dagger \hat{a}_B \hat{a}_B \propto e^{2i(\omega_A - \omega_B)t}$$
+
+### 7.2. Classification of Quartic Terms
+It is a common misconception that all mixing terms are "exchange" interactions. We distinguish between:
+
+| Term Type | Operator Form | Diagonal? | Physics | Status in BBQ |
+| :--- | :--- | :--- | :--- | :--- |
+| **Self-Kerr** | $\hat{n}_k(\hat{n}_k-1)$ | Yes | Anharmonicity of mode $k$. | **Kept** ($\alpha_k$) |
+| **Cross-Kerr** | $\hat{n}_k \hat{n}_l$ | Yes | Frequency shift of mode $k$ due to mode $l$. | **Kept** ($\chi_{kl}$) |
+| **Pair-Exchange** | $\hat{a}_k^{\dagger 2} \hat{a}_l^2 + h.c.$ | No | Two-photon swapping ($|2,0\rangle \leftrightarrow |0,2\rangle$). | **Discarded** (usually) |
+| **Beam-Splitter** | $\hat{a}_k^\dagger \hat{a}_l + h.c.$ | No | Single-photon swapping ($|1,0\rangle \leftrightarrow |0,1\rangle$). | **Absent** in Normal Basis |
+
+*> **Note on Cross-Kerr:** The term $\hat{a}_A^\dagger \hat{a}_B^\dagger \hat{a}_A \hat{a}_B$ is equivalent to $\hat{n}_A \hat{n}_B$ due to commutation relations. It represents a state-dependent dispersive shift, NOT a particle exchange.*
+
+## 8. Handling Resonances & Anti-Crossings
+
+Special care must be taken when mode frequencies coincide (crossings).
+
+### 8.1. Fundamental Anti-Crossing ($\omega_A \approx \omega_B$)
+When the fundamental frequencies of two qubits
