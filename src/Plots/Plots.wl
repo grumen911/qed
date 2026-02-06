@@ -75,6 +75,9 @@ PlotLabMatrixElements::usage =
 (<0|Φ|1> и <0|Q|1>) для лабораторных узлов и нормальных мод.
 Отображает вклад каждой моды в колебания на конкретном узле.";
 
+PlotFermiRates::usage = "PlotFermiRates[model] displays a table of relaxation times (T1) \
+calculated via Fermi's Golden Rule, separated by noise channel.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
@@ -649,6 +652,70 @@ PlotLabMatrixElements[model_Association] := Module[
     Text[Style["Unit: " <> data["Units"]["Charge"] <> " (Coulomb)", Gray]],
     Spacer[10],
     makeGrid["Charge", "C"]
+  }, Alignment -> Center]
+];
+
+PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
+  {data, modes, freqs, fluxGamma, ohmicGamma, totalT1, rows, header, formatTime},
+  
+  (* 1. Вычисляем скорости *)
+  data = QED`Numeric`CalculateFermiRates[model];
+  
+  If[FailureQ[data], 
+    Return[Style["Error: Could not calculate Fermi rates. Check model parameters.", Red]]
+  ];
+
+  modes = data["Modes"];
+  freqs = data["Frequencies"];
+  fluxGamma = data["FluxRelaxationRate"];
+  ohmicGamma = data["OhmicRelaxationRate"];
+  totalT1 = data["TotalT1"];
+
+  (* Вспомогательная функция: переводит Gamma (1/s) в T1 (us) и обрабатывает 0 *)
+  formatTime[rate_] := If[rate <= 1.0*^-20, 
+    Infinity, 
+    ScientificForm[1.0 / rate * 10^6, 3] (* s -> us *)
+  ];
+  
+  (* Обработка общего времени (которое уже в секундах или Infinity) *)
+  formatTotalTime[t_] := If[t === Infinity, 
+    Infinity, 
+    ScientificForm[t * 10^6, 3]
+  ];
+
+  (* 2. Формируем таблицу *)
+  header = {
+    Style["Mode", Bold, Darker[Blue]],
+    Style["Freq\n(GHz)", Bold],
+    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Flux\n(\[Mu]s)", Bold],  (* Limit T1 Flux *)
+    Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Ohmic\n(\[Mu]s)", Bold], (* Limit T1 Ohmic *)
+    Style["Total \!\(\*SubscriptBox[\(T\), \(1\)]\)\n(\[Mu]s)", Bold]
+  };
+
+  rows = Table[
+    {
+      m,
+      ScientificForm[freqs[[m]] / (2 Pi * 10^9), 3], (* Hz -> GHz *)
+      formatTime[fluxGamma[[m]]],
+      formatTime[ohmicGamma[[m]]],
+      formatTotalTime[totalT1[[m]]]
+    },
+    {m, modes}
+  ];
+
+  (* 3. Вывод *)
+  Column[{
+    Text[Style["Relaxation Times by Channel (Fermi's Golden Rule)", Medium, Bold]],
+    Text[Style["Parameters: Flux Noise A=10^-6, Ohmic R=50 \[CapitalOmega]", Gray]],
+    Spacer[10],
+    Grid[
+      Prepend[rows, header], 
+      Frame -> All, 
+      FrameStyle -> LightGray,
+      Background -> {{1 -> LightGray}, {1 -> LightGray}, {1, 1} -> White},
+      Spacings -> {1.5, 1.2},
+      Alignment -> Center
+    ]
   }, Alignment -> Center]
 ];
 

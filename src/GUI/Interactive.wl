@@ -285,6 +285,10 @@ RegisterPlot["LabMatrixElements", "Matrix Elements (Lab Basis)", "Light",
   Function[{m}, QED`Plots`PlotLabMatrixElements[m]]
 ];
 
+RegisterPlot["FermiRates", "T1 Relaxation Times (Fermi)", "Light", 
+  Function[{m}, QED`Plots`PlotFermiRates[m]]
+];
+
 (* 
    COMPUTE WORKER (FUNCTIONAL STYLE)
    Input: plotId, model (Value)
