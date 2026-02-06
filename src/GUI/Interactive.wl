@@ -281,9 +281,7 @@ RegisterPlot["SpectroscopyScanner", "Spectroscopy Scanner", "Light",
   ]
 ];
 
-RegisterPlot[
-  "LabMatrixElements", 
-  "Label" -> "Matrix Elements (Lab Basis)", 
+RegisterPlot["LabMatrixElements", "Matrix Elements (Lab Basis)", "Light", 
   "Function" -> Function[{m}, QED`Plots`PlotLabMatrixElements[m]]
 ];
 

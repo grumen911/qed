@@ -637,6 +637,5 @@ PlotLabMatrixElements[model_Association] := Module[
   }, Alignment -> Center]
 ];
 
-
 End[];
 EndPackage[];
