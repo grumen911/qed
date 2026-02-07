@@ -74,6 +74,14 @@ Channels included: \n\
 1. Inductive Coupling (RL): Relaxation via mutual inductance M to a resistor R (Flux bias line). \n\
 2. Capacitive Coupling (RC): Relaxation via capacitor Cc to a resistor R (Readout line / Purcell).";
 
+GenerateFluxSweep::usage = "GenerateFluxSweep[model, analysisFunction] returns a function f[phiExt] \
+that computes analysisFunction[model_at_phi] for a range of external fluxes. \
+\n\nArguments:\n\
+  model: The QED circuit model (must have initialized numerical cache).\n\
+  analysisFunction: A function accepting a 'warmed-up' model instance.\n\
+\n\nExample:\n\
+  sweep = GenerateFluxSweep[model, CalculateFermiRates];\n\
+  results = Table[sweep[phi], {phi, -0.5, 0.5, 0.01}];";
 
 Begin["`Private`"];
 
@@ -1270,6 +1278,70 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
        {k, numModes}
     ]
   |>
+];
+
+GenerateFluxSweep[model_Association, analysisFunction_Function] := Module[
+    {
+        cache, gradientRescaled, hessianRescaled, fluxVars, 
+        topology, phi0, baseRules, phiExtSym
+    },
+
+    (* 1. Проверка наличия Continuation Derivatives *)
+    (* Они создаются при первом запуске GetNumericalQuantity[model, "PlasmonFrequencies"] *)
+    If[!KeyExistsQ[model["Numerical"]["Cache"], "ContinuationDerivatives"],
+        Print["[Error] GenerateFluxSweep requires initialized continuation derivatives."];
+        Print["Please run GetNumericalQuantity[model, \"PlasmonFrequencies\"] once to initialize."];
+        Return[$Failed];
+    ];
+
+    cache = model["Numerical"]["Cache"]["ContinuationDerivatives"];
+    gradientRescaled = cache["Gradient"];
+    hessianRescaled = cache["Hessian"];
+    fluxVars = cache["FluxVars"];
+    
+    topology = model["Topology"];
+    phi0 = QED`$Phi0Value;
+    phiExtSym = QED`$PhiExt;
+    
+    (* Базовые правила: берем текущие, но убираем старые Flux и phi_min *)
+    baseRules = DeleteCases[
+        model["SubstitutionRules"],
+        (phiExtSym :> _) | (Subscript[QED`$FluxSymbol, "min", _] :> _)
+    ];
+
+    (* 2. Возвращаем замыкание *)
+    Function[{phiExtDimensionless},
+        Module[{phiExtPhysical, equilibriumRules, currentRules, tempModel},
+            
+            phiExtPhysical = phiExtDimensionless * phi0;
+            
+            (* А. Быстрый поиск равновесия (Continuation) *)
+            equilibriumRules = FindPotentialMinimumContinuation[
+                gradientRescaled,
+                hessianRescaled,
+                fluxVars,
+                topology,
+                phiExtPhysical
+            ];
+            
+            If[equilibriumRules === $Failed,
+                Return[$Failed]
+            ];
+            
+            (* Б. Сборка полных правил *)
+            currentRules = Join[
+                baseRules,
+                {phiExtSym -> phiExtPhysical},
+                equilibriumRules
+            ];
+            
+            (* В. Создание "прогретой" модели без пересчета равновесия *)
+            tempModel = QED`Model`UpdateModelWithRules[model, currentRules];
+            
+            (* Г. Вызов пользовательской функции *)
+            analysisFunction[tempModel]
+        ]
+    ]
 ];
 
 End[];

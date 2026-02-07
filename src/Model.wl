@@ -14,6 +14,9 @@ UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
 GetWaveFunction::usage = "GetWaveFunction[model, quantumNumbers] returns the analytical wavefunction \
 Psi[phi1, phi2, ...] for the specified state {n1, n2, ...} in physical flux coordinates.";
+UpdateModelWithRules::usage = "UpdateModelWithRules[model, rules] updates the model's SubstitutionRules \
+(at root) and manually populates the numerical cache with matrices and diagonalization data, \
+setting IsDirty->False. This allows skipping the expensive FindPotentialMinimum step during sweeps.";
 
 $CurrentModel::usage = "Global reference to the active circuit model for substitution rules";
 
@@ -712,6 +715,63 @@ GetWaveFunction[model_Association, quantumNumbers_List] :=
   psiSymbolic //. subRules
  ];
 
+UpdateModelWithRules[model_Association, rules_List] := Module[
+    {
+        analytical, capNum, indNum, invCap, invInd, diag, 
+        newCache, existingCache, newModel
+    },
+
+    analytical = model["Analytical"];
+    existingCache = model["Numerical"]["Cache"];
+
+    (* 1. Вычисляем матрицы (быстрая подстановка) *)
+    capNum = analytical["CapacitanceMatrix"] /. rules;
+    indNum = analytical["InductanceMatrix"] /. rules;
+
+    (* 2. Обращаем матрицы и диагонализуем (Eager evaluation для надежности) *)
+    (* Проверки на сингулярность опущены для краткости, в продакшене лучше добавить *)
+    invCap = If[Det[capNum] != 0, Inverse[capNum], $Failed];
+    invInd = If[Det[indNum] != 0, Inverse[indNum], $Failed];
+    
+    diag = If[MatrixQ[invCap] && MatrixQ[invInd],
+        DiagonalizeHarmonicHamiltonian[invCap, invInd],
+        $Failed
+    ];
+
+    (* 3. Формируем обновления для кэша *)
+    (* Важно: используем структуру <|"State" -> "Ready", "Value" -> ...|> *)
+    newCache = <|
+        "CapacitanceMatrixNumerical"       -> <|"State" -> "Ready", "Value" -> capNum|>,
+        "InductanceMatrixInverseNumerical" -> <|"State" -> "Ready", "Value" -> indNum|>,
+        "InverseCapacitanceMatrix"         -> <|"State" -> "Ready", "Value" -> invCap|>,
+        "InductanceMatrixNumerical"        -> <|"State" -> "Ready", "Value" -> invInd|>,
+        "HarmonicDiagonalization"          -> <|"State" -> "Ready", "Value" -> diag|>,
+        
+        (* Для удобства доступа к частотам и потокам *)
+        "PlasmonFrequencies" -> <|
+            "State" -> "Ready", 
+            "Value" -> If[diag === $Failed, $Failed, diag["NormalModeFrequencies"]]
+        |>,
+        "EquilibriumFluxes" -> <|
+            "State" -> "Ready",
+            "Value" -> FilterRules[rules, Subscript[QED`$FluxSymbol, "min", _]]
+        |>
+    |>;
+
+    (* 4. Собираем новую модель *)
+    newModel = model;
+    
+    (* Обновляем КОРНЕВЫЕ правила *)
+    newModel["SubstitutionRules"] = rules;
+    
+    (* Обновляем кэш, сохраняя старые записи (например, ContinuationDerivatives) *)
+    newModel["Numerical"]["Cache"] = Join[existingCache, newCache];
+    
+    (* Запрещаем пересчет *)
+    newModel["Numerical"]["IsDirty"] = False;
+
+    newModel
+];
 
 (* Удобный доступ ко всем параметрам *)
 GetAllParams[model_Association] := <|
