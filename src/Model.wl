@@ -726,31 +726,32 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
 
     (* 1. Вычисляем матрицы (быстрая подстановка) *)
     capNum = analytical["CapacitanceMatrix"] /. rules;
-    indNum = analytical["InductanceMatrix"] /. rules;
+    indNum = analytical["InductanceMatrix"] /. rules; (* Это L^-1 ! *)
 
-    (* 2. Обращаем матрицы и диагонализуем (Eager evaluation для надежности) *)
-    (* Проверки на сингулярность опущены для краткости, в продакшене лучше добавить *)
+    (* 2. Обращаем матрицы *)
+    (* invCap = C^-1 *)
     invCap = If[Det[capNum] != 0, Inverse[capNum], $Failed];
+    (* invInd = L (прямая индуктивность) - нужна для кэша, но не для диагонализации *)
     invInd = If[Det[indNum] != 0, Inverse[indNum], $Failed];
     
-    diag = If[MatrixQ[invCap] && MatrixQ[invInd],
-        DiagonalizeHarmonicHamiltonian[invCap, invInd],
+    (* 3. Диагонализация *)
+    (* ИСПРАВЛЕНИЕ: Передаем (C^-1, L^-1), то есть (invCap, indNum) *)
+    diag = If[MatrixQ[invCap] && MatrixQ[indNum],
+        DiagonalizeHarmonicHamiltonian[invCap, indNum],
         $Failed
     ];
 
-    (* 3. Формируем обновления для кэша *)
-    (* Важно: используем структуру <|"State" -> "Ready", "Value" -> ...|> *)
+    (* 4. Формируем обновления для кэша *)
     newCache = <|
         "CapacitanceMatrixNumerical"       -> <|"State" -> "Ready", "Value" -> capNum|>,
-        "InductanceMatrixInverseNumerical" -> <|"State" -> "Ready", "Value" -> indNum|>,
-        "InverseCapacitanceMatrix"         -> <|"State" -> "Ready", "Value" -> invCap|>,
-        "InductanceMatrixNumerical"        -> <|"State" -> "Ready", "Value" -> invInd|>,
+        "InductanceMatrixInverseNumerical" -> <|"State" -> "Ready", "Value" -> indNum|>, (* L^-1 *)
+        "InverseCapacitanceMatrix"         -> <|"State" -> "Ready", "Value" -> invCap|>, (* C^-1 *)
+        "InductanceMatrixNumerical"        -> <|"State" -> "Ready", "Value" -> invInd|>, (* L *)
         "HarmonicDiagonalization"          -> <|"State" -> "Ready", "Value" -> diag|>,
         
-        (* Для удобства доступа к частотам и потокам *)
         "PlasmonFrequencies" -> <|
             "State" -> "Ready", 
-            "Value" -> If[diag === $Failed, $Failed, diag["NormalModeFrequencies"]]
+            "Value" -> Sort[If[diag === $Failed, $Failed, diag["NormalModeFrequencies"]]]
         |>,
         "EquilibriumFluxes" -> <|
             "State" -> "Ready",
@@ -758,16 +759,10 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
         |>
     |>;
 
-    (* 4. Собираем новую модель *)
+    (* 5. Собираем новую модель *)
     newModel = model;
-    
-    (* Обновляем КОРНЕВЫЕ правила *)
     newModel["SubstitutionRules"] = rules;
-    
-    (* Обновляем кэш, сохраняя старые записи (например, ContinuationDerivatives) *)
     newModel["Numerical"]["Cache"] = Join[existingCache, newCache];
-    
-    (* Запрещаем пересчет *)
     newModel["Numerical"]["IsDirty"] = False;
 
     newModel
