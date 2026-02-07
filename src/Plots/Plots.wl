@@ -78,6 +78,10 @@ PlotLabMatrixElements::usage =
 PlotFermiRates::usage = "PlotFermiRates[model] displays a table of relaxation times (T1) \
 calculated via Fermi's Golden Rule, separated by noise channel.";
 
+PlotGenericFluxSweep::usage = "PlotGenericFluxSweep[model] plots eigenfrequencies using \
+the generic GenerateFluxSweep method. \
+Used for verification of the generic sweep architecture.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
@@ -704,6 +708,71 @@ PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     ]
   }, Alignment -> Center]
 ];
+
+(* Копия PlotPlasmonSpectrum с заменой движка на GenerateFluxSweep *)
+PlotGenericFluxSweep[model_Association, opts:OptionsPattern[]] := 
+  Module[{freqFunc, nModes, range, scale, modeFreq, plot},
+    
+    (* 1. ИЗМЕНЕНИЕ: Используем GenerateFluxSweep вместо PlasmonFrequenciesVsFlux *)
+    (* Анализатор: просто достаем частоты из "прогретой" модели *)
+    freqFunc = QED`Numeric`GenerateFluxSweep[model, 
+        Function[{m}, QED`Model`GetNumericalQuantity[m, "PlasmonFrequencies"]]
+    ];
+
+    (* Проверка на ошибки инициализации *)
+    If[freqFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
+    ];
+
+    (* 2. ОПЦИИ: Берем те же, что у оригинала *)
+    nModes = OptionValue[PlotPlasmonSpectrum, {opts}, NumModes];
+    range = OptionValue[PlotPlasmonSpectrum, {opts}, FluxRange];
+    scale = Switch[OptionValue[PlotPlasmonSpectrum, {opts}, FrequencyUnit],
+      "GHz", 2 Pi * 10^9,
+      "MHz", 2 Pi * 10^6,
+      _, 1.
+    ];
+
+    (* 3. ОБРАБОТКА ДАННЫХ: Точно так же оборачиваем в modeFreq *)
+    Clear[modeFreq];
+    modeFreq[i_Integer][phi_?NumericQ] := Re[freqFunc[phi][[i]]] / scale;
+
+    (* 4. ГРАФИК: Полная копия стилей PlotPlasmonSpectrum *)
+    Plot[
+        Evaluate @ Table[modeFreq[i][phi], {i, nModes}],
+        {phi, range[[1]], range[[2]]},
+        
+        (* Легенда чуть отличается, чтобы понимать где что *)
+        PlotLegends -> Table[Row[{"Gen. Sweep ", Subscript["\[Omega]", i]}], {i, nModes}],
+        
+        (* Все визуальные настройки 1-в-1 как в оригинале *)
+        Frame -> True,
+        FrameLabel -> {
+          "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)",
+          "Frequency (GHz)"
+        },
+        PlotRange -> All,
+        PlotPoints -> 25,
+        MaxRecursion -> 1,
+        AspectRatio -> 0.6,
+        ImageSize -> 600,
+        TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
+        
+        (* СТИЛЬ: Те же цвета и толщина, но добавили Dashed для отличия *)
+        PlotStyle -> {
+          Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.006], Dashed],  (* Синий пунктир *)
+          Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006], Dashed]    (* Оранжевый пунктир *)
+        },
+        
+        FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+        FrameLabel -> {
+          Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], 16],
+          Style["Frequency (GHz)", 16]
+        },
+        
+        opts
+    ]
+  ];
 
 End[];
 EndPackage[];

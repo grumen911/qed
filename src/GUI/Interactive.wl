@@ -23,6 +23,10 @@ RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light",
   Function[{m}, QED`Plots`PlotPlasmonSpectrum[m]]
 ];
 
+RegisterPlot["PlasmonSpectrum (Generic)", "Plasmon Spectrum (Generic)", "Light", 
+  Function[{m}, QED`Plots`PlotGenericFluxSweep[m]]
+];
+
 RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy", 
   Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
 ];
