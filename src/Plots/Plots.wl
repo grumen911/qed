@@ -110,7 +110,8 @@ Options[PlotPotentialSlices3D] = {
 Options[PlotRelaxationTime] = Join[
   Options[PlotPlasmonSpectrum],
   {
-    "RelaxationChannel" -> "CapacitiveRelaxationRate"
+    "RelaxationChannel" -> "CapacitiveRelaxationRate",
+    "LogTimeRange" -> {-8, 2}
   }
 ];
 
@@ -792,7 +793,14 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
     channel = OptionValue["RelaxationChannel"];
     nModes = OptionValue[NumModes];
     range = OptionValue[FluxRange];
-    
+    logRange = OptionValue["LogTimeRange"];
+
+    (* Преобразуем степени в реальные значения для PlotRange *)
+    timeRange = If[ListQ[logRange] && Length[logRange] == 2,
+        {10.^logRange[[1]], 10.^logRange[[2]]},
+        All (* Fallback, если формат нарушен *)
+    ];
+
     (* Определяем, нужно ли инвертировать (Rate -> Time) *)
     isRate = StringContainsQ[channel, "Rate", IgnoreCase -> True];
     
