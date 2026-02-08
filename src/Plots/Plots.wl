@@ -687,9 +687,9 @@ PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   formatTime[rate_] := If[rate <= 1.0*^-20, Infinity, ScientificForm[1.0 / rate * 10^6, 3]];
   formatTotalTime[t_] := If[t === Infinity, Infinity, ScientificForm[t * 10^6, 3]];
 
+(* 2. Формируем таблицу *)
   header = {
-    Style["Mode", Bold, Darker[Blue]],
-    Style["Freq\n(GHz)", Bold],
+    Style["Mode (Freq)", Bold, Darker[Blue]], (* Обновили заголовок *)
     Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Inductive\n(RL, \[Mu]s)", Bold],
     Style["\!\(\*SubscriptBox[\(T\), \(1\)]\) Capacitive\n(RC, \[Mu]s)", Bold],
     Style["Total \!\(\*SubscriptBox[\(T\), \(1\)]\)\n(\[Mu]s)", Bold]
@@ -697,8 +697,13 @@ PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
 
   rows = Table[
     {
-      m,
-      ScientificForm[freqs[[m]] / (2 Pi * 10^9), 3],
+      (* Теперь в первом столбце и индекс, и частота в ГГц *)
+      Row[{
+        Style["#" <> ToString[m], Bold], 
+        " (", 
+        N[freqs[[m]] / (2 Pi * 10^9), 3], 
+        " GHz)"
+      }],
       formatTime[indGamma[[m]]],
       formatTime[capGamma[[m]]],
       formatTotalTime[totalT1[[m]]]
