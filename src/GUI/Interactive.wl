@@ -458,40 +458,61 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   {
     currentModel = First[modelsStack],
     selectedPlotId = "PlasmonSpectrum",
-    needsUpdate = False, 
-    plotCache
+    plotCache = <||>,
+    performUpdate (* Вспомогательная функция для расчета *)
   },
   
+  (* Определение логики обновления *)
+  performUpdate = Function[{},
+    (* 1. Визуальная индикация начала (покажем "Computing..." перед фризом) *)
+    plotCache[selectedPlotId] = "Computing...";
+    FinishDynamic[]; (* Принудительная отрисовка интерфейса перед тяжелой задачей *)
+    
+    (* 2. Тяжелое вычисление (происходит в потоке вызова: Button=Queued, Slider=Preemptive) *)
+    Module[{res, updatedModel},
+       {res, updatedModel} = ComputePlotData[selectedPlotId, currentModel];
+       plotCache[selectedPlotId] = res;
+       currentModel = updatedModel;
+    ]
+  ];
+
   Column[{
     Row[{
       (* LEFT PANEL: Model Selection + Controls *)
       Panel[
         Column[{
           (* Model Selector Widget *)
-          SelectModel[currentModel, modelsStack, 
+          SelectModel[currentModel, 
+             modelsStack, 
              Function[{}, 
-               (* Reset state on model switch *)
+               (* При смене модели сбрасываем кэш *)
                plotCache = <||>;
-               needsUpdate = True; 
-               (* Force dirty to ensure recompute *)
                currentModel["Numerical", "IsDirty"] = True;
+               (* Авто-расчет только для легких графиков *)
+               If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
              ]
           ],
           
           Spacer[15],
-          (* Divider[] REMOVED as requested *)
           Spacer[10],
           
-          (* Sliders *)
+          (* Sliders & Button Panel *)
           PlotControlPanel[
             currentModel, 
+            
+            (* onSliderChange Callback *)
             Function[{}, 
                If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
-                  needsUpdate = True,
-                  plotCache[selectedPlotId] = Missing["Stale"]
+                  performUpdate[], (* Легкие графики обновляем сразу (Preemptive) *)
+                  plotCache[selectedPlotId] = Missing["Stale"] (* Тяжелые помечаем как устаревшие *)
                ]
             ],
-            Function[{}, needsUpdate = True]
+            
+            (* onButtonPress Callback (Queued via PlotControlPanel definition) *)
+            Function[{}, 
+               currentModel["Numerical", "IsDirty"] = True; (* Форсируем пересчет *)
+               performUpdate[] (* Запускаем расчет в потоке кнопки (без лимита времени) *)
+            ]
           ]
         }],
         Alignment -> Top
@@ -503,52 +524,53 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       Column[{
         Row[{
            "Plot Type: ",
-           PopupMenu[Dynamic[selectedPlotId], Keys[$PlotRegistry]]
+           (* При смене типа графика сразу запускаем расчет, если он легкий *)
+           PopupMenu[Dynamic[selectedPlotId, 
+             Function[{v}, 
+               selectedPlotId = v; 
+               If[$PlotRegistry[selectedPlotId]["Type"] === "Light", 
+                  performUpdate[],
+                  (* Для тяжелых проверяем кэш, если пусто - просим нажать кнопку *)
+                  If[!KeyExistsQ[plotCache, selectedPlotId], plotCache[selectedPlotId] = Missing["Init"]]
+               ]
+             ]], 
+             Keys[$PlotRegistry]
+           ]
         }],
         Spacer[10],
         
+        (* 3. DISPLAY ONLY (Logic moved to Button) *)
         Dynamic[
-          (* 1. COMPUTE AND UPDATE STATE *)
-          If[needsUpdate,
-             Module[{res, updatedModel},
-               {res, updatedModel} = ComputePlotData[selectedPlotId, currentModel];
-               plotCache[selectedPlotId] = res;
-               currentModel = updatedModel;
-               needsUpdate = False;
-             ]
-          ];
-          
-          (* 2. RENDER *)
-          Module[{cached},
-            cached = plotCache[selectedPlotId];
+          Switch[plotCache[selectedPlotId],
+            "Computing...", 
+              Panel[Column[{
+                Style["Computing...", Blue, Bold],
+                ProgressIndicator[Appearance -> "Indeterminate"]
+              }, Alignment->Center], ImageSize->{300,300}],
             
-            Switch[cached,
-              _Missing, 
-              If[cached === Missing["Stale"],
-                 Panel[Style["Parameters changed. Press Update.", Gray], ImageSize->{300,300}],
-                 If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
-                    needsUpdate = True; "Computing...", 
-                    Panel[Style["Select plot to start", Gray], ImageSize->{300,300}]
-                 ]
+            _Missing, 
+              If[plotCache[selectedPlotId] === Missing["Stale"],
+                 Panel[Style["Parameters changed. Press Update.", Gray, 16], ImageSize->{400,300}],
+                 Panel[Style["Select plot or Press Update", Gray], ImageSize->{300,300}]
               ],
               
-              _, cached
-            ]
+            _, plotCache[selectedPlotId]
           ],
           
-          TrackedSymbols :> {needsUpdate, selectedPlotId, plotCache}
+          TrackedSymbols :> {plotCache, selectedPlotId}
         ]
       }, Alignment -> Top]
     }, Alignment -> Top],
     
-    Dynamic @ Row[{"Cache: ", Keys[plotCache], " | Update: ", needsUpdate}]
+    (* Debug Footer *)
+    Dynamic @ Row[{"Cache Keys: ", Keys[plotCache]}, BaseStyle->{FontSize->10, Color->Gray}]
   }],
   
-  UnsavedVariables :> {plotCache, needsUpdate},
+  UnsavedVariables :> {plotCache},
   Initialization :> {
     plotCache = <||>;
-    needsUpdate = True; 
-    currentModel["Numerical", "IsDirty"] = True;
+    (* При старте считаем график, только если он легкий *)
+    If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
   },
   SynchronousInitialization -> False,
   SaveDefinitions -> False
