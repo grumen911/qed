@@ -875,8 +875,7 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
                 Row[{
                    Subscript["T", "1"]^labelSub,
                    " (", 
-                   Style["|1\[RightAngleBracket]", Italic], 
-                   Subscript[Style["m", Italic], i-1], 
+                   Subscript[Style["|1\[RightAngleBracket]", Italic], i-1],
                    " \[Rule] ", 
                    Style["|0\[RightAngleBracket]", Italic], 
                    ")"
