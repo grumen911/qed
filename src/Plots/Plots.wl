@@ -181,9 +181,9 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
         FrameLabel -> {
           Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], 16],
           Style["Frequency (GHz)", 16]
-        },
+        }
         
-        opts
+        (* ,opts *)
       ];
 
       If[$DebugPlotPlasmonSpectrum === True,
@@ -785,9 +785,9 @@ PlotGenericFluxSweep[model_Association, opts:OptionsPattern[]] :=
         FrameLabel -> {
           Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], 16],
           Style["Frequency (GHz)", 16]
-        },
+        }
         
-        opts
+        (* ,opts *)
     ]
   ];
 
@@ -896,9 +896,9 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
         },
         
         MaxRecursion -> ControlActive[2, 6], 
-        PlotPoints -> ControlActive[20, 80],
-        
-        opts
+        PlotPoints -> ControlActive[20, 80]
+
+        (* ,opts *)
     ]
   ];
 
