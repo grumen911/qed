@@ -107,6 +107,13 @@ Options[PlotPotentialSlices3D] = {
   PlotCenter -> "Origin"     (* НОВОЕ: "GlobalMinimum" | "Origin" | {φ1, φ2, φ3} *)
 };
 
+Options[PlotRelaxationTime] = Join[
+  Options[PlotPlasmonSpectrum],
+  {
+    "RelaxationChannel" -> "CapacitiveRelaxationRate"
+  }
+];
+
 $DebugPlotPlasmonSpectrum = False;
 $DebugPlotPotentialSlices3D = False;
 
@@ -779,12 +786,36 @@ PlotGenericFluxSweep[model_Association, opts:OptionsPattern[]] :=
   ];
 
 PlotRelaxationTime[model_Association, opts:OptionsPattern[]] := 
-  Module[{t1DataFunc, nModes, range, modeT1},
+  Module[{t1DataFunc, nModes, range, channel, modeT1, labelSub, isRate},
     
-    (* 1. Подготовка данных *)
+    (* 1. Получаем настройки *)
+    channel = OptionValue["RelaxationChannel"];
+    nModes = OptionValue[NumModes];
+    range = OptionValue[FluxRange];
+    
+    (* Определяем, нужно ли инвертировать (Rate -> Time) *)
+    isRate = StringContainsQ[channel, "Rate", IgnoreCase -> True];
+    
+    If[!IntegerQ[nModes], nModes = 1]; 
+    If[!ListQ[range], range = {-0.5, 0.5}];
+
+    (* 2. Подготовка функции свипа *)
     t1DataFunc = QED`Numeric`GenerateFluxSweep[model, 
         Function[{m}, 
-            QED`Numeric`CalculateFermiRates[m]["TotalT1"] 
+            Module[{rates, rawData},
+                (* Вызов функции расчета *)
+                rates = QED`Numeric`CalculateFermiRates[m];
+                
+                (* Извлечение данных по ключу *)
+                rawData = rates[channel];
+                
+                (* Если это Rate (Гц), а мы хотим T1 (с), нужно инвертировать.
+                   Если это уже Time (TotalT1), оставляем как есть. *)
+                If[isRate,
+                    Map[If[TrueQ[# > 10^-20], 1.0/#, Infinity] &, rawData],
+                    rawData
+                ]
+            ]
         ]
     ];
 
@@ -792,61 +823,68 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
       Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
     ];
 
-    (* 2. Опции *)
-    nModes = OptionValue[PlotPlasmonSpectrum, {opts}, NumModes];
-    range = OptionValue[PlotPlasmonSpectrum, {opts}, FluxRange];
-    If[!IntegerQ[nModes], nModes = 1]; 
-    If[!ListQ[range], range = {-0.5, 0.5}];
-
     (* 3. Обертка данных *)
     modeT1[i_Integer][phi_?NumericQ] := 
       Module[{val},
         val = t1DataFunc[phi][[i]];
-        If[val === Infinity, Null, val]
+        (* Фильтр для LogPlot: убираем бесконечности и нули *)
+        If[!NumericQ[val] || val <= 0 || val === Infinity, Null, val]
       ];
 
-    (* 4. ГРАФИК: Ваши параметры один-в-один *)
+    (* 4. Подготовка подписи *)
+    labelSub = Switch[channel,
+        "InductiveRelaxationRate", "ind",
+        "CapacitiveRelaxationRate", "cap",
+        "TotalT1", "tot",
+        _, "x"
+    ];
+
+    (* 5. ГРАФИК *)
     Plot[
         Evaluate @ Table[modeT1[i][phi], {i, nModes}],
         {phi, range[[1]], range[[2]]},
         
-        (* === Ваши настройки === *)
-        ScalingFunctions -> "Log10", 
+        ScalingFunctions -> "Log10",
         
-        PlotRange -> {Automatic, {10^(-8), 10^2}}, (* Ваш диапазон *)
+        (* Диапазон под T1 (секунды) *)
+        PlotRange -> {Automatic, {10^(-8), 10^(-2)}}, 
         
-        MaxRecursion -> ControlActive[2, 6], 
-        PlotPoints -> ControlActive[20, 100], (* Чуть больше точек для логарифма *)
-        
-        (* Оси и метки (ваши шрифты) *)
         Axes -> True,
-        Frame -> False, (* Отключаем Frame, раз вы хотели Axes *)
+        Frame -> False,
         
         AxesLabel -> {
             Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
             Style[Subscript["T", "1"], FontFamily -> "Times New Roman", Large],
             FormatType -> TraditionalForm
         }, 
-        
         AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
-        
         MeshFunctions -> Function[{x, y}, y],
         
-        (* === Технические правки для исправления "каши" === *)
-        (* 1. ImageSize побольше, чтобы легенда не сжимала график *)
         ImageSize -> 600, 
         
-        (* 2. Легенда *)
         PlotLegends -> Placed[
-            Table[Row[{Subscript["T", "1"], " (mode ", i-1, ")"}], {i, nModes}],
+            Table[
+                Row[{
+                   Subscript["T", "1"]^labelSub,
+                   " (", 
+                   Style["|1\[RightAngleBracket]", Italic], 
+                   Subscript[Style["m", Italic], i-1], 
+                   " \[Rule] ", 
+                   Style["|0\[RightAngleBracket]", Italic], 
+                   ")"
+                }], 
+                {i, nModes}
+            ],
             Right
         ],
         
-        (* 3. Цвета линий *)
         PlotStyle -> {
             Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
             Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
         },
+        
+        MaxRecursion -> ControlActive[2, 6], 
+        PlotPoints -> ControlActive[20, 80],
         
         opts
     ]
