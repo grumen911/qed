@@ -82,6 +82,10 @@ PlotGenericFluxSweep::usage = "PlotGenericFluxSweep[model] plots eigenfrequencie
 the generic GenerateFluxSweep method. \
 Used for verification of the generic sweep architecture.";
 
+PlotRelaxationTime::usage = "PlotRelaxationTime[model] plots the relaxation time T1 \
+dependence on external flux using generic sweep and CalculateFermiRates.
+Options: Same as PlotPlasmonSpectrum (NumModes, FluxRange).";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
@@ -769,6 +773,77 @@ PlotGenericFluxSweep[model_Association, opts:OptionsPattern[]] :=
           Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], 16],
           Style["Frequency (GHz)", 16]
         },
+        
+        opts
+    ]
+  ];
+
+PlotRelaxationTime[model_Association, opts:OptionsPattern[]] := 
+  Module[{t1DataFunc, nModes, range, modeT1, plot},
+    
+    (* 1. Подготовка функции свипа *)
+    (* Возвращаем список T1 для всех мод сразу: {T1_0, T1_1, ...} *)
+    t1DataFunc = QED`Numeric`GenerateFluxSweep[model, 
+        Function[{m}, 
+            QED`Numeric`CalculateFermiRates[m]["CapacitiveRelaxationRate"] 
+        ]
+    ];
+
+    If[t1DataFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
+    ];
+
+    (* 2. Опции (используем те же, что и для спектра) *)
+    nModes = OptionValue[PlotPlasmonSpectrum, {opts}, NumModes];
+    range = OptionValue[PlotPlasmonSpectrum, {opts}, FluxRange];
+    
+    (* Дефолты, если опции не переданы явно *)
+    If[!IntegerQ[nModes], nModes = 1]; 
+    If[!ListQ[range], range = {-0.5, 0.5}];
+
+    (* 3. Обертка для Plot *)
+    (* Извлекаем i-й элемент из списка T1 *)
+    modeT1[i_Integer][phi_?NumericQ] := 
+      Module[{val},
+        val = t1DataFunc[phi][[i]];
+        (* Обработка Infinity для графика: заменяем на Null или большое число *)
+        If[val === Infinity, Null, val]
+      ];
+
+    (* 4. Построение графика *)
+    Plot[
+        Evaluate @ Table[modeT1[i][phi], {i, nModes}],
+        {phi, range[[1]], range[[2]]},
+        
+        (* Логарифмический масштаб *)
+        ScalingFunctions -> "Log10",
+        
+        (* Легенда *)
+        PlotLegends -> Table[Row[{Subscript["T", "1"], " (mode ", i-1, ")"}], {i, nModes}],
+        
+        (* Ваши настройки стиля *)
+        PlotRange -> {Automatic, {10^(-9), 10^(-3)}}, (* Настройте под ожидаемые значения *)
+        MaxRecursion -> ControlActive[2, 6], 
+        PlotPoints -> ControlActive[20, 50],
+        
+        Frame -> True,
+        FrameStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        
+        FrameLabel -> {
+            Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], FontFamily -> "Times New Roman", Large],
+            Style[Subscript["T", "1"], FontFamily -> "Times New Roman", Large]
+        },
+        
+        GridLines -> Automatic,
+        MeshFunctions -> Function[{x, y}, y],
+        
+        (* Стиль линий (синий, оранжевый...) *)
+        PlotStyle -> {
+            Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
+            Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
+        },
+        
+        PlotLabel -> Style["Relaxation Time", FontFamily -> "Times", 18],
         
         opts
     ]

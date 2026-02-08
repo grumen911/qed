@@ -293,6 +293,10 @@ RegisterPlot["FermiRates", "T1 Relaxation Times (Fermi)", "Light",
   Function[{m}, QED`Plots`PlotFermiRates[m]]
 ];
 
+RegisterPlot["RelaxationTime", "Relaxation Time (T1)", "Heavy", 
+  Function[{m}, QED`Plots`PlotRelaxationTime[m]]
+];
+
 (* 
    COMPUTE WORKER (FUNCTIONAL STYLE)
    Input: plotId, model (Value)
