@@ -1206,34 +1206,35 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   {elements, freqs, hbar, numModes, numNodes, 
    mInd, rInd, cCap, rCap, portNode,
    inductiveRates, capacitiveRates, w, 
-   nodesToSum},
+   nodesToSum, totalT1},
 
   elements = GetLabMatrixElements[model];
   If[FailureQ[elements], Return[$Failed]];
 
+  (* freqs идут от БОЛЬШЕГО к МЕНЬШЕМУ (Descending), как дает Eigenvalues *)
   freqs = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"]["NormalModeFrequencies"];
   hbar = QED`$hbarValue;
   
   numNodes = Length[Keys[elements["Flux"]]];
   numModes = Length[freqs];
 
-  mInd = OptionValue["MutualInductance"];      (* M ~ 2 pH *)
-  rInd = OptionValue["InductiveLineResistance"]; (* R ~ 50 Ohm *)
+  mInd = OptionValue["MutualInductance"];
+  rInd = OptionValue["InductiveLineResistance"];
   cCap = OptionValue["CouplingCapacitance"];
   rCap = OptionValue["CapacitiveLineResistance"];
   portNode = OptionValue["PortNode"]; 
 
   nodesToSum = If[IntegerQ[portNode], {portNode}, Range[numNodes]];
 
-  (* 1. Inductive Relaxation (Flux Bias Line) *)
-  (* Uses Charge matrix elements because <I> ~ w <Q> *)
+  (* --- Расчет (идет в порядке убывания частот) --- *)
+
+  (* 1. Inductive (RL) *)
   inductiveRates = Table[
     w = freqs[[k]];
     If[w == 0, 0.,
       Sum[
         Module[{qElem, rate},
           qElem = elements["Charge"][n][k]; 
-          (* Gamma = (2 * w^3 * M^2 * |<Q>|^2) / (hbar * R) *)
           rate = (2.0 * w^3 * mInd^2 * Abs[qElem]^2) / (hbar * rInd);
           rate
         ],
@@ -1243,16 +1244,13 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     {k, numModes}
   ];
 
-  (* 2. Capacitive Relaxation (Purcell Readout) *)
-  (* Uses Flux matrix elements because <V> ~ w <Phi> or via admittance logic *)
+  (* 2. Capacitive (RC) *)
   capacitiveRates = Table[
     w = freqs[[k]];
     If[w == 0, 0.,
       Module[{yRe, sCurrent},
-        (* Re[Y] for RC series *)
         yRe = (rCap * w^2 * cCap^2) / (1.0 + w^2 * cCap^2 * rCap^2);
         sCurrent = 2.0 * hbar * w * yRe;
-
         Sum[
           Module[{phiElem},
             phiElem = elements["Flux"][n][k];
@@ -1264,19 +1262,24 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     ],
     {k, numModes}
   ];
+  
+  (* 3. Total T1 (в исходном порядке) *)
+  totalT1 = Table[
+     Module[{gammaTot},
+       gammaTot = inductiveRates[[k]] + capacitiveRates[[k]];
+       If[gammaTot == 0, Infinity, 1.0 / gammaTot]
+     ],
+     {k, numModes}
+  ];
 
+  (* --- Возврат результата с РЕВЕРСОМ (Low -> High freq) --- *)
   <|
     "Modes" -> Range[numModes],
-    "Frequencies" -> freqs,
-    "InductiveRelaxationRate" -> inductiveRates, 
-    "CapacitiveRelaxationRate" -> capacitiveRates,
-    "TotalT1" -> Table[
-       Module[{gammaTot},
-         gammaTot = inductiveRates[[k]] + capacitiveRates[[k]];
-         If[gammaTot == 0, Infinity, 1.0 / gammaTot]
-       ],
-       {k, numModes}
-    ]
+    (* Разворачиваем списки, чтобы Mode #1 была самой низкочастотной *)
+    "Frequencies" -> Reverse[freqs], 
+    "InductiveRelaxationRate" -> Reverse[inductiveRates],
+    "CapacitiveRelaxationRate" -> Reverse[capacitiveRates],
+    "TotalT1" -> Reverse[totalT1]
   |>
 ];
 
