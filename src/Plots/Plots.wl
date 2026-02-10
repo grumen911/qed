@@ -1006,12 +1006,10 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
 PlotDephasingTime[model_Association, opts:OptionsPattern[]] := 
   Module[{tPhiFunc, nModes, range, logRange, timeRange, modeTphi},
     
-    (* 1. Получаем настройки отображения *)
     nModes = OptionValue[NumModes];
     range = OptionValue[FluxRange];
     logRange = OptionValue["LogTimeRange"];
     
-    (* Диапазон для оси Y (Log scale) *)
     timeRange = If[ListQ[logRange] && Length[logRange] == 2,
         {10.^logRange[[1]], 10.^logRange[[2]]},
         All
@@ -1020,19 +1018,15 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
     If[!IntegerQ[nModes], nModes = 1]; 
     If[!ListQ[range], range = {-0.5, 0.5}];
 
-    (* 2. Функция свипа *)
+    (* Генератор свипа *)
     tPhiFunc = QED`Numeric`GenerateFluxSweep[model, 
         Function[{m}, 
-            Module[{data},
-                (* Пробрасываем любые физические опции (Amplitude, LogFactor) напрямую в расчет *)
-                data = QED`Numeric`CalculateDephasingRates[m, 
+            Module[{res},
+                res = QED`Numeric`CalculateDephasingRates[m, 
                     FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]]
                 ];
-                
-                If[FailureQ[data], Return[ConstantArray[Infinity, nModes]]];
-                
-                (* Возвращаем только итоговое время *)
-                data["DephasingTime"]
+                (* Возвращаем список времен (числа или Infinity) *)
+                If[FailureQ[res], ConstantArray[Infinity, nModes], res["DephasingTime"]]
             ]
         ]
     ];
@@ -1041,17 +1035,19 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
       Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
     ];
 
-    (* 3. Обертка для Plot (фильтрация нулей/бесконечностей) *)
+    (* Обертка для Plot *)
     modeTphi[i_Integer][phi_?NumericQ] := 
       Module[{valVec, val},
         valVec = tPhiFunc[phi];
         If[i > Length[valVec], Return[Null]];
+        
         val = valVec[[i]];
         
+        (* Infinity превращаем в Null (разрыв линии) *)
         If[!NumericQ[val] || val <= 0 || val === Infinity, Null, val]
       ];
 
-    (* 4. График *)
+    (* График *)
     Plot[
         Evaluate @ Table[modeTphi[i][phi], {i, nModes}],
         {phi, range[[1]], range[[2]]},
@@ -1068,8 +1064,6 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
             FormatType -> TraditionalForm
         }, 
         AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
-        MeshFunctions -> Function[{x, y}, y],
-        
         ImageSize -> 600, 
         
         PlotLegends -> Placed[
@@ -1091,7 +1085,6 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
             Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
             Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
         },
-        
         MaxRecursion -> ControlActive[2, 6], 
         PlotPoints -> ControlActive[20, 80]
     ]

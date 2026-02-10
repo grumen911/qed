@@ -1359,63 +1359,65 @@ GenerateFluxSweep[model_Association, analysisFunction_Function] := Module[
 
 CalculateDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
   {
-    (* Параметры *)
-    h = OptionValue["FluxStep"],
-    A = OptionValue["FluxNoiseAmplitude"],
-    logFac = OptionValue["PinkNoiseLogFactor"],
-    
-    (* Переменные *)
-    freqFunc, phiExtDimless,
+    h, A, logFac,
+    cleanModel, freqFunc, phiExtDimless,
     w0, wPlus, wMinus,
     d1, d2,
     gamma1, gamma2, totalRate, tPhi
   },
 
-  (* 1. Получаем функцию зависимости спектра от потока *)
-  freqFunc = PlasmonFrequenciesVsFlux[model];
+  (* 1. Опции *)
+  h = OptionValue["FluxStep"];
+  A = OptionValue["FluxNoiseAmplitude"];
+  logFac = OptionValue["PinkNoiseLogFactor"];
   
-  If[freqFunc === $Failed,
-     Print["[Error] CalculateDephasingRates: Could not generate frequency function."];
-     Return[$Failed]
+  (* --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ --- *)
+  (* GenerateFluxSweep передает модель, где Phi жестко зафиксировано числом. *)
+  (* Если мы построим спектр по такой модели, он будет константой. *)
+  (* Мы создаем cleanModel, удаляя правило для потока, чтобы получить зависимость. *)
+  cleanModel = model;
+  cleanModel["SubstitutionRules"] = DeleteCases[
+      model["SubstitutionRules"], 
+      (QED`$PhiExt | Subscript[QED`$FluxSymbol, "ext"]) -> _
   ];
+  
+  (* Теперь freqFunc - это честная функция от аргумента *)
+  freqFunc = PlasmonFrequenciesVsFlux[cleanModel];
+  
+  If[freqFunc === $Failed, Return[$Failed]];
 
-  (* 2. Рабочая точка (безразмерная) *)
+  (* 2. Рабочую точку берем из ВХОДЯЩЕЙ модели (там где число прописано) *)
   phiExtDimless = (QED`$PhiExt /. model["SubstitutionRules"]) / QED`$Phi0Value;
   If[!NumericQ[phiExtDimless], phiExtDimless = 0.0];
 
-  (* 3. Вычисляем частоты (Central Difference) *)
+  (* 3. Считаем частоты *)
   w0 = freqFunc[phiExtDimless];
   wPlus = freqFunc[phiExtDimless + h];
   wMinus = freqFunc[phiExtDimless - h];
   
   If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], Return[$Failed]];
 
-  (* 4. Численное дифференцирование *)
-  d1 = (wPlus - wMinus) / (2 * h);          (* 1-я производная *)
-  d2 = (wPlus - 2*w0 + wMinus) / (h^2);     (* 2-я производная *)
+  (* 4. Производные *)
+  d1 = (wPlus - wMinus) / (2 * h);
+  d2 = (wPlus - 2*w0 + wMinus) / (h^2);
   
-  (* 5. Расчет скоростей *)
-  (* Gamma1 (Slope) *)
+  (* 5. Скорости *)
   gamma1 = A * logFac * Abs[d1];
-  
-  (* Gamma2 (Curvature) *)
   gamma2 = (A^2) * logFac * Abs[d2]; 
   
-  (* Суммарная скорость распада *)
   totalRate = Sqrt[gamma1^2 + gamma2^2];
   
-  (* 6. Расчет времени с защитой от деления на ноль *)
-  (* Если скорость распада исчезающе мала, время жизни бесконечно *)
-  tPhi = If[PossibleZeroQ[totalRate] || totalRate < 1.0*^-20, 
-      Infinity, 
-      1.0 / totalRate
+  (* 6. Время (обрабатываем список) *)
+  (* Если rate ~ 0, возвращаем Infinity. *)
+  tPhi = Map[
+    Function[r, If[TrueQ[r < 1.0*^-20], Infinity, 1.0 / r]],
+    totalRate
   ];
   
-  (* Возвращаем структуру данных *)
   <|
     "Frequencies" -> w0,
-    "dOmega_dPhi" -> d1,      (* [rad/s per Phi0] *)
-    "d2Omega_dPhi2" -> d2,    (* [rad/s per Phi0^2] *)
+    "dOmega_dPhi" -> d1,
+    "d2Omega_dPhi2" -> d2,
     "DephasingRate" -> totalRate,
     "DephasingTime" -> tPhi
   |>
