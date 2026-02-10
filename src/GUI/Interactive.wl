@@ -453,7 +453,7 @@ PlotControlPanel[model_, onUpdate_, onForceUpdate_] :=
 SetAttributes[PresetControlPanel, HoldFirst];
 PresetControlPanel[modelSymbol_, onModelUpdate_] := 
   DynamicModule[{selectedPreset = Null},
-    FrameBox[
+    Framed[  (* <--- БЫЛО FrameBox, СТАЛО Framed *)
       Row[{
         Style["Presets: ", 10, Gray],
         
@@ -505,7 +505,7 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
                 ]
              ]
           ],
-          Method -> "Queued", (* Essential for DialogInput *)
+          Method -> "Queued",
           ImageSize -> {40, 20}
         ],
         Spacer[2],
@@ -524,6 +524,7 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
            ImageSize -> {20, 20}
         ]
       }],
+      (* Опции Framed *)
       FrameStyle -> LightGray,
       RoundingRadius -> 3,
       ImageMargins -> 0
