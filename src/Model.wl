@@ -12,12 +12,12 @@ GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
 
-(* --- PRESET API --- *)
+
 SavePreset::usage = "SavePreset[model, name] saves the current Primary parameters into the Presets registry under the given name. Returns updated model.";
 LoadPreset::usage = "LoadPreset[model, name] loads Primary parameters from the specified preset. Returns updated model with IsDirty=True.";
 DeletePreset::usage = "DeletePreset[model, name] removes a preset from the registry.";
 GetPresetNames::usage = "GetPresetNames[model] returns a list of available preset names.";
-(* ---------------------- *)
+MergePresets::usage = "MergePresets[model, newPresets] merges an association of presets into the model's registry.";
 
 GetWaveFunction::usage = "GetWaveFunction[model, quantumNumbers] returns the analytical wavefunction \
 Psi[phi1, phi2, ...] for the specified state {n1, n2, ...} in physical flux coordinates.";
@@ -801,6 +801,14 @@ LoadPreset[model_Association, name_String] :=
   ];
 
 LoadPreset::nopreset = "Preset '`1`' not found in the model.";
+
+MergePresets[model_Association, newPresets_Association] := 
+  Module[{updated},
+    updated = model;
+    (* Join[old, new] - ключи из new перезаписывают ключи из old, если совпадают *)
+    updated["Presets"] = Join[model["Presets"], newPresets];
+    updated
+  ];
 
 DeletePreset[model_Association, name_String] := 
   Module[{updatedModel},
