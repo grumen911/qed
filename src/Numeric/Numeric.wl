@@ -1368,12 +1368,10 @@ CalculateDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
     freqFunc, phiExtDimless,
     w0, wPlus, wMinus,
     d1, d2,
-    gamma1, gamma2, tPhi
+    gamma1, gamma2, totalRate, tPhi
   },
 
   (* 1. Получаем функцию зависимости спектра от потока *)
-  (* PlasmonFrequenciesVsFlux возвращает Function[{phiDimless}, {w1, w2...}] *)
-  (* Она уже содержит логику FindPotentialMinimumContinuation и работы с кэшем *)
   freqFunc = PlasmonFrequenciesVsFlux[model];
   
   If[freqFunc === $Failed,
@@ -1381,52 +1379,44 @@ CalculateDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
      Return[$Failed]
   ];
 
-  (* 2. Определяем рабочую точку (в единицах Phi0) *)
-  (* Извлекаем текущий PhiExt из правил подстановки и делим на Phi0Value *)
+  (* 2. Рабочая точка (безразмерная) *)
   phiExtDimless = (QED`$PhiExt /. model["SubstitutionRules"]) / QED`$Phi0Value;
-  
-  (* Если PhiExt не задан числом, считаем его равным 0 *)
   If[!NumericQ[phiExtDimless], phiExtDimless = 0.0];
 
-  (* 3. Вычисляем частоты в 3 точках (Central Difference) *)
-  (* PlasmonFrequenciesVsFlux принимает аргумент в единицах Phi0 *)
-  
+  (* 3. Вычисляем частоты (Central Difference) *)
   w0 = freqFunc[phiExtDimless];
   wPlus = freqFunc[phiExtDimless + h];
   wMinus = freqFunc[phiExtDimless - h];
   
-  (* Проверка на сбои (например, если продолжение не сошлось) *)
-  If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], 
-     Return[$Failed]
-  ];
+  If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], Return[$Failed]];
 
   (* 4. Численное дифференцирование *)
-  (* w в [rad/s], h безразмерный *)
+  d1 = (wPlus - wMinus) / (2 * h);          (* 1-я производная *)
+  d2 = (wPlus - 2*w0 + wMinus) / (h^2);     (* 2-я производная *)
   
-  (* 1-я производная: dOmega / d(Phi/Phi0) *)
-  d1 = (wPlus - wMinus) / (2 * h);
-  
-  (* 2-я производная: d2Omega / d(Phi/Phi0)^2 *)
-  d2 = (wPlus - 2*w0 + wMinus) / (h^2);
-  
-  (* 5. Расчет скоростей дефазировки *)
-  (* Формула: Gamma = A_dimless * logFac * |dw/dx| *)
-  (* Размерности: [1] * [1] * [rad/s] = [rad/s] - корректно *)
-  
+  (* 5. Расчет скоростей *)
+  (* Gamma1 (Slope) *)
   gamma1 = A * logFac * Abs[d1];
   
-  (* Для второго порядка (в sweet spot): Gamma ~ A^2 * |d2w/dx2| *)
+  (* Gamma2 (Curvature) *)
   gamma2 = (A^2) * logFac * Abs[d2]; 
   
-  (* Итоговое время T_phi *)
-  tPhi = 1.0 / Sqrt[gamma1^2 + gamma2^2];
+  (* Суммарная скорость распада *)
+  totalRate = Sqrt[gamma1^2 + gamma2^2];
+  
+  (* 6. Расчет времени с защитой от деления на ноль *)
+  (* Если скорость распада исчезающе мала, время жизни бесконечно *)
+  tPhi = If[PossibleZeroQ[totalRate] || totalRate < 1.0*^-20, 
+      Infinity, 
+      1.0 / totalRate
+  ];
   
   (* Возвращаем структуру данных *)
   <|
     "Frequencies" -> w0,
     "dOmega_dPhi" -> d1,      (* [rad/s per Phi0] *)
     "d2Omega_dPhi2" -> d2,    (* [rad/s per Phi0^2] *)
-    "DephasingRate" -> (1.0/tPhi),
+    "DephasingRate" -> totalRate,
     "DephasingTime" -> tPhi
   |>
 ];
