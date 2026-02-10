@@ -9,9 +9,16 @@ GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
 GetNumericalQuantity::usage = "GetNumericalQuantity[model, key]"
 GetNumericalParams::usage = "GetNumericalParams[model]"
 GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]"
-UpdatePrimaryParam::usage = "UpdatePrimaryParam[model, path, value]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
+
+(* --- PRESET API --- *)
+SavePreset::usage = "SavePreset[model, name] saves the current Primary parameters into the Presets registry under the given name. Returns updated model.";
+LoadPreset::usage = "LoadPreset[model, name] loads Primary parameters from the specified preset. Returns updated model with IsDirty=True.";
+DeletePreset::usage = "DeletePreset[model, name] removes a preset from the registry.";
+GetPresetNames::usage = "GetPresetNames[model] returns a list of available preset names.";
+(* ---------------------- *)
+
 GetWaveFunction::usage = "GetWaveFunction[model, quantumNumbers] returns the analytical wavefunction \
 Psi[phi1, phi2, ...] for the specified state {n1, n2, ...} in physical flux coordinates.";
 UpdateModelWithRules::usage = "UpdateModelWithRules[model, rules] updates the model's SubstitutionRules \
@@ -187,6 +194,7 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
       "Image" -> circuitImage,
       "SubstitutionRules" -> {},
       "Analytical" -> analytical,
+      "Presets" -> <||>,
       "Numerical" -> <|
         "Method" -> method,
         "Cache" -> <||>,
@@ -664,21 +672,6 @@ UpdateAnaliticalParam[model_Association, path_List, newValue_] :=
     updated
   ];
 
-
-UpdatePrimaryParam[model_Association, path_List, newValue_] := 
-  Module[{updated},
-    
-    updated = model;
-    
-    (* Обновить первичный параметр *)
-    updated["Primary"] = 
-      SetAtPath[model["Primary"], path, newValue];
-    
-    (* Отметить численный кэш как грязный *)
-    updated["Numerical"]["IsDirty"] = True;
-    
-    updated
-  ];
   
 GetAnalyticalParams[model_Association] := model["Analytical"]
 
@@ -767,6 +760,56 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
 
     newModel
 ];
+
+(* ════════════════════════════════════════════════════════════════ *)
+(* PRESET MANAGEMENT SYSTEM                             *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+SavePreset[model_Association, name_String] := 
+  Module[{updatedModel},
+    If[name === "", Return[model]]; (* Защита от пустого имени *)
+    
+    updatedModel = model;
+    (* Сохраняем полную копию Primary (значения, лимиты, символы) *)
+    updatedModel["Presets", name] = model["Primary"];
+    
+    updatedModel
+  ];
+
+LoadPreset[model_Association, name_String] := 
+  Module[{updatedModel, presetData},
+    (* Проверяем наличие пресета *)
+    If[!KeyExistsQ[model["Presets"], name],
+       Message[LoadPreset::nopreset, name];
+       Return[model]
+    ];
+    
+    presetData = model["Presets", name];
+    updatedModel = model;
+    
+    (* Восстанавливаем Primary *)
+    updatedModel["Primary"] = presetData;
+    
+    (* Критично: обновляем правила подстановки, так как Value изменились *)
+    (* Примечание: BuildSubstitutionRules зависит от текущей model, но мы передаем данные явно *)
+    (* В текущей архитектуре параметры подставляются через SubstitutionRules, 
+       которые ссылаются на Primary. Но лучше сбросить кэш. *)
+       
+    updatedModel["Numerical", "IsDirty"] = True;
+    
+    updatedModel
+  ];
+
+LoadPreset::nopreset = "Preset '`1`' not found in the model.";
+
+DeletePreset[model_Association, name_String] := 
+  Module[{updatedModel},
+    updatedModel = model;
+    updatedModel["Presets"] = KeyDrop[model["Presets"], name];
+    updatedModel
+  ];
+
+GetPresetNames[model_Association] := Keys[model["Presets"]];
 
 (* Удобный доступ ко всем параметрам *)
 GetAllParams[model_Association] := <|

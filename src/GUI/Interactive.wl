@@ -454,6 +454,84 @@ PlotControlPanel[model_, onUpdate_, onForceUpdate_] :=
     ]
   ];
 
+SetAttributes[PresetControlPanel, HoldFirst];
+PresetControlPanel[modelSymbol_, onModelUpdate_] := 
+  DynamicModule[{selectedPreset = Null},
+    Framed[
+      Row[{
+        Style["Presets: ", 10, Gray],
+        
+        (* 1. Preset Selector *)
+        Dynamic[PopupMenu[
+          Dynamic[selectedPreset],
+          (* FIX: Wrap list in Dynamic to auto-update when presets change *)
+          QED`Model`GetPresetNames[modelSymbol], 
+          "Select...",
+          ImageSize -> {90, Automatic}
+        ]],
+        Spacer[5],
+        
+        (* 2. Load Button *)
+        Button[
+          Tooltip[Style["Load", 10], "Load selected preset"],
+          If[StringQ[selectedPreset],
+             Module[{updated},
+               updated = QED`Model`LoadPreset[modelSymbol, selectedPreset];
+               onModelUpdate[updated]; 
+             ]
+          ],
+          Enabled -> Dynamic[StringQ[selectedPreset]],
+          ImageSize -> {40, 20}
+        ],
+        Spacer[2],
+        
+        (* 3. Save Button *)
+        Button[
+          Tooltip[Style["Save", 10], "Save current configuration"],
+          Module[{name},
+             name = DialogInput[{text = ""}, 
+                Column[{
+                  Style["Save Preset", Bold],
+                  InputField[Dynamic[text], String],
+                  Row[{
+                    DefaultButton["Save", DialogReturn[text]], 
+                    CancelButton[]
+                  }]
+                }]
+             ];
+             If[StringQ[name] && StringLength[name] > 0,
+                Module[{updated},
+                   updated = QED`Model`SavePreset[modelSymbol, name];
+                   onModelUpdate[updated];
+                   selectedPreset = name; 
+                ]
+             ]
+          ],
+          Method -> "Queued",
+          ImageSize -> {40, 20}
+        ],
+        Spacer[2],
+        
+        (* 4. Delete Button *)
+        Button[
+           Tooltip[Style["X", 10, Red], "Delete selected preset"],
+           If[StringQ[selectedPreset],
+              Module[{updated},
+                 updated = QED`Model`DeletePreset[modelSymbol, selectedPreset];
+                 onModelUpdate[updated];
+                 selectedPreset = Null;
+              ]
+           ],
+           Enabled -> Dynamic[StringQ[selectedPreset]],
+           ImageSize -> {20, 20}
+        ]
+      }],
+      FrameStyle -> LightGray,
+      RoundingRadius -> 3,
+      ImageMargins -> 0
+    ]
+  ];
+
 (* ═══════════════════════════════════════════════════════════════ *)
 (* 3. CORE: QUBIT DASHBOARD *)
 (* ═══════════════════════════════════════════════════════════════ *)
@@ -498,6 +576,14 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
           ],
           
           Spacer[15],
+
+          PresetControlPanel[currentModel, 
+             Function[{newModel}, 
+                currentModel = newModel;
+                needsUpdate = True; (* Trigger re-render *)
+             ]
+          ],
+          
           Spacer[10],
           
           (* Sliders & Button Panel *)
