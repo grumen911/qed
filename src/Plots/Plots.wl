@@ -89,6 +89,14 @@ Options: Same as PlotPlasmonSpectrum (NumModes, FluxRange).";
 PlotDephasingRates::usage = "PlotDephasingRates[model] displays a table of pure dephasing times (T_phi), \
 broken down by 1st order (flux slope) and 2nd order (curvature) contributions.";
 
+PlotDephasingTime::usage = "PlotDephasingTime[model] plots the pure dephasing time (T_phi) dependence on external flux.
+Options:
+  NumModes -> Integer (default 2)
+  FluxRange -> {min, max} (default {-0.5, 0.5})
+  \"DephasingContribution\" -> \"Total\" | \"FirstOrder\" | \"SecondOrder\"
+  \"FluxNoiseAmplitude\" -> 1.0*^-6
+  \"PinkNoiseLogFactor\" -> 3.0";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
@@ -114,6 +122,13 @@ Options[PlotRelaxationTime] = Join[
   Options[PlotPlasmonSpectrum],
   {
     "RelaxationChannel" -> "CapacitiveRelaxationRate",
+    "LogTimeRange" -> {-8, 2}
+  }
+];
+
+Options[PlotDephasingTime] = Join[
+  Options[PlotPlasmonSpectrum],
+  {
     "LogTimeRange" -> {-8, 2}
   }
 ];
@@ -987,6 +1002,100 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
         (* ,opts *)
     ]
   ];
+
+PlotDephasingTime[model_Association, opts:OptionsPattern[]] := 
+  Module[{tPhiFunc, nModes, range, logRange, timeRange, modeTphi},
+    
+    (* 1. Получаем настройки отображения *)
+    nModes = OptionValue[NumModes];
+    range = OptionValue[FluxRange];
+    logRange = OptionValue["LogTimeRange"];
+    
+    (* Диапазон для оси Y (Log scale) *)
+    timeRange = If[ListQ[logRange] && Length[logRange] == 2,
+        {10.^logRange[[1]], 10.^logRange[[2]]},
+        All
+    ];
+
+    If[!IntegerQ[nModes], nModes = 1]; 
+    If[!ListQ[range], range = {-0.5, 0.5}];
+
+    (* 2. Функция свипа *)
+    tPhiFunc = QED`Numeric`GenerateFluxSweep[model, 
+        Function[{m}, 
+            Module[{data},
+                (* Пробрасываем любые физические опции (Amplitude, LogFactor) напрямую в расчет *)
+                data = QED`Numeric`CalculateDephasingRates[m, 
+                    FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]]
+                ];
+                
+                If[FailureQ[data], Return[ConstantArray[Infinity, nModes]]];
+                
+                (* Возвращаем только итоговое время *)
+                data["DephasingTime"]
+            ]
+        ]
+    ];
+
+    If[tPhiFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
+    ];
+
+    (* 3. Обертка для Plot (фильтрация нулей/бесконечностей) *)
+    modeTphi[i_Integer][phi_?NumericQ] := 
+      Module[{valVec, val},
+        valVec = tPhiFunc[phi];
+        If[i > Length[valVec], Return[Null]];
+        val = valVec[[i]];
+        
+        If[!NumericQ[val] || val <= 0 || val === Infinity, Null, val]
+      ];
+
+    (* 4. График *)
+    Plot[
+        Evaluate @ Table[modeTphi[i][phi], {i, nModes}],
+        {phi, range[[1]], range[[2]]},
+        
+        ScalingFunctions -> "Log10",
+        PlotRange -> {Automatic, timeRange}, 
+        
+        Axes -> True,
+        Frame -> False,
+        
+        AxesLabel -> {
+            Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
+            Style[Subscript["T", "\[Phi]"], FontFamily -> "Times New Roman", Large],
+            FormatType -> TraditionalForm
+        }, 
+        AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        MeshFunctions -> Function[{x, y}, y],
+        
+        ImageSize -> 600, 
+        
+        PlotLegends -> Placed[
+            Table[
+                Row[{
+                   Subscript["T", "\[Phi]"],
+                   " (", 
+                   Subscript[Style["|1\[RightAngleBracket]", Italic], i],
+                   " \[Rule] ", 
+                   Style["|0\[RightAngleBracket]", Italic], 
+                   ")"
+                }], 
+                {i, nModes}
+            ],
+            Right
+        ],
+        
+        PlotStyle -> {
+            Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
+            Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
+        },
+        
+        MaxRecursion -> ControlActive[2, 6], 
+        PlotPoints -> ControlActive[20, 80]
+    ]
+];
 
 End[];
 EndPackage[];

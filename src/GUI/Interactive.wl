@@ -305,6 +305,10 @@ RegisterPlot["InductiveRelaxationTime", "Relaxation Time (T1)", "Heavy",
   Function[{m}, QED`Plots`PlotRelaxationTime[m, "RelaxationChannel" -> "InductiveRelaxationRate"]]
 ];
 
+RegisterPlot["DephasingTime", "Pure Dephasing Time (T_phi)", "Heavy", 
+  Function[{m}, QED`Plots`PlotDephasingTime[m]]
+];
+
 (* 
    COMPUTE WORKER (FUNCTIONAL STYLE)
    Input: plotId, model (Value)
