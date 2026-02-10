@@ -454,21 +454,27 @@ PlotControlPanel[model_, onUpdate_, onForceUpdate_] :=
     ]
   ];
 
+(* --- NEW: PRESET CONTROL PANEL --- *)
 SetAttributes[PresetControlPanel, HoldFirst];
 PresetControlPanel[modelSymbol_, onModelUpdate_] := 
-  DynamicModule[{selectedPreset = Null},
+  DynamicModule[{selectedPreset = Null, getModelKey},
+    
+    (* Helper: Unique key based on topology name *)
+    getModelKey[m_] := Lookup[m["Topology"], "Name", "DefaultCircuit"];
+
     Framed[
       Row[{
         Style["Presets: ", 10, Gray],
         
         (* 1. Preset Selector *)
-        Dynamic[PopupMenu[
-          Dynamic[selectedPreset],
-          (* FIX: Wrap list in Dynamic to auto-update when presets change *)
-          QED`Model`GetPresetNames[modelSymbol], 
-          "Select...",
-          ImageSize -> {90, Automatic}
-        ]],
+        Dynamic[
+          PopupMenu[
+            Dynamic[selectedPreset],
+            QED`Model`GetPresetNames[modelSymbol], 
+            "Select...",
+            ImageSize -> {90, Automatic}
+          ]
+        ],
         Spacer[5],
         
         (* 2. Load Button *)
@@ -524,6 +530,37 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
            ],
            Enabled -> Dynamic[StringQ[selectedPreset]],
            ImageSize -> {20, 20}
+        ],
+        
+        (* --- PERSISTENCE SECTION --- *)
+        Spacer[10],
+        Style["|", Gray],
+        Spacer[10],
+        
+        (* 5. Save to NB *)
+        Button[
+          Tooltip[Style["To NB", 10], "Save all presets to Notebook metadata (TaggingRules)"],
+          Module[{key},
+             key = getModelKey[modelSymbol];
+             CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}] = modelSymbol["Presets"];
+          ],
+          ImageSize -> {45, 20}
+        ],
+        Spacer[2],
+        
+        (* 6. Load from NB *)
+        Button[
+          Tooltip[Style["From NB", 10], "Merge presets from Notebook metadata"],
+          Module[{key, saved, updated},
+             key = getModelKey[modelSymbol];
+             saved = CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}];
+             
+             If[AssociationQ[saved],
+                updated = QED`Model`MergePresets[modelSymbol, saved];
+                onModelUpdate[updated];
+             ]
+          ],
+          ImageSize -> {55, 20}
         ]
       }],
       FrameStyle -> LightGray,
