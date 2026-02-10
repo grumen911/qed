@@ -86,6 +86,9 @@ PlotRelaxationTime::usage = "PlotRelaxationTime[model] plots the relaxation time
 dependence on external flux using generic sweep and CalculateFermiRates.
 Options: Same as PlotPlasmonSpectrum (NumModes, FluxRange).";
 
+PlotDephasingRates::usage = "PlotDephasingRates[model] displays a table of pure dephasing times (T_phi), \
+broken down by 1st order (flux slope) and 2nd order (curvature) contributions.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
@@ -722,6 +725,89 @@ PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
       Background -> {{1 -> LightGray}, {1 -> LightGray}, {1, 1} -> White},
       Spacings -> {1.5, 1.2},
       Alignment -> Center
+    ]
+  }, Alignment -> Center]
+];
+
+PlotDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
+  {
+    data, nModes, freqs, d1, d2, 
+    A, logFac, 
+    gamma1, gamma2, t1, t2, tTot,
+    rows, header, formatTime
+  },
+  
+  (* 1. Выполняем расчет *)
+  data = QED`Numeric`CalculateDephasingRates[model];
+  
+  If[FailureQ[data] || !AssociationQ[data], 
+    Return[Style["Error: Could not calculate dephasing rates. Check model initialization.", Red]]
+  ];
+
+  (* 2. Извлекаем параметры для пересчета компонент *)
+  (* Нам нужно восстановить отдельные вклады T1 и T2, так как функция вернула только Total *)
+  (* Берем те же опции, что использовались по умолчанию или переданы *)
+  
+  (* ВАЖНО: CalculateDephasingRates возвращает dOmega/dPhi уже нормированные на квант потока, 
+     а параметры шума берем из опций функции CalculateDephasingRates *)
+     
+  A = OptionValue[QED`Numeric`CalculateDephasingRates, {opts}, "FluxNoiseAmplitude"];
+  logFac = OptionValue[QED`Numeric`CalculateDephasingRates, {opts}, "PinkNoiseLogFactor"];
+  
+  (* Дефолты, если не переданы *)
+  If[!NumericQ[A], A = 1.0*^-6];
+  If[!NumericQ[logFac], logFac = 3.0];
+  
+  (* 3. Данные из результата *)
+  freqs = data["Frequencies"]; (* rad/s *)
+  d1 = data["dOmega_dPhi"];    (* rad/s per Phi0 *)
+  d2 = data["d2Omega_dPhi2"];  (* rad/s per Phi0^2 *)
+  
+  nModes = Length[freqs];
+  
+  (* 4. Расчет компонент *)
+  (* Gamma1 = A * log * |d1| *)
+  gamma1 = A * logFac * Abs[d1];
+  
+  (* Gamma2 = A^2 * log * |d2| *)
+  gamma2 = (A^2) * logFac * Abs[d2];
+  
+  (* Времена (защита от деления на 0) *)
+  formatTime[g_] := If[g < 1.0*^-20, Infinity, ScientificForm[1.0/g, 3]];
+  
+  (* 5. Формирование таблицы *)
+  header = {
+    Style["Mode (Freq)", Bold, Darker[Blue]],
+    Style["\!\(\*SubscriptBox[\(T\), \(\[Phi]\)]\) (1st Order)\n(Slope, s)", Bold],
+    Style["\!\(\*SubscriptBox[\(T\), \(\[Phi]\)]\) (2nd Order)\n(Curvature, s)", Bold],
+    Style["Total \!\(\*SubscriptBox[\(T\), \(\[Phi]\)]\)\n(s)", Bold]
+  };
+  
+  rows = Table[
+    {
+      Row[{
+        Style["#" <> ToString[m], Bold], 
+        " (", N[freqs[[m]] / (2 Pi * 10^9), 3], " GHz)"
+      }],
+      formatTime[gamma1[[m]]],
+      formatTime[gamma2[[m]]],
+      Style[formatTime[Sqrt[gamma1[[m]]^2 + gamma2[[m]]^2]], Bold] 
+    },
+    {m, nModes}
+  ];
+  
+  Column[{
+    Text[Style["Pure Dephasing Times (1/f Flux Noise)", Large, Bold]],
+    Text[Style[Row[{"Noise Amplitude: ", ScientificForm[A], " \!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)"}], Gray]],
+    Spacer[10],
+    Grid[
+      Prepend[rows, header], 
+      Frame -> All, 
+      FrameStyle -> LightGray,
+      Background -> {{1 -> LightGray}, {1 -> LightGray}, {1, 1} -> White},
+      Spacings -> {2, 1.5},
+      Alignment -> Center,
+      ItemSize -> {{15, 12, 12, 12}, Automatic}
     ]
   }, Alignment -> Center]
 ];

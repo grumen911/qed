@@ -293,6 +293,10 @@ RegisterPlot["FermiRates", "T1 Relaxation Times (Fermi)", "Light",
   Function[{m}, QED`Plots`PlotFermiRates[m]]
 ];
 
+RegisterPlot["DephasingRates", "Pure Dephasing Times (T_phi)", "Light", 
+  Function[{m}, QED`Plots`PlotDephasingRates[m]]
+];
+
 RegisterPlot["CapacitiveRelaxationTime", "Relaxation Time (T1)", "Heavy", 
   Function[{m}, QED`Plots`PlotRelaxationTime[m]]
 ];
