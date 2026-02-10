@@ -860,7 +860,7 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
         ScalingFunctions -> "Log10",
         
         (* Диапазон под T1 (секунды) *)
-        PlotRange -> {Automatic, {10^(-8), 10^(-2)}}, 
+        PlotRange -> {Automatic, {10^(-8), 10^(2)}}, 
         
         Axes -> True,
         Frame -> False,

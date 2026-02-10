@@ -293,8 +293,12 @@ RegisterPlot["FermiRates", "T1 Relaxation Times (Fermi)", "Light",
   Function[{m}, QED`Plots`PlotFermiRates[m]]
 ];
 
-RegisterPlot["RelaxationTime", "Relaxation Time (T1)", "Heavy", 
+RegisterPlot["CapacitiveRelaxationTime", "Relaxation Time (T1)", "Heavy", 
   Function[{m}, QED`Plots`PlotRelaxationTime[m]]
+];
+
+RegisterPlot["InductiveRelaxationTime", "Relaxation Time (T1)", "Heavy", 
+  Function[{m}, QED`Plots`PlotRelaxationTime[m, "RelaxationChannel" -> "InductiveRelaxationRate"]]
 ];
 
 (* 
