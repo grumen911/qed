@@ -83,7 +83,17 @@ that computes analysisFunction[model_at_phi] for a range of external fluxes. \
   sweep = GenerateFluxSweep[model, CalculateFermiRates];\n\
   results = Table[sweep[phi], {phi, -0.5, 0.5, 0.01}];";
 
+CalculateDephasingRates::usage = "CalculateDephasingRates[model, opts] calculates pure dephasing time T_phi \
+using robust numerical differentiation (Central Finite Difference) via FindPotentialMinimumContinuation. \
+Returns Association with derivatives dOmega/dPhi, d2Omega/dPhi2 and estimated rates.";
+
 Begin["`Private`"];
+
+Options[CalculateDephasingRates] = {
+  "FluxStep" -> 1.0*^-4,           (* Шаг h в единицах Phi0 *)
+  "FluxNoiseAmplitude" -> 1.0*^-6, (* A_Phi в единицах Phi0 *)
+  "PinkNoiseLogFactor" -> 3.0      (* Sqrt[2 ln(omega * t)] *)
+};
 
 Options[CalculateFermiRates] = {
   (* Inductive Channel parameters *)
@@ -1345,6 +1355,80 @@ GenerateFluxSweep[model_Association, analysisFunction_Function] := Module[
             analysisFunction[tempModel]
         ]
     ]
+];
+
+CalculateDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
+  {
+    (* Параметры *)
+    h = OptionValue["FluxStep"],
+    A = OptionValue["FluxNoiseAmplitude"],
+    logFac = OptionValue["PinkNoiseLogFactor"],
+    
+    (* Переменные *)
+    freqFunc, phiExtDimless,
+    w0, wPlus, wMinus,
+    d1, d2,
+    gamma1, gamma2, tPhi
+  },
+
+  (* 1. Получаем функцию зависимости спектра от потока *)
+  (* PlasmonFrequenciesVsFlux возвращает Function[{phiDimless}, {w1, w2...}] *)
+  (* Она уже содержит логику FindPotentialMinimumContinuation и работы с кэшем *)
+  freqFunc = PlasmonFrequenciesVsFlux[model];
+  
+  If[freqFunc === $Failed,
+     Print["[Error] CalculateDephasingRates: Could not generate frequency function."];
+     Return[$Failed]
+  ];
+
+  (* 2. Определяем рабочую точку (в единицах Phi0) *)
+  (* Извлекаем текущий PhiExt из правил подстановки и делим на Phi0Value *)
+  phiExtDimless = (QED`$PhiExt /. model["SubstitutionRules"]) / QED`$Phi0Value;
+  
+  (* Если PhiExt не задан числом, считаем его равным 0 *)
+  If[!NumericQ[phiExtDimless], phiExtDimless = 0.0];
+
+  (* 3. Вычисляем частоты в 3 точках (Central Difference) *)
+  (* PlasmonFrequenciesVsFlux принимает аргумент в единицах Phi0 *)
+  
+  w0 = freqFunc[phiExtDimless];
+  wPlus = freqFunc[phiExtDimless + h];
+  wMinus = freqFunc[phiExtDimless - h];
+  
+  (* Проверка на сбои (например, если продолжение не сошлось) *)
+  If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], 
+     Return[$Failed]
+  ];
+
+  (* 4. Численное дифференцирование *)
+  (* w в [rad/s], h безразмерный *)
+  
+  (* 1-я производная: dOmega / d(Phi/Phi0) *)
+  d1 = (wPlus - wMinus) / (2 * h);
+  
+  (* 2-я производная: d2Omega / d(Phi/Phi0)^2 *)
+  d2 = (wPlus - 2*w0 + wMinus) / (h^2);
+  
+  (* 5. Расчет скоростей дефазировки *)
+  (* Формула: Gamma = A_dimless * logFac * |dw/dx| *)
+  (* Размерности: [1] * [1] * [rad/s] = [rad/s] - корректно *)
+  
+  gamma1 = A * logFac * Abs[d1];
+  
+  (* Для второго порядка (в sweet spot): Gamma ~ A^2 * |d2w/dx2| *)
+  gamma2 = (A^2) * logFac * Abs[d2]; 
+  
+  (* Итоговое время T_phi *)
+  tPhi = 1.0 / Sqrt[gamma1^2 + gamma2^2];
+  
+  (* Возвращаем структуру данных *)
+  <|
+    "Frequencies" -> w0,
+    "dOmega_dPhi" -> d1,      (* [rad/s per Phi0] *)
+    "d2Omega_dPhi2" -> d2,    (* [rad/s per Phi0^2] *)
+    "DephasingRate" -> (1.0/tPhi),
+    "DephasingTime" -> tPhi
+  |>
 ];
 
 End[];
