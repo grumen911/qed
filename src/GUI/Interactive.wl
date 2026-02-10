@@ -453,17 +453,18 @@ PlotControlPanel[model_, onUpdate_, onForceUpdate_] :=
 SetAttributes[PresetControlPanel, HoldFirst];
 PresetControlPanel[modelSymbol_, onModelUpdate_] := 
   DynamicModule[{selectedPreset = Null},
-    Framed[  (* <--- БЫЛО FrameBox, СТАЛО Framed *)
+    Framed[
       Row[{
         Style["Presets: ", 10, Gray],
         
         (* 1. Preset Selector *)
-        PopupMenu[
+        Dynamic[PopupMenu[
           Dynamic[selectedPreset],
-          QED`Model`GetPresetNames[modelSymbol],
+          (* FIX: Wrap list in Dynamic to auto-update when presets change *)
+          QED`Model`GetPresetNames[modelSymbol], 
           "Select...",
           ImageSize -> {90, Automatic}
-        ],
+        ]],
         Spacer[5],
         
         (* 2. Load Button *)
@@ -484,7 +485,6 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
         Button[
           Tooltip[Style["Save", 10], "Save current configuration"],
           Module[{name},
-             (* Modal Dialog for Name Input *)
              name = DialogInput[{text = ""}, 
                 Column[{
                   Style["Save Preset", Bold],
@@ -495,13 +495,11 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
                   }]
                 }]
              ];
-             
-             (* Logic if name provided *)
              If[StringQ[name] && StringLength[name] > 0,
                 Module[{updated},
                    updated = QED`Model`SavePreset[modelSymbol, name];
                    onModelUpdate[updated];
-                   selectedPreset = name; (* Auto-select new preset *)
+                   selectedPreset = name; 
                 ]
              ]
           ],
@@ -524,7 +522,6 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
            ImageSize -> {20, 20}
         ]
       }],
-      (* Опции Framed *)
       FrameStyle -> LightGray,
       RoundingRadius -> 3,
       ImageMargins -> 0
