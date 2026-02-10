@@ -454,13 +454,23 @@ PlotControlPanel[model_, onUpdate_, onForceUpdate_] :=
     ]
   ];
 
-(* --- NEW: PRESET CONTROL PANEL --- *)
 SetAttributes[PresetControlPanel, HoldFirst];
 PresetControlPanel[modelSymbol_, onModelUpdate_] := 
-  DynamicModule[{selectedPreset = Null, getModelKey},
+  DynamicModule[{selectedPreset = Null, getModelKey, hamburgerIcon},
     
-    (* Helper: Unique key based on topology name *)
     getModelKey[m_] := Lookup[m["Topology"], "Name", "DefaultCircuit"];
+
+    (*Add ImagePadding -> 0 to remove hidden margins (not work)*)
+    hamburgerIcon = Graphics[
+      {GrayLevel[0.4], CapForm["Round"], Thickness[0.15], 
+       Line[{{0, 0.25}, {1, 0.25}}], 
+       Line[{{0, 0.5}, {1, 0.5}}], 
+       Line[{{0, 0.75}, {1, 0.75}}]}, 
+      ImageSize -> {12, 12}, 
+      PlotRange -> {{0, 1}, {0, 1}},
+      ImagePadding -> 0, 
+      BaselinePosition -> Center
+    ];
 
     Framed[
       Row[{
@@ -532,35 +542,41 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
            ImageSize -> {20, 20}
         ],
         
-        (* --- PERSISTENCE SECTION --- *)
-        Spacer[10],
-        Style["|", Gray],
         Spacer[10],
         
-        (* 5. Save to NB *)
-        Button[
-          Tooltip[Style["To NB", 10], "Save all presets to Notebook metadata (TaggingRules)"],
-          Module[{key},
-             key = getModelKey[modelSymbol];
-             CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}] = modelSymbol["Presets"];
-          ],
-          ImageSize -> {45, 20}
-        ],
-        Spacer[2],
-        
-        (* 6. Load from NB *)
-        Button[
-          Tooltip[Style["From NB", 10], "Merge presets from Notebook metadata"],
-          Module[{key, saved, updated},
-             key = getModelKey[modelSymbol];
-             saved = CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}];
-             
-             If[AssociationQ[saved],
-                updated = QED`Model`MergePresets[modelSymbol, saved];
-                onModelUpdate[updated];
+        (* 5. Compact Persistence Menu *)
+        ActionMenu[
+           Tooltip[
+              MouseAppearance[
+                 (* Wrap in Pane to force vertical centering *)
+                 Pane[hamburgerIcon, ImageSize -> {20, 20}, Alignment -> Center], 
+                 "LinkHand"
+              ], 
+              "Notebook Storage Options"
+           ],
+           {
+             "Save to Notebook..." :> Module[{key},
+                key = getModelKey[modelSymbol];
+                If[ChoiceDialog[
+                     "Overwrite preset metadata in this notebook?\nExisting presets for this model in the file metadata will be replaced.",
+                     {"Overwrite" -> True, "Cancel" -> False},
+                     WindowTitle -> "Confirm Save to Notebook"
+                   ],
+                   CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}] = modelSymbol["Presets"];
+                ]
+             ],
+             "Merge from Notebook" :> Module[{key, saved, updated},
+                key = getModelKey[modelSymbol];
+                saved = CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}];
+                If[AssociationQ[saved],
+                   updated = QED`Model`MergePresets[modelSymbol, saved];
+                   onModelUpdate[updated];
+                ]
              ]
-          ],
-          ImageSize -> {55, 20}
+           },
+           Appearance -> "None",
+           ImageSize -> {20, 20},
+           Method -> "Queued"
         ]
       }],
       FrameStyle -> LightGray,
