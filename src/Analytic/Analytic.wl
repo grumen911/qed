@@ -24,6 +24,15 @@ Arguments:
 Returns:
   Symbolic expression Ψ(φ₁, φ₂, ...). Includes Jacobian normalization factor.";
 
+BuildAnharmonicPart::usage = "BuildAnharmonicPart[hamiltonian, topology, order] returns the symbolic \
+Taylor expansion of the potential energy terms of order > 2.";
+
+QuantizeToLadderOperators::usage = "QuantizeToLadderOperators[expr, topology, transformMatrix, frequencies, \
+effectiveCapacitances] transforms flux variables into ladder operators Create[mode] and Annihilate[mode].";
+
+CalculatePerturbationCorrection::usage = "CalculatePerturbationCorrection[operator, state] computes the \
+first-order energy correction <state|operator|state>. State is a list of occupation numbers.";
+
 Begin["`Private`"];
 
 
@@ -352,7 +361,153 @@ BuildHarmonicWavefunction[
 ];
 
 BuildHarmonicWavefunction::dim = "Dimension mismatch: `1` has length `2`, expected `3`.";
- 
+
+(* --- Выделение ангармонической части --- *)
+BuildAnharmonicPart[hamiltonian_, topology_Association, order_Integer:4] := 
+ Module[{nodes, fluxVars, minSymbols, deltas, t, pot, series},
+  
+  nodes = getIndependentNodes[topology];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  deltas = fluxVars - minSymbols;
+  
+  (* Работаем только с потенциальной энергией (кинетическая квадратична) *)
+  pot = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
+  
+  (* Параметризуем отклонение от минимума *)
+  series = Normal @ Series[
+    pot /. Thread[fluxVars -> (minSymbols + t * deltas)],
+    {t, 0, order}
+  ];
+  
+  (* Оставляем только члены старше 2-го порядка (ангармонизм) *)
+  series = Select[series, Exponent[#, t] > 2 &];
+  
+  Simplify[series /. t -> 1]
+ ];
+
+
+(* --- Переход к операторам (Квантование) --- *)
+QuantizeToLadderOperators[expr_, topology_Association, T_?MatrixQ, freqs_List, caps_List] := 
+ Module[{nodes, fluxVars, minFluxVars, deltaPhi, nDOF, qSyms, phiExpr, qRules, ladderExpr,
+         CreateOp, AnnihilateOp},
+  
+  nodes = getIndependentNodes[topology];
+  nDOF = Length[nodes];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  minFluxVars = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  
+  (* Временные символы для операторов, чтобы избежать конфликтов контекста *)
+  CreateOp = Symbol["QED`Analytic`Create"];
+  AnnihilateOp = Symbol["QED`Analytic`Annihilate"];
+
+  (* 1. Выражаем лабораторные потоки через нормальные координаты q *)
+  (* deltaPhi = T . q *)
+  qSyms = Table[Unique["q"], {nDOF}]; 
+  deltaPhi = T . qSyms;
+  
+  (* Подставляем в выражение вместо (phi - phi_min) *)
+  (* Заметьте: expr зависит от phi, поэтому заменяем phi -> phi_min + T.q *)
+  phiExpr = expr /. Thread[fluxVars -> (minFluxVars + deltaPhi)];
+  
+  (* 2. Правила замены нормальных координат на операторы: q = x_zpf * (a + a+) *)
+  qRules = Table[
+    Module[{xZpf, opSum},
+      (* ZPF = Sqrt[hbar / (2 C w)] *)
+      xZpf = Sqrt[QED`$hbar / (2 * caps[[i]] * freqs[[i]])];
+      
+      (* Используем NonCommutativeMultiply (**) для сохранения порядка *)
+      (* q ~ (a + a+) *)
+      opSum = xZpf * (AnnihilateOp[i] ** 1 + CreateOp[i] ** 1);
+      qSyms[[i]] -> opSum
+    ],
+    {i, nDOF}
+  ];
+  
+  ladderExpr = phiExpr /. qRules;
+  
+  (* Раскрываем скобки с учетом некоммутативности *)
+  ExpandNonCommutative[ladderExpr /. (x_ ** 1) -> x]
+ ];
+
+
+(* Хелпер для раскрытия некоммутативных скобок *)
+ExpandNonCommutative[expr_] := 
+ Distribute[expr, Plus, NonCommutativeMultiply] //. {
+   (a_ * b_) ** c_ :> a * (b ** c) /; NumericQ[a],
+   a_ ** (b_ * c_) :> b * (a ** c) /; NumericQ[b],
+   NonCommutativeMultiply[x_] :> x
+ };
+
+
+(* --- Вычисление поправки <n|V|n> --- *)
+CalculatePerturbationCorrection[operator_, state_List] := 
+ Module[{terms},
+   (* Разбиваем полином на отдельные слагаемые *)
+   terms = If[Head[operator] === Plus, List @@ operator, {operator}];
+   Total[EvaluateTerm[#, state] & /@ terms]
+ ];
+
+EvaluateTerm[term_, state_List] := 
+ Module[{coeff, ops, currentChain, nList, factor, opHead, modeIdx, n},
+  
+  (* 1. Разделяем коэффициент и цепочку операторов *)
+  (* Ожидаем структуру: Coeff * (Op1 ** Op2 ...) или Coeff * Op1 *)
+  {coeff, ops} = ParseTerm[term];
+  
+  (* Если операторов нет (константа), поправка равна самому члену *)
+  If[ops === {}, Return[term]]; 
+
+  (* 2. Применяем операторы к состоянию |n1, n2...> справа налево *)
+  nList = state; (* Копия чисел заполнения *)
+  factor = 1;
+  
+  (* ops - это список, например {Create[1], Annihilate[1], ...} *)
+  Do[
+    opHead = Head[op]; 
+    modeIdx = First[op]; (* Индекс моды *)
+    n = nList[[modeIdx]];
+    
+    If[opHead === Symbol["QED`Analytic`Create"],
+      (* a+|n> = sqrt(n+1)|n+1> *)
+      factor *= Sqrt[n + 1];
+      nList[[modeIdx]]++;
+    ,
+    If[opHead === Symbol["QED`Analytic`Annihilate"],
+      (* a|n> = sqrt(n)|n-1> *)
+      If[n == 0, Return[0]]; (* Уничтожение вакуума *)
+      factor *= Sqrt[n];
+      nList[[modeIdx]]--;
+    ]];
+  , {op, Reverse[ops]}]; (* Важно: Reverse, т.к. в A**B оператор B действует первым *)
+  
+  (* 3. Проецируем на начальное состояние <state|final_state> *)
+  If[nList === state, coeff * factor, 0]
+ ];
+
+(* Разбор члена на (Coeff, {Operators}) *)
+ParseTerm[term_] := Module[{nc, scalar},
+  Switch[Head[term],
+    NonCommutativeMultiply, {1, List @@ term},
+    Times, 
+      (* Ищем некоммутативную часть *)
+      nc = SelectFirst[List @@ term, Head[#] === NonCommutativeMultiply &];
+      If[!MissingQ[nc], 
+        {DeleteCases[term, nc], List @@ nc},
+        (* Если нет **, проверяем одиночные операторы *)
+        nc = Select[List @@ term, MemberQ[{Symbol["QED`Analytic`Create"], Symbol["QED`Analytic`Annihilate"]}, Head[#]] &];
+        If[Length[nc] > 0, 
+           (* Внимание: в Times порядок сбит, но для одиночного оператора неважно. 
+              Для нескольких без ** порядок неопределен, считаем это ошибкой квантования, но обработаем как есть *)
+           {DeleteCases[term, Alternatives @@ nc], nc},
+           {term, {}} (* Число *)
+        ]
+      ],
+    Symbol["QED`Analytic`Create"], {1, {term}},
+    Symbol["QED`Analytic`Annihilate"], {1, {term}},
+    _, {term, {}}
+  ]
+]; 
 
 End[];
 EndPackage[];
