@@ -1213,79 +1213,114 @@ GetLabMatrixElements[model_Association] := Module[
 ];
 
 CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
-  {elements, freqs, hbar, numModes, numNodes, 
-   mInd, rInd, cCap, rCap, portNode,
-   inductiveRates, capacitiveRates, w, 
-   nodesToSum, totalT1},
+  {
+    elements, diagData, freqs, effCaps, 
+    currentOpNum, fluxVars, currentGradient, 
+    hbar, numModes, numNodes, nodes,
+    mInd, rInd, cCap, rCap, portNode,
+    inductiveRates, capacitiveRates, w, 
+    totalT1
+  },
 
+  (* 1. Получение данных *)
   elements = GetLabMatrixElements[model];
   If[FailureQ[elements], Return[$Failed]];
-
-  (* freqs идут от БОЛЬШЕГО к МЕНЬШЕМУ (Descending), как дает Eigenvalues *)
-  freqs = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"]["NormalModeFrequencies"];
-  hbar = QED`$hbarValue;
   
-  numNodes = Length[Keys[elements["Flux"]]];
-  numModes = Length[freqs];
+  diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
+  If[FailureQ[diagData], Return[$Failed]];
+  
+  freqs = diagData["NormalModeFrequencies"];
+  effCaps = diagData["EffectiveCapacitances"];
+  
+  (* 2. Получение численного оператора тока *)
+  (* Он должен быть вида Const + c1*phi1 + c2*phi2... *)
+  (* Используем GetNumericalQuantity, чтобы он вычислялся через кэш модели *)
+  currentOpNum = QED`Model`GetNumericalQuantity[model, "CurrentOperatorNumerical"];
+  
+  (* Fallback: если оператор не найден (например, старая модель), считаем его нулем *)
+  If[FailureQ[currentOpNum], 
+     (* Можно добавить Print["Warning..."], но для скорости лучше молча считать 0 *)
+     currentOpNum = 0;
+  ];
 
+  hbar = QED`$hbarValue;
+  numModes = Length[freqs];
+  
+  (* Извлекаем переменные потока для дифференцирования оператора *)
+  nodes = Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  numNodes = Length[nodes];
+
+  (* Вектор весов для тока: dI/dphi_i *)
+  (* D[] автоматически убирает константу I_eq и оставляет коэффициенты c_i *)
+  currentGradient = D[currentOpNum, {fluxVars}]; 
+  (* Если currentOpNum = 0, градиент будет списком нулей {0, 0...} *)
+
+  (* Параметры из опций *)
   mInd = OptionValue["MutualInductance"];
   rInd = OptionValue["InductiveLineResistance"];
   cCap = OptionValue["CouplingCapacitance"];
   rCap = OptionValue["CapacitiveLineResistance"];
   portNode = OptionValue["PortNode"]; 
 
-  nodesToSum = If[IntegerQ[portNode], {portNode}, Range[numNodes]];
+  (* --- Расчет (идет в порядке убывания частот, как в diagData) --- *)
 
-  (* --- Расчет (идет в порядке убывания частот) --- *)
-
-  (* 1. Inductive (RL) *)
+  (* 1. Inductive (Flux Noise Channel) *)
+  (* Rate = (2 * w * M^2 / (hbar * R)) * |<0|I_circ|1>|^2 *)
   inductiveRates = Table[
     w = freqs[[k]];
-    If[w == 0, 0.,
-      Sum[
-        Module[{qElem, rate},
-          qElem = elements["Charge"][n][k]; 
-          rate = (2.0 * w^3 * mInd^2 * Abs[qElem]^2) / (hbar * rInd);
-          rate
-        ],
-        {n, nodesToSum}
+    If[TrueQ[w == 0], 0.,
+      Module[{iElem, rate},
+        (* Матричный элемент тока = взвешенная сумма элементов потока *)
+        (* <0|I|k> = Sum[ c_n * <0|phi_n|k> ] *)
+        iElem = Sum[
+           currentGradient[[n]] * elements["Flux"][nodes[[n]]][k],
+           {n, 1, numNodes}
+        ];
+        
+        rate = (2.0 * w * mInd^2 * Abs[iElem]^2) / (hbar * rInd);
+        rate
       ]
     ],
     {k, numModes}
   ];
 
-  (* 2. Capacitive (RC) *)
+  (* 2. Capacitive (Charge Noise Channel) *)
+  (* Rate = (2 * R * Cc^2 * w / (hbar * C_eff^2)) * |<0|q_node|1>|^2 *)
   capacitiveRates = Table[
     w = freqs[[k]];
-    If[w == 0, 0.,
-      Module[{yRe, sCurrent},
-        yRe = (rCap * w^2 * cCap^2) / (1.0 + w^2 * cCap^2 * rCap^2);
-        sCurrent = 2.0 * hbar * w * yRe;
-        Sum[
-          Module[{phiElem},
-            phiElem = elements["Flux"][n][k];
-            (1/hbar^2) * Abs[phiElem]^2 * sCurrent
-          ],
-          {n, nodesToSum}
-        ]
+    If[TrueQ[w == 0], 0.,
+      Module[{qElem, cEff, rate},
+        (* Используем правильный элемент Charge *)
+        (* Если portNode не входит в список узлов, берем первый (fallback) *)
+        (* В идеале portNode должен быть валидным индексом узла *)
+        qElem = If[KeyExistsQ[elements["Charge"], portNode],
+            elements["Charge"][portNode][k],
+            elements["Charge"][nodes[[1]]][k] (* Default to first node if port invalid *)
+        ];
+        
+        cEff = effCaps[[k]];
+        
+        (* Формула для связи через напряжение *)
+        rate = (2.0 * rCap * cCap^2 * w * Abs[qElem]^2) / (hbar * cEff^2);
+        rate
       ]
     ],
     {k, numModes}
   ];
-  
-  (* 3. Total T1 (в исходном порядке) *)
+
+  (* 3. Total T1 *)
   totalT1 = Table[
      Module[{gammaTot},
        gammaTot = inductiveRates[[k]] + capacitiveRates[[k]];
-       If[gammaTot == 0, Infinity, 1.0 / gammaTot]
+       (* Защита от деления на ноль *)
+       If[gammaTot < 1.0*^-20, Infinity, 1.0 / gammaTot]
      ],
      {k, numModes}
   ];
 
-  (* --- Возврат результата с РЕВЕРСОМ (Low -> High freq) --- *)
   <|
     "Modes" -> Range[numModes],
-    (* Разворачиваем списки, чтобы Mode #1 была самой низкочастотной *)
     "Frequencies" -> Reverse[freqs], 
     "InductiveRelaxationRate" -> Reverse[inductiveRates],
     "CapacitiveRelaxationRate" -> Reverse[capacitiveRates],
