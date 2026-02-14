@@ -24,6 +24,8 @@ Arguments:
 Returns:
   Symbolic expression Ψ(φ₁, φ₂, ...). Includes Jacobian normalization factor.";
 
+BuildCurrentOperator::usage = "BuildCurrentOperator[hamiltonian] computes the symbolic current operator I = -dH/dPhi_ext.";
+
 Begin["`Private`"];
 
 
@@ -353,6 +355,10 @@ BuildHarmonicWavefunction[
 
 BuildHarmonicWavefunction::dim = "Dimension mismatch: `1` has length `2`, expected `3`.";
  
+BuildCurrentOperator[hamiltonian_] := Module[{},
+  (* Используем глобальный символ потока из QED.wl *)
+  Simplify[-D[hamiltonian, QED`$PhiExt]]
+];
 
 End[];
 EndPackage[];

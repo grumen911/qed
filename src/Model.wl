@@ -342,12 +342,13 @@ GenerateDefaultParameters[topology_] :=
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
- 		 potentialGradient},
+ 		 potentialGradient, currentOp},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
   hamiltonian = BuildHamiltonian[lagrangian, capMatrix, topology];
   harmonicHamiltonian = BuildHarmonicHamiltonian[hamiltonian, topology];
+  currentOp = QED`Analytic`BuildCurrentOperator[hamiltonian];
   
   (* Индуктивная матрица (обратная) *)
   indMatrix = BuildInductanceMatrix[hamiltonian, topology];
@@ -360,7 +361,8 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
     "Hamiltonian" -> hamiltonian,
     "HarmonicHamiltonian" -> harmonicHamiltonian,
     "InductanceMatrix" -> indMatrix,
-    "PotentialGradient" -> potentialGradient
+    "PotentialGradient" -> potentialGradient,
+    "CurrentOperator" -> currentOp
   |>
  ];
 
