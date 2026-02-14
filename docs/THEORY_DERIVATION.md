@@ -120,6 +120,29 @@ In protected qubits (like 0-$\pi$ or soft-0-$\pi$), the topology and parameters 
 
 By evaluating the operator strictly in the lab frame, `CalculateFermiRates` automatically respects these protection mechanisms without needing manual selection rules.
 
+### 2.4. Gauge Invariance and Coherent Summation
+
+A fundamental requirement for any physical observable (such as relaxation rate $1/T_1$) is **Gauge Invariance**. The result must not depend on the arbitrary choice of the circuit's ground node or the spanning tree used to define the flux coordinates.
+
+#### The Physical Operator
+Noise sources couple to specific physical variables (branch current $\hat{I}_{branch}$ or node voltage relative to ground). These physical operators are linear combinations of the generalized coordinates (node fluxes $\phi_i$):
+
+$$\hat{O}_{noise} = \sum_i w_i \hat{\phi}_i$$
+
+where weights $w_i$ are determined by the circuit topology (e.g., $w_i = \pm 1$ for inductive coupling, or elements of the inverse capacitance matrix for capacitive coupling).
+
+#### Coherent vs. Incoherent Summation
+To preserve gauge invariance and correctly account for interference, we must sum the transition amplitudes **coherently** (before squaring):
+
+$$\Gamma \propto \left| \langle 0 | \hat{O}_{noise} | k \rangle \right|^2 = \left| \sum_i w_i \langle 0 | \hat{\phi}_i | k \rangle \right|^2$$
+
+**Why this matters:**
+Consider a floating Josephson junction between nodes 1 and 2 with noise coupled to its current $\hat{I} \propto (\hat{\phi}_1 - \hat{\phi}_2)$.
+* **Correct (Coherent):** We calculate $|\langle \phi_1 \rangle - \langle \phi_2 \rangle|^2$. If the mode is antisymmetric ($\phi_1 = -\phi_2$), the signals add up constructively ($2\phi$), yielding a rate $\propto 4|\phi|^2$.
+* **Incorrect (Incoherent):** If we summed probabilities ($\sum |\langle \phi_i \rangle|^2$), we would get $|\phi_1|^2 + |\phi_2|^2 = 2|\phi|^2$. This underestimates the rate by half and violates gauge invariance.
+
+By strictly evaluating the matrix element of the **physical operator** defined in Section 2.1, the code automatically satisfies gauge invariance and captures all interference effects.
+
 ---
 
 ## 3. Pure Dephasing ($T_\varphi$)
