@@ -24,7 +24,9 @@ Arguments:
 Returns:
   Symbolic expression Ψ(φ₁, φ₂, ...). Includes Jacobian normalization factor.";
 
-BuildCurrentOperator::usage = "BuildCurrentOperator[hamiltonian] computes the symbolic current operator I = -dH/dPhi_ext.";
+BuildCurrentOperator::usage = "BuildCurrentOperator[hamiltonian, topology] computes the harmonic approximation (linearized) \
+of the circulating current operator I = -dH/dPhi_ext around the equilibrium flux positions.";
+
 
 Begin["`Private`"];
 
@@ -355,10 +357,32 @@ BuildHarmonicWavefunction[
 
 BuildHarmonicWavefunction::dim = "Dimension mismatch: `1` has length `2`, expected `3`.";
  
-BuildCurrentOperator[hamiltonian_] := Module[{},
-  (* Используем глобальный символ потока из QED.wl *)
-  Simplify[-D[hamiltonian, QED`$PhiExt]]
-];
+BuildCurrentOperator[hamiltonian_, topology_Association] := 
+ Module[{exactCurrent, nodes, fluxVars, minSymbols, deltas, t, currentSeries},
+  
+  (* 1. Точный оператор: I = -dH/dPhi_ext *)
+  exactCurrent = Simplify[-D[hamiltonian, QED`$PhiExt]];
+  
+  (* 2. Подготовка переменных для разложения *)
+  nodes = getIndependentNodes[topology];
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+  
+  (* Отклонения от равновесия: d_i = phi_i - phi_min_i *)
+  deltas = fluxVars - minSymbols;
+  
+  (* 3. Разложение в ряд (Linearized Current)
+     Используем t-scaling (phi -> phi_min + t*delta) и берем 1-й порядок по t.
+     Нулевой порядок (Const) - это статический ток в рабочей точке.
+     Первый порядок (Linear) - это оператор шума, вызывающий переходы.
+  *)
+  currentSeries = Normal @ Series[
+    exactCurrent /. Thread[fluxVars -> (minSymbols + t * deltas)],
+    {t, 0, 1} (* Ограничиваемся линейным членом, т.к. H - квадратичный *)
+  ] /. t -> 1;
+  
+  Simplify[currentSeries]
+ ];
 
 End[];
 EndPackage[];

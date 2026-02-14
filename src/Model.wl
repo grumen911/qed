@@ -348,7 +348,7 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
   hamiltonian = BuildHamiltonian[lagrangian, capMatrix, topology];
   harmonicHamiltonian = BuildHarmonicHamiltonian[hamiltonian, topology];
-  currentOp = QED`Analytic`BuildCurrentOperator[hamiltonian];
+  currentOp = QED`Analytic`BuildCurrentOperator[hamiltonian, topology];
   
   (* Индуктивная матрица (обратная) *)
   indMatrix = BuildInductanceMatrix[hamiltonian, topology];
