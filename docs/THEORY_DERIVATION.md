@@ -121,7 +121,7 @@ $$\Gamma_{\varphi, 1} \approx A_\Phi \left| \frac{\partial \omega_{01}}{\partial
 
 2. **Second Order (Quadratic):** Dominates at BIC/Sweet spots where first derivative vanishes.
 
-$$\Gamma_{\varphi, 2} \approx A_\Phi^2 \left| [cite_start]\frac{\partial^2 \omega_{01}}{\partial \Phi_{\text{ext}}^2 \text{[cite: 1, 98]}} \right| \cdot (\text{const})$$
+$$\Gamma_{\varphi, 2} \approx A_\Phi^2 \left|\frac{\partial^2 \omega_{01}}{\partial \Phi_{\text{ext}}^2 } \right| \cdot (\text{const})$$
 
 ### 3.2. Combined Numerical Formula
 
