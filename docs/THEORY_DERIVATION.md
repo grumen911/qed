@@ -32,6 +32,31 @@ $$\hat{I}_{\text{circ}}^{\text{lin}} \approx \frac{\hat{\phi}_1 - \hat{\phi}_2}{
 
 > **Implementation Note:** In the code, we must calculate the matrix element of this specific operator difference (or the numerical derivative of the Hamiltonian), rather than using the flux of a single node $\hat{\phi}_1$.
 
+### 1.2. The Role of Equilibrium Fluxes ($\bm{\phi}_{\text{eq}}$)
+
+The equilibrium flux configuration $\bm{\phi}_{\text{eq}}$ (where $\nabla U(\bm{\phi}) = 0$) plays a dual role: it defines the operating point of the qubit and determines the **effective coupling strength** to the noise source.
+
+The full non-linear current operator through a Josephson junction with critical current $I_c$ is:
+
+$$\hat{I}_{\text{JJ}} = I_c \sin\left( \frac{\hat{\phi}_i - \hat{\phi}_j + \Phi_{\text{ext}}}{\phi_0} \right)$$
+
+In the harmonic approximation used by the code, we decompose the node fluxes into a classical equilibrium part and a quantum fluctuation part: $\hat{\phi} = \phi_{\text{eq}} + \delta\hat{\phi}$. Expanding the current operator to the first order in $\delta\hat{\phi}$:
+
+$$\hat{I}_{\text{JJ}} \approx I_c \sin(\varphi_{\text{dc}}) + \underbrace{\left[ \frac{I_c}{\phi_0} \cos(\varphi_{\text{dc}}) \right] (\delta\hat{\phi}_i - \delta\hat{\phi}_j)}_{\text{Noise Coupling Operator}}$$
+
+Here, $\varphi_{\text{dc}} = (\phi_{i,\text{eq}} - \phi_{j,\text{eq}} + \Phi_{\text{ext}})/\phi_0$ is the total phase bias across the junction.
+
+**Crucial Implications for Protection:**
+
+1. **DC Term:** The first term is a static current expectation value. It shifts the energy but does not induce transitions ($T_1$ processes).
+2. **Coupling Coefficient:** The prefactor $\alpha = \frac{I_c}{\phi_0} \cos(\varphi_{\text{dc}})$ acts as a tunable coupling constant.
+* This coefficient is effectively the inverse kinetic inductance: $\alpha = 1/L_J(\bm{\phi}_{\text{eq}})$.
+* **Protection Mechanism:** If the circuit parameters and flux bias are tuned such that $\cos(\varphi_{\text{dc}}) \to 0$ (or if interference cancels this term globally across multiple junctions), the coupling to the external noise vanishes.
+
+
+
+**Conclusion:** The equilibrium search (`FindPotentialMinimum`) is not just for finding eigenfrequencies; it is strictly necessary to calculate the correct prefactors for the noise operators. Calculating matrix elements of $\delta\hat{\phi}$ without this $\cos(\varphi_{\text{dc}})$ weight would yield incorrect relaxation rates.
+
 ---
 
 ## 2. Depolarization Rates ($T_1$)
