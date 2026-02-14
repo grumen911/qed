@@ -459,6 +459,23 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     $CurrentModel = ReplacePart[$CurrentModel, {"Numerical", "Cache"} -> cache];
     
     (* ════════════════════════════════════════════════════════════ *)
+    (*         Шаг 2a: Численный оператор тока                      *)
+    (* ════════════════════════════════════════════════════════════ *)
+
+    Module[{opSym, opNum},
+        (* Извлекаем символьный оператор (если он был посчитан в Analytic) *)
+        opSym = Lookup[analytical, "CurrentOperator", 0];
+        
+        (* Подставляем числа: параметры EJ, C, PhiExt И найденные phi_min *)
+        opNum = opSym /. subRules;
+        
+        cache["CurrentOperatorNumerical"] = <|
+            "State" -> "Ready", 
+            "Value" -> opNum
+        |>;
+    ];  
+
+    (* ════════════════════════════════════════════════════════════ *)
     (* Шаг 3: Остальные матрицы (ТЕПЕРЬ с φ_min!)                   *)
     (* ════════════════════════════════════════════════════════════ *)
     
@@ -713,7 +730,7 @@ GetWaveFunction[model_Association, quantumNumbers_List] :=
 UpdateModelWithRules[model_Association, rules_List] := Module[
     {
         analytical, capNum, indNum, invCap, invInd, diag, 
-        newCache, existingCache, newModel
+        newCache, existingCache, newModel, currentOpNum
     },
 
     analytical = model["Analytical"];
@@ -722,6 +739,7 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
     (* 1. Вычисляем матрицы (быстрая подстановка) *)
     capNum = analytical["CapacitanceMatrix"] /. rules;
     indNum = analytical["InductanceMatrix"] /. rules; (* Это L^-1 ! *)
+    currentOpNum = Lookup[analytical, "CurrentOperator", 0] /. rules;
 
     (* 2. Обращаем матрицы *)
     (* invCap = C^-1 *)
@@ -742,6 +760,7 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
         "InductanceMatrixInverseNumerical" -> <|"State" -> "Ready", "Value" -> indNum|>, (* L^-1 *)
         "InverseCapacitanceMatrix"         -> <|"State" -> "Ready", "Value" -> invCap|>, (* C^-1 *)
         "InductanceMatrixNumerical"        -> <|"State" -> "Ready", "Value" -> invInd|>, (* L *)
+        "CurrentOperatorNumerical"         -> <|"State" -> "Ready", "Value" -> currentOpNum|>,
         "HarmonicDiagonalization"          -> <|"State" -> "Ready", "Value" -> diag|>,
         
         "PlasmonFrequencies" -> <|
