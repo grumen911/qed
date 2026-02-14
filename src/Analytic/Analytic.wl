@@ -393,54 +393,55 @@ BuildAnharmonicPart[hamiltonian_, topology_Association, order_Integer:4] :=
   Simplify[(seriesFull - seriesHarmonic) /. t -> 1]
  ];
 
-
-(* --- Переход к операторам (Квантование) --- *)
+(* 2. Квантование (С УСИЛЕННЫМ РАСКРЫТИЕМ СТЕПЕНЕЙ) *)
 QuantizeToLadderOperators[expr_, topology_Association, T_?MatrixQ, freqs_List, caps_List] := 
- Module[{nodes, fluxVars, minFluxVars, deltaPhi, nDOF, qSyms, phiExpr, qRules, ladderExpr,
-         CreateOp, AnnihilateOp, exprWithNC},
+ Module[{nodes, nDOF, qSyms, deltaPhi, phiExpr, qRules, ladderExpr, 
+         CreateOp, AnnihilateOp, exprExpanded},
   
   nodes = QED`Analytic`Private`getIndependentNodes[topology];
   nDOF = Length[nodes];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  minFluxVars = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
   
   CreateOp = Symbol["QED`Analytic`Create"];
   AnnihilateOp = Symbol["QED`Analytic`Annihilate"];
 
-  (* Временные символы для мод *)
+  (* Временные символы q *)
   qSyms = Table[Unique["q"], {nDOF}]; 
   deltaPhi = T . qSyms;
   
-  (* 1. Подставляем моды в компактное выражение *)
-  (* (phi - phi_min) заменяется на (T.q) *)
-  phiExpr = expr /. Thread[fluxVars -> (minFluxVars + deltaPhi)];
+  (* Подстановка: phi -> phi_min + T.q *)
+  phiExpr = expr /. Thread[(Subscript[QED`$FluxSymbol, #] & /@ nodes) -> 
+                           (Subscript[QED`$FluxSymbol, "min", #] & /@ nodes) + deltaPhi];
   
-  (* 2. Заменяем q -> (a + a+) *)
+  (* Правила замены q -> x_zpf * (a + ad) *)
   qRules = Table[
-    Module[{xZpf, opSum},
+     Module[{xZpf},
+       (* Используем ЧИСЛЕННОЕ hbar, чтобы избежать проблем с размерностью *)
       xZpf = Sqrt[QED`$hbarValue / (2 * caps[[i]] * freqs[[i]])];
-      opSum = xZpf * (AnnihilateOp[i] ** 1 + CreateOp[i] ** 1);
-      qSyms[[i]] -> opSum
+       qSyms[[i]] -> xZpf * (AnnihilateOp[i] ** 1 + CreateOp[i] ** 1)
     ],
     {i, nDOF}
   ];
   
   ladderExpr = phiExpr /. qRules;
   
-  (* 3. ПРЕВРАЩАЕМ СТЕПЕНИ В НЕКОММУТАТИВНЫЕ ПРОИЗВЕДЕНИЯ *)
-  exprWithNC = ladderExpr /. Power[b_, n_Integer?Positive] :> NonCommutativeMultiply @@ ConstantArray[b, n];
-  
-  (* 4. Раскрываем скобки *)
-  ExpandNonCommutative[exprWithNC /. (x_ ** 1) -> x]
+  (* ГЛАВНОЕ ИСПРАВЛЕНИЕ: Принудительное раскрытие Power[..., n] в цепочку ** *)
+  exprExpanded = ladderExpr //. {
+     Power[base_, n_Integer?Positive] :> (NonCommutativeMultiply @@ ConstantArray[base, n]),
+     (a_ * b_) ** c_ :> a * (b ** c) /; NumericQ[a],
+     a_ ** (b_ * c_) :> b * (a ** c) /; NumericQ[b],
+     NonCommutativeMultiply[x_] :> x
+  };
+
+  (* Раскрытие скобок и уборка лишних единиц *)
+  ExpandNonCommutative[exprExpanded /. (x_ ** 1) -> x]
  ];
 
-
-(* Хелпер для раскрытия некоммутативных скобок *)
 ExpandNonCommutative[expr_] := 
  Distribute[expr, Plus, NonCommutativeMultiply] //. {
    (a_ * b_) ** c_ :> a * (b ** c) /; NumericQ[a],
    a_ ** (b_ * c_) :> b * (a ** c) /; NumericQ[b],
-   NonCommutativeMultiply[x_] :> x
+   (a_ + b_) ** c_ :> a ** c + b ** c,
+   a_ ** (b_ + c_) :> a ** b + a ** c
  };
 
 
