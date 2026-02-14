@@ -670,10 +670,11 @@ PlasmonFrequenciesVsFlux[model_Association] := Module[
   nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   
-  (* Базовые правила подстановки БЕЗ внешнего потока и φ_min *)
+  (* Удаляем И отложенные (:>), И мгновенные (->) правила *)
   rulesBase = DeleteCases[
     model["SubstitutionRules"],
-    (phiExtSym :> _) | (Subscript[QED`$FluxSymbol, "min", _] :> _)
+    (phiExtSym :> _) | (phiExtSym -> _) | 
+    (Subscript[QED`$FluxSymbol, "min", _] :> _) | (Subscript[QED`$FluxSymbol, "min", _] -> _)
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
