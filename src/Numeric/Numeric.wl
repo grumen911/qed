@@ -1214,18 +1214,16 @@ GetLabMatrixElements[model_Association] := Module[
 
 CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   {
-    elements, diagData, freqs, effCaps, 
+    elements, diagData, freqs, 
     currentOpNum, fluxVars, currentGradient, 
+    voltageOpsNum, voltageOp, chargeVars, voltageGradient, (* NEW *)
     hbar, numModes, numNodes, nodes,
     mInd, rInd, cCap, rCap, portNode,
     inductiveRates, capacitiveRates, w, 
     totalT1
   },
 
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* 1. PREPARE DATA                                                  *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
+  (* 1. PREPARE DATA *)
   elements = GetLabMatrixElements[model];
   If[FailureQ[elements], Return[$Failed]];
   
@@ -1233,37 +1231,48 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
   If[FailureQ[diagData], Return[$Failed]];
   
   freqs = diagData["NormalModeFrequencies"];
-  effCaps = diagData["EffectiveCapacitances"];
+  (* effCaps больше не нужны явно, они "зашиты" в оператор напряжения *)
   
-  (* Retrieve Cached Numerical Current Operator: I(phi) = I_dc + c1*phi1 + c2*phi2... *)
-  currentOpNum = QED`Model`GetNumericalQuantity[model, "CurrentOperatorNumerical"];
-  
-  If[FailureQ[currentOpNum], 
-     currentOpNum = 0; (* Fallback for old models *)
-  ];
-
   hbar = QED`$hbarValue;
   numModes = Length[freqs];
   
-  (* Extract flux variables to compute gradients (sensitivities) *)
   nodes = Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   numNodes = Length[nodes];
+  
+  (* Variables for differentiation *)
+  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+  chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes; (* NEW *)
 
-  (* Compute weights w_i = dI/dphi_i. 
-     Since the operator is linearized, these are constants. *)
+  (* --- LOAD OPERATORS --- *)
+  
+  (* A. Current Operator *)
+  currentOpNum = QED`Model`GetNumericalQuantity[model, "CurrentOperatorNumerical"];
+  If[FailureQ[currentOpNum], currentOpNum = 0];
   currentGradient = D[currentOpNum, {fluxVars}]; 
+  
+  (* B. Voltage Operators [NEW] *)
+  voltageOpsNum = QED`Model`GetNumericalQuantity[model, "VoltageOperatorsNumerical"];
+  If[FailureQ[voltageOpsNum], voltageOpsNum = <||>];
+  
+  (* Extract parameters *)
+  portNode = OptionValue["PortNode"]; 
+  (* Fallback to first node if portNode is not in keys *)
+  voltageOp = If[KeyExistsQ[voltageOpsNum, portNode], 
+      voltageOpsNum[portNode], 
+      (* Fallback: try to construct naive V = q/C approx or just 0 *)
+      0 
+  ];
+  
+  (* Compute weights w_i = dV/dq_i (row of inverse capacitance matrix) *)
+  voltageGradient = D[voltageOp, {chargeVars}];
 
-  (* Extract Options *)
   mInd = OptionValue["MutualInductance"];
   rInd = OptionValue["InductiveLineResistance"];
   cCap = OptionValue["CouplingCapacitance"];
   rCap = OptionValue["CapacitiveLineResistance"];
-  portNode = OptionValue["PortNode"]; 
 
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* 2. CALCULATE RATES (Loop over modes)                             *)
-  (* ════════════════════════════════════════════════════════════════ *)
+
+  (* 2. CALCULATE RATES *)
 
   (* A. Inductive Channel (Flux Noise)
      Interaction: H_int = M * I_circ * I_bias
@@ -1273,18 +1282,8 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     w = freqs[[k]];
     If[TrueQ[w == 0], 0.,
       Module[{iElem, rate},
-        (* CRITICAL: Calculate <0|I|k> in the Lab Frame.
-           iElem = Sum[ (dI/dphi_n) * <0|phi_n|k> ]
-           
-           This summation captures DESTRUCTIVE INTERFERENCE. 
-           For protected qubits (e.g. 0-pi), contributions from different nodes 
-           often have opposite signs and cancel each other out, leading to small T1.
-        *)
-        iElem = Sum[
-           currentGradient[[n]] * elements["Flux"][nodes[[n]]][k],
-           {n, 1, numNodes}
-        ];
-        
+        (* <0|I|k> = Sum[ dI/dphi_n * <phi_n> ] *)
+        iElem = Sum[currentGradient[[n]] * elements["Flux"][nodes[[n]]][k], {n, 1, numNodes}];
         rate = (2.0 * w * mInd^2 * Abs[iElem]^2) / (hbar * rInd);
         rate
       ]
@@ -1292,23 +1291,21 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     {k, numModes}
   ];
 
-  (* B. Capacitive Channel (Charge Noise)
-     Interaction: H_int = q_node * V_noise_eff
-     Rate: Gamma = (2 * R * Cc^2 * w / (hbar * C_eff^2)) * |<0|q_node|k>|^2
-  *)
+  (* Capacitive (Charge Noise) *)
+  (* Rate = (2 * R * Cc^2 * w / hbar) * |<0|V_node|k>|^2 *)
   capacitiveRates = Table[
     w = freqs[[k]];
     If[TrueQ[w == 0], 0.,
-      Module[{qElem, cEff, rate},
-        (* Use Charge matrix element directly *)
-        qElem = If[KeyExistsQ[elements["Charge"], portNode],
-            elements["Charge"][portNode][k],
-            elements["Charge"][nodes[[1]]][k]
+      Module[{vElem, rate},
+        (* <0|V|k> = Sum[ dV/dq_n * <q_n> ] *)
+        (* This accounts for the fact that V_node depends on charges on ALL nodes *)
+        vElem = Sum[
+            voltageGradient[[n]] * elements["Charge"][nodes[[n]]][k], 
+            {n, 1, numNodes}
         ];
         
-        cEff = effCaps[[k]];
-        
-        rate = (2.0 * rCap * cCap^2 * w * Abs[qElem]^2) / (hbar * cEff^2);
+        (* Note: C_eff is absorbed into vElem (since V ~ q/C_eff) *)
+        rate = (2.0 * rCap * cCap^2 * w * Abs[vElem]^2) / hbar;
         rate
       ]
     ],
