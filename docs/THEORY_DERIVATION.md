@@ -101,6 +101,25 @@ $$\boxed{ \Gamma_{\text{cap}} = \frac{2 R C_c^2 \omega_{01}}{\hbar C_{\text{node
 
 * **Dependence:** $\Gamma \propto \omega \cdot |q|^2 \propto \omega \cdot \omega \to \omega^2$ (or $\omega^3$ depending on specific admittance).
 
+### 2.3. Interference in Laboratory Coordinates
+
+A critical feature of the implementation is the calculation of matrix elements in the **Laboratory Frame** (node fluxes $\phi_i$) rather than the Normal Mode frame.
+
+The noise operator $\hat{O}_{\text{noise}}$ typically couples to a specific physical element (e.g., a bias line coupled to inductor $L_1$ between nodes $A$ and $B$). Even if the qubit is encoded in a specific "mode" (e.g., the differential mode), the physical noise source sees a superposition of all modes at the coupling port.
+
+The transition matrix element is calculated as a weighted sum over all circuit nodes:
+
+$$\langle 0 | \hat{O}_{\text{noise}} | 1 \rangle = \sum_{n \in \text{nodes}} \frac{\partial \hat{O}}{\partial \phi_n} \langle 0 | \hat{\phi}_n | 1 \rangle$$
+
+**Why this is powerful:**
+This summation naturally captures **Destructive Interference**.
+In protected qubits (like 0-$\pi$ or soft-0-$\pi$), the topology and parameters are chosen such that the contributions from different nodes cancel each other out for the protected transition.
+
+* **Constructive Interference:** Amplitudes add up $\to$ Fast decay (Unprotected mode).
+* **Destructive Interference:** Amplitudes cancel ($\sum \approx 0$) $\to$ Long $T_1$ (Protected state).
+
+By evaluating the operator strictly in the lab frame, `CalculateFermiRates` automatically respects these protection mechanisms without needing manual selection rules.
+
 ---
 
 ## 3. Pure Dephasing ($T_\varphi$)
