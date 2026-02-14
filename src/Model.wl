@@ -342,13 +342,19 @@ GenerateDefaultParameters[topology_] :=
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
- 		 potentialGradient, currentOp},
+ 		 potentialGradient, currentOp, voltageOperatorsSym, nodes},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
   hamiltonian = BuildHamiltonian[lagrangian, capMatrix, topology];
   harmonicHamiltonian = BuildHarmonicHamiltonian[hamiltonian, topology];
   currentOp = QED`Analytic`BuildCurrentOperator[hamiltonian, topology];
+  
+  nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+  voltageOperatorsSym = AssociationMap[
+    Function[n, QED`Analytic`BuildVoltageOperator[hamiltonian, topology, n]],
+    nodes
+  ];
   
   (* Индуктивная матрица (обратная) *)
   indMatrix = BuildInductanceMatrix[hamiltonian, topology];
@@ -362,7 +368,8 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
     "HarmonicHamiltonian" -> harmonicHamiltonian,
     "InductanceMatrix" -> indMatrix,
     "PotentialGradient" -> potentialGradient,
-    "CurrentOperator" -> currentOp
+    "CurrentOperator" -> currentOp,
+    "VoltageOperators" -> voltageOperatorsSym
   |>
  ];
 
@@ -474,6 +481,18 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
             "Value" -> opNum
         |>;
     ];  
+    (* Шаг 2b: Численные операторы напряжения *)
+    Module[{opsSym, opsNum},
+        opsSym = Lookup[analytical, "VoltageOperators", <||>];
+        
+        (* Подставляем параметры (C, L, ...) и равновесные потоки *)
+        opsNum = opsSym /. subRules;
+        
+        cache["VoltageOperatorsNumerical"] = <|
+            "State" -> "Ready", 
+            "Value" -> opsNum
+        |>;
+    ];
 
     (* ════════════════════════════════════════════════════════════ *)
     (* Шаг 3: Остальные матрицы (ТЕПЕРЬ с φ_min!)                   *)
@@ -730,7 +749,8 @@ GetWaveFunction[model_Association, quantumNumbers_List] :=
 UpdateModelWithRules[model_Association, rules_List] := Module[
     {
         analytical, capNum, indNum, invCap, invInd, diag, 
-        newCache, existingCache, newModel, currentOpNum
+        newCache, existingCache, newModel, currentOpNum,
+        voltageOpsNum
     },
 
     analytical = model["Analytical"];
@@ -740,6 +760,7 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
     capNum = analytical["CapacitanceMatrix"] /. rules;
     indNum = analytical["InductanceMatrix"] /. rules; (* Это L^-1 ! *)
     currentOpNum = Lookup[analytical, "CurrentOperator", 0] /. rules;
+    voltageOpsNum = Lookup[analytical, "VoltageOperators", <||>] /. rules;
 
     (* 2. Обращаем матрицы *)
     (* invCap = C^-1 *)
@@ -761,6 +782,7 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
         "InverseCapacitanceMatrix"         -> <|"State" -> "Ready", "Value" -> invCap|>, (* C^-1 *)
         "InductanceMatrixNumerical"        -> <|"State" -> "Ready", "Value" -> invInd|>, (* L *)
         "CurrentOperatorNumerical"         -> <|"State" -> "Ready", "Value" -> currentOpNum|>,
+        "VoltageOperatorsNumerical"        -> <|"State" -> "Ready", "Value" -> voltageOpsNum|>,
         "HarmonicDiagonalization"          -> <|"State" -> "Ready", "Value" -> diag|>,
         
         "PlasmonFrequencies" -> <|

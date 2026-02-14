@@ -27,6 +27,9 @@ Returns:
 BuildCurrentOperator::usage = "BuildCurrentOperator[hamiltonian, topology] computes the harmonic approximation (linearized) \
 of the circulating current operator I = -dH/dPhi_ext around the equilibrium flux positions.";
 
+BuildVoltageOperator::usage = "BuildVoltageOperator[hamiltonian, topology, nodeIndex] computes the symbolic voltage operator \
+V = dH/dq for a specific node, capturing the full capacitive coupling structure.";
+
 
 Begin["`Private`"];
 
@@ -383,6 +386,19 @@ BuildCurrentOperator[hamiltonian_, topology_Association] :=
   
   Simplify[currentSeries]
  ];
+
+BuildVoltageOperator[hamiltonian_, topology_, nodeIndex_Integer] := Module[
+  {chargeSym},
+  
+  (* Символ заряда для данного узла *)
+  chargeSym = Subscript[QED`$ChargeSymbol, nodeIndex];
+  
+  (* Согласно уравнениям Гамильтона: V_node = dH / dq_node.
+     Для стандартных цепей это вернет линейную комбинацию зарядов: Sum[(C^-1)_nj * q_j].
+     Для нелинейных емкостей это вернет корректный нелинейный оператор.
+  *)
+  Simplify[D[hamiltonian, chargeSym]]
+];
 
 End[];
 EndPackage[];
