@@ -362,28 +362,35 @@ BuildHarmonicWavefunction[
 
 BuildHarmonicWavefunction::dim = "Dimension mismatch: `1` has length `2`, expected `3`.";
 
-(* --- Выделение ангармонической части --- *)
+(* === 1. Выделение ангармонической части (Исправлено по образцу BuildHarmonicHamiltonian) === *)
 BuildAnharmonicPart[hamiltonian_, topology_Association, order_Integer:4] := 
- Module[{nodes, fluxVars, minSymbols, deltas, t, pot, series},
+ Module[{nodes, fluxVars, minSymbols, deltas, t, pot, seriesFull, seriesHarmonic},
   
+  (* ВАЖНО: Используем ту же локальную функцию, что и BuildHarmonicHamiltonian *)
   nodes = getIndependentNodes[topology];
+  
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
   deltas = fluxVars - minSymbols;
   
-  (* Работаем только с потенциальной энергией (кинетическая квадратична) *)
+  (* Убираем зарядовую часть *)
   pot = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
   
-  (* Параметризуем отклонение от минимума *)
-  series = Normal @ Series[
+  (* 1. Полное разложение (до порядка order) *)
+  (* Используем t-scaling, который точно работает в BuildHarmonicHamiltonian *)
+  seriesFull = Normal @ Series[
     pot /. Thread[fluxVars -> (minSymbols + t * deltas)],
     {t, 0, order}
   ];
   
-  (* Оставляем только члены старше 2-го порядка (ангармонизм) *)
-  series = Select[series, Exponent[#, t] > 2 &];
+  (* 2. Гармоническое разложение (до 2-го порядка) *)
+  seriesHarmonic = Normal @ Series[
+    pot /. Thread[fluxVars -> (minSymbols + t * deltas)],
+    {t, 0, 2}
+  ];
   
-  Simplify[series /. t -> 1]
+  (* 3. Вычитание: (H_full - H_harmonic) дает чисто ангармонические члены *)
+  Simplify[(seriesFull - seriesHarmonic) /. t -> 1]
  ];
 
 
