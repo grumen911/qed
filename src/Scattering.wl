@@ -2,26 +2,22 @@ BeginPackage["QED`Scattering`", {"QED`Model`"}];
 
 (* Публичные функции *)
 BuildSymbolicScattering::usage = 
-  "BuildSymbolicScattering[topology, options] строит символьную S-матрицу и матрицу проводимости (Y).
-   Использует унифицированные символы: Subscript[\"C\", name] и Subscript[\"L\", name] для всех типов компонентов.
-   Опции:
-     Ports -> {nodeIdx1, nodeIdx2} (по умолчанию: {первый, последний})
-     ReferenceImpedance -> 50 (Ом)
-     IgnoreJunctionCapacitance -> False
-   Возвращает ассоциацию с символьными матрицами и списком сгенерированных символов.";
+  "BuildSymbolicScattering[topology, options] строит символьную S-матрицу.
+   Возвращает:
+     \"SMatrix\" - упрощенная рациональная функция (для аналитики/полюсов).
+     \"SMatrixRaw\" - необработанная вложенная дробь (для численной стабильности).";
 
 ComputeNumericalScattering::usage = 
-  "ComputeNumericalScattering[model, frequencyList] вычисляет численные значения S-матрицы 
-   для списка частот. Автоматически связывает символы из топологии со значениями в Primary.";
+  "ComputeNumericalScattering[model, frequencyList] вычисляет S-параметры.
+   Использует SMatrixRaw для максимальной точности.";
 
 GetEffectiveInductances::usage = 
-  "GetEffectiveInductances[model] возвращает список правил для эффективных индуктивностей 
-   джозефсоновских переходов в рабочей точке.";
+  "GetEffectiveInductances[model] возвращает правила для L_eff джозефсоновских переходов.";
 
 Begin["`Private`"];
 
 (* ════════════════════════════════════════════════════════════════ *)
-(* СИМВОЛЬНОЕ ПОСТРОЕНИЕ (ANALYTIC)                    *)
+(* СИМВОЛЬНОЕ ПОСТРОЕНИЕ *)
 (* ════════════════════════════════════════════════════════════════ *)
 
 Options[BuildSymbolicScattering] = {
@@ -34,10 +30,9 @@ BuildSymbolicScattering[topology_Association, opts : OptionsPattern[]] :=
  Module[{
     nodes, groundNode, activeNodes, nNodes,
     components, yMatrix, portIndices, z0, ignoreCap,
-    sVar, (* s = i*omega *)
-    internalIndices, 
+    sVar, internalIndices, 
     Ypp, Ypi, Yip, Yii, Yschur, 
-    unitMatrix, sMatrix,
+    unitMatrix, rawSMatrix, sMatrix,
     generatedSymbols
  },
   
@@ -59,7 +54,6 @@ BuildSymbolicScattering[topology_Association, opts : OptionsPattern[]] :=
   sVar = Symbol["s"]; 
   
   yMatrix = ConstantArray[0, {nNodes, nNodes}];
-  generatedSymbols = <||>;
   
   Do[
     Module[{type, n1, n2, name, u, v, yComp, symC, symL},
@@ -70,30 +64,22 @@ BuildSymbolicScattering[topology_Association, opts : OptionsPattern[]] :=
       
       If[u == 0 && v == 0, Continue[]];
 
-      (* УПРОЩЕНИЕ: Используем только "C" и "L" как заголовки *)
       yComp = Switch[type,
         "Capacitor",
-          symC = Subscript["C", name];
-          sVar * symC,
+          sVar * Subscript["C", name],
           
         "Inductor",
-          symL = Subscript["L", name];
-          1 / (sVar * symL),
+          1 / (sVar * Subscript["L", name]),
           
         "JosephsonJunction",
-          (* Для JJ: L - это эффективная индуктивность, C - собственная емкость *)
-          symL = Subscript["L", name]; 
-          
           If[ignoreCap,
-             1 / (sVar * symL),
-             symC = Subscript["C", name];
-             1 / (sVar * symL) + sVar * symC
+             1 / (sVar * Subscript["L", name]),
+             1 / (sVar * Subscript["L", name]) + sVar * Subscript["C", name]
           ],
           
         _, 0
       ];
       
-      (* Заполнение матрицы *)
       If[u > 0, yMatrix[[u, u]] += yComp];
       If[v > 0, yMatrix[[v, v]] += yComp];
       If[u > 0 && v > 0, 
@@ -104,7 +90,6 @@ BuildSymbolicScattering[topology_Association, opts : OptionsPattern[]] :=
     {comp, components}
   ];
 
-  (* Редукция (Schur Complement) *)
   internalIndices = Complement[Range[nNodes], portIndices];
   
   If[Length[internalIndices] > 0,
@@ -118,17 +103,19 @@ BuildSymbolicScattering[topology_Association, opts : OptionsPattern[]] :=
     Yschur = yMatrix[[portIndices, portIndices]];
   ];
 
-  (* S-матрица *)
   unitMatrix = IdentityMatrix[Length[portIndices]];
   
-  sMatrix = Simplify[
-    (unitMatrix - z0 * Yschur) . Inverse[unitMatrix + z0 * Yschur]
-  ];
+  (* 1. Raw S-Matrix (для чисел) *)
+  rawSMatrix = (unitMatrix - z0 * Yschur) . Inverse[unitMatrix + z0 * Yschur];
+  
+  (* 2. Simplified S-Matrix (для аналитики) *)
+  sMatrix = Map[Together, rawSMatrix, {2}];
 
   <|
     "YMatrixFull" -> yMatrix,
     "YMatrixReduced" -> Yschur,
-    "SMatrix" -> sMatrix,
+    "SMatrix" -> sMatrix,       (* P(s)/Q(s) *)
+    "SMatrixRaw" -> rawSMatrix, (* Nested fractions *)
     "FrequencyVariable" -> sVar,
     "PortIndices" -> portIndices,
     "ActiveNodes" -> activeNodes
@@ -137,7 +124,7 @@ BuildSymbolicScattering[topology_Association, opts : OptionsPattern[]] :=
 
 
 (* ════════════════════════════════════════════════════════════════ *)
-(* ЧИСЛЕННАЯ ПОДСТАНОВКА (NUMERICAL)                   *)
+(* ЧИСЛЕННАЯ ПОДСТАНОВКА *)
 (* ════════════════════════════════════════════════════════════════ *)
 
 GetEffectiveInductances[model_Association] := 
@@ -172,7 +159,6 @@ GetEffectiveInductances[model_Association] :=
 
          lVal = (phi0Val / (2 * Pi))^2 / (ejVal * cosPhi);
          
-         (* УПРОЩЕНИЕ: Теперь мы возвращаем правило для Subscript["L", name] *)
          Subscript["L", name] -> lVal
      ]
   ]
@@ -181,7 +167,7 @@ GetEffectiveInductances[model_Association] :=
 
 ComputeNumericalScattering[model_Association, frequencyList_List] := 
  Module[{symScattering, components, primary, valRules, lJeffRules, 
-        sMatrixSym, sVarSym, sMatrixNumFunction, omegaList},
+        sMatrixExpr, sVarSym, sMatrixNumFunction, omegaList},
   
   symScattering = BuildSymbolicScattering[model["Topology"]];
   
@@ -202,7 +188,6 @@ ComputeNumericalScattering[model_Association, frequencyList_List] :=
              Subscript["L", name] -> p["L"]["Value"],
           
           "JosephsonJunction", 
-             (* Для JJ используем "C" вместо "CJ" для согласованности *)
              Subscript["C", name] -> p["CJ"]["Value"],
              
           _, {}
@@ -215,10 +200,11 @@ ComputeNumericalScattering[model_Association, frequencyList_List] :=
   lJeffRules = GetEffectiveInductances[model];
   If[lJeffRules === $Failed, Return[$Failed]];
   
-  sMatrixSym = symScattering["SMatrix"];
+  (* ВАЖНО: Используем Raw матрицу для численной подстановки! *)
+  sMatrixExpr = symScattering["SMatrixRaw"];
   sVarSym = symScattering["FrequencyVariable"];
   
-  sMatrixNumFunction = sMatrixSym /. Join[valRules, lJeffRules];
+  sMatrixNumFunction = sMatrixExpr /. Join[valRules, lJeffRules];
   
   omegaList = I * 2 * Pi * frequencyList;
   
