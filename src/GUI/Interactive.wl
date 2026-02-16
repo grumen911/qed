@@ -1,9 +1,16 @@
 BeginPackage["QED`Interactive`", {"QED`Model`", "QED`Numeric`"}];
 
-QubitDashboard::usage = "QubitDashboard[{models..}] - интерактивная панель управления для списка моделей.";
-RegisterPlot::usage = "RegisterPlot[id, label, type, computeFunc] регистрирует новый тип графика.";
+QubitDashboard::usage = "QubitDashboard[{models..}] - interactive dashboard for model list.";
+RegisterPlot::usage = "RegisterPlot[id, label, type, computeFunc] registers a new plot type.";
+
+$DefaultExportPath::usage = "$DefaultExportPath specifies the default directory for saving plots. 
+If the path is invalid or the directory does not exist, the system default (or last used directory) is used.";
 
 Begin["`Private`"];
+
+(* === USER CONFIGURATION === *)
+(* Change the value below to your custom path, e.g., "C:\\Users\\Me\\Thesis\\Figures" *)
+$DefaultExportPath = "C:\\Users\\rudia\\git\\2026-bic-bridge\\figures";
 
 (* ═══════════════════════════════════════════════════════════════ *)
 (* 1. BACKEND: PLOT REGISTRY & COMPUTE SYSTEM *)
@@ -593,12 +600,25 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
     ]
   ];
 
+(* Векторная иконка настроек (Draws a gear) *)
+makeGearIcon[color_] := Graphics[{
+    color, 
+    Disk[{0, 0}, 0.7], 
+    Table[
+        Rotate[
+            {EdgeForm[None], Rectangle[{-0.15, 0.6}, {0.15, 0.95}]}, 
+            ang, {0, 0}
+        ], 
+        {ang, 0, 2 Pi - 0.1, Pi/4}
+    ],
+    White, Disk[{0, 0}, 0.3]
+}, ImageSize -> 18, PlotRange -> {{-1, 1}, {-1, 1}}, BaselinePosition -> Center];
+
+ExtractGraphicOnly[expr_] := Replace[expr, Legended[g_, _] :> g];
+
 (* ═══════════════════════════════════════════════════════════════ *)
 (* 3. CORE: QUBIT DASHBOARD *)
 (* ═══════════════════════════════════════════════════════════════ *)
-
-(* Добавляем хелпер перед QubitDashboard *)
-ExtractGraphicOnly[expr_] := Replace[expr, Legended[g_, _] :> g];
 
 (* Модифицированный QubitDashboard *)
 QubitDashboard[modelsStack : {__Association}] := DynamicModule[
@@ -609,7 +629,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     overlayBasket = <||>, (* <| "PlotId" -> {g1, g2...} |> *)
 
     showExportSettings = False,
-    exportPreset = "Screen", (* Default *)
+    exportPreset = "Publication", (* Default *)
 
     performUpdate
   },
@@ -660,9 +680,9 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       
       (* RIGHT PANEL: Plot Area *)
       Column[{
-
-        (* HEADER: Selector + Overlay Controls *)
+        (* 1. UNIFIED TOOLBAR: Type | Overlay | Export *)
         Row[{
+           (* A. Plot Type Selector *)
            "Plot Type: ",
            PopupMenu[Dynamic[selectedPlotId, 
              Function[{v}, 
@@ -675,24 +695,18 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
              Keys[$PlotRegistry]
            ],
            
-           Spacer[30],
+           Spacer[20],
            
-           (* OVERLAY CONTROLS *)
+           (* B. OVERLAY CONTROLS *)
            Button["Add to Overlay",
              Module[{curr},
                curr = plotCache[selectedPlotId];
                If[!MissingQ[curr] && !FailureQ[curr],
-                  (* Инициализируем список, если его нет *)
                   If[!KeyExistsQ[overlayBasket, selectedPlotId], overlayBasket[selectedPlotId] = {}];
-                  
-                  (* Используем исправленный ExtractGraphicOnly *)
                   AppendTo[overlayBasket[selectedPlotId], ExtractGraphicOnly[curr]];
                ]
              ],
-             (* Кнопка активна только для Графики или Legended графики *)
-             Enabled -> Dynamic[
-                MatchQ[plotCache[selectedPlotId], _Graphics | _Legended]
-             ],
+             Enabled -> Dynamic[MatchQ[plotCache[selectedPlotId], _Graphics | _Legended]],
              ImageSize -> {100, Automatic}
            ],
            
@@ -707,103 +721,93 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
            Spacer[5],
            
            Dynamic[
-             Style[
-               "(" <> ToString[Length[Lookup[overlayBasket, selectedPlotId, {}]]] <> ")", 
-               Gray
-             ]
+             Style["(" <> ToString[Length[Lookup[overlayBasket, selectedPlotId, {}]]] <> ")", Gray]
+           ],
+           
+           Spacer[30], (* Разделитель групп *)
+           
+           (* C. SAVE & EXPORT CONTROLS *)
+           Button[
+              Row[{Style["Save PDF...", Bold], Spacer[5], Style["\[DownArrow]", Gray]}],
+              Module[{targetFile, gToSave, finalG, savedOverlays, initialPath, safePath},
+                 
+                 (* --- ЛОГИКА ЗАЩИЩЕННОГО ПУТИ --- *)
+                 safePath = $DefaultExportPath;
+                 
+                 (* 1. Проверяем: это строка? папка существует? *)
+                 initialPath = If[StringQ[safePath] && DirectoryQ[safePath],
+                     (* Да: предлагаем сохранить "plot.pdf" внутри этой папки *)
+                     FileNameJoin[{safePath, "plot.pdf"}],
+                     (* Нет: отдаем на откуп системе (последняя папка или Документы) *)
+                     "plot.pdf"
+                 ];
+                 
+                 (* 2. Открываем диалог с вычисленным путем *)
+                 targetFile = SystemDialogInput["FileSave", initialPath];
+                 
+                 If[StringQ[targetFile],
+                    savedOverlays = Lookup[overlayBasket, selectedPlotId, {}];
+                    gToSave = If[Length[savedOverlays] > 0,
+                       Show[Join[savedOverlays, {plotCache[selectedPlotId]}], PlotRange->All],
+                       plotCache[selectedPlotId]
+                    ];
+                    finalG = QED`Style`ApplyExportPreset[gToSave, exportPreset];
+                    Check[Export[targetFile, finalG, "PDF"]; Beep[], Beep[]; Beep[]]
+                 ];
+              ],
+              Method -> "Queued", 
+              ImageSize -> {110, Automatic}
+           ],
+           
+           Spacer[5],
+           
+           (* SETTINGS TOGGLE (Gear) *)
+           Button[
+              MouseAppearance[
+                 makeGearIcon[If[showExportSettings, Darker[Blue], Gray]],
+                 "LinkHand"
+              ],
+              showExportSettings = !showExportSettings,
+              Appearance -> "Frameless",
+              ImageSize -> {22, 22}
            ]
         }],
         
-        Spacer[10],
-
-        (* --- SAVE & EXPORT CONTROLS --- *)
-        DynamicModule[{file},
-           Column[{
-             Row[{
-               (* Кнопка SAVE *)
-               Button[
-                  Row[{Style["Save PDF...", Bold], Spacer[5], Style["\[DownArrow]", Gray]}],
-                  Module[{targetFile, gToSave, finalG, savedOverlays},
-                     (* 1. Спрашиваем куда сохранить *)
-                     targetFile = SystemDialogInput["FileSave", "plot.pdf"];
-                     
-                     If[StringQ[targetFile],
-                        (* 2. Собираем текущую сцену (с оверлеями, если есть) *)
-                        savedOverlays = Lookup[overlayBasket, selectedPlotId, {}]; (* Возвращает {} если ключа нет *)
-                        gToSave = If[Length[savedOverlays] > 0,
-                           Show[Join[savedOverlays, {plotCache[selectedPlotId]}], PlotRange->All],
-                           plotCache[selectedPlotId]
-                        ];
-                        
-                        (* 3. Применяем пресет (Screen/Publication) *)
-                        (* Важно: делаем это только для файла, экран не меняется *)
-                        finalG = QED`Style`ApplyExportPreset[gToSave, exportPreset];
-                        
-                        (* 4. Экспорт *)
-                        Check[
-                           Export[targetFile, finalG, "PDF"];
-                           (* Можно добавить уведомление, например Beep *)
-                           Beep[], 
-                           (* else error *)
-                           Beep[]; Beep[]
-                        ]
-                     ];
+        (* 2. DRAWER (Выезжает ВНИЗУ под строкой кнопок) *)
+        Pane[
+           Dynamic[
+               If[showExportSettings,
+                  Framed[
+                    Column[{
+                       Style["Export Settings", Bold, 10],
+                       Spacer[5],
+                       Row[{"Preset: ", 
+                          PopupMenu[Dynamic[exportPreset], {
+                             "Screen" -> "Screen (WYSIWYG)", 
+                             "Publication" -> "Publication (Thick Lines, Arial)"
+                          }]
+                       }],
+                       Spacer[5],
+                       Text[Style["Tip: 'Publication' scales lines and fonts\nfor Illustrator editing.", Gray, 8]]
+                    }],
+                    FrameStyle -> LightGray,
+                    Background -> Lighter[Gray, 0.95],
+                    RoundingRadius -> 4,
+                    ImageMargins -> {{0,0}, {5,5}}
                   ],
-                  Method -> "Queued", (* Важно для диалога сохранения *)
-                  ImageSize -> {110, Automatic}
-               ],
-               
-               Spacer[5],
-               
-               (* Кнопка SETTINGS (Toggle) *)
-               Button[
-                  MouseAppearance[
-                     Style["\[Cogwheel]", 18, If[showExportSettings, Darker[Blue], Gray]],
-                     "LinkHand"
-                  ],
-                  showExportSettings = !showExportSettings,
-                  Appearance -> "Frameless",
-                  ImageSize -> {30, 30}
+                  Spacer[0]
                ]
-             }],
-             
-            (* DRAWER: Выезжающая панель настроек *)
-             Pane[
-               Dynamic[  (* <--- ГЛАВНОЕ ИСПРАВЛЕНИЕ: Обертка Dynamic *)
-                   If[showExportSettings,
-                      Framed[
-                        Column[{
-                           Style["Export Settings", Bold, 10],
-                           Spacer[5],
-                           Row[{"Preset: ", 
-                              PopupMenu[Dynamic[exportPreset], {
-                                 "Screen" -> "Screen (WYSIWYG)", 
-                                 "Publication" -> "Publication (Thick Lines, Arial)"
-                              }]
-                           }],
-                           Spacer[5],
-                           Text[Style["Tip: 'Publication' scales lines and fonts\nfor Illustrator editing.", Gray, 8]]
-                        }],
-                        FrameStyle -> LightGray,
-                        Background -> Lighter[Gray, 0.95],
-                        RoundingRadius -> 4,
-                        ImageMargins -> {{0,0}, {5,5}}
-                      ],
-                      Spacer[0] (* Используем Spacer[0] вместо Nothing для надежности *)
-                   ]
-               ],
-               ImageSize -> {Automatic, Automatic},
-               ImageSizeAction -> "ShrinkToFit",
-               Alignment -> Center
-             ]
-           }]
+           ],
+           ImageSize -> {Automatic, Automatic},
+           ImageSizeAction -> "ShrinkToFit",
+           Alignment -> Left (* Выравниваем панель по левому краю (под кнопками) *)
         ],
         
         Spacer[10],
-
-        (* DISPLAY AREA *)
+        
+        (* 3. DISPLAY AREA *)
         Dynamic[
-          Module[{curr, saved, combined},
+          Module[{curr, saved},
             curr = plotCache[selectedPlotId];
             saved = Lookup[overlayBasket, selectedPlotId, {}];
             
@@ -818,16 +822,8 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
               ],
               
               _, 
-              (* ЛОГИКА ОТОБРАЖЕНИЯ С ОВЕРЛЕЕМ *)
               If[Length[saved] > 0 && (MatchQ[curr, _Graphics] || MatchQ[curr, _Legended]),
-                 
-                 (* Если у нас есть и сохраненные, и текущий график *)
-                 Show[
-                    Join[saved, {curr}], (* Рисуем сохраненные снизу, текущий сверху *)
-                    PlotRange -> All     (* Чтобы старые графики не обрезались осями нового *)
-                 ],
-                 
-                 (* Иначе (нет сохраненных ИЛИ это не график, а таблица) -> просто выводим текущий *)
+                 Show[Join[saved, {curr}], PlotRange -> All],
                  curr
               ]
             ]
