@@ -597,21 +597,23 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
 (* 3. CORE: QUBIT DASHBOARD *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
+(* Добавляем хелпер перед QubitDashboard *)
+ExtractGraphicOnly[expr_] := Replace[expr, Legended[g_, _] :> g];
+
+(* Модифицированный QubitDashboard *)
 QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   {
     currentModel = First[modelsStack],
     selectedPlotId = "PlasmonSpectrum",
     plotCache = <||>,
-    performUpdate (* Вспомогательная функция для расчета *)
+    overlayBasket = <||>, (* <| "PlotId" -> {g1, g2...} |> *)
+    performUpdate
   },
   
-  (* Определение логики обновления *)
+  (* ... performUpdate тот же ... *)
   performUpdate = Function[{},
-    (* 1. Визуальная индикация начала (покажем "Computing..." перед фризом) *)
     plotCache[selectedPlotId] = "Computing...";
-    FinishDynamic[]; (* Принудительная отрисовка интерфейса перед тяжелой задачей *)
-    
-    (* 2. Тяжелое вычисление (происходит в потоке вызова: Button=Queued, Slider=Preemptive) *)
+    FinishDynamic[];
     Module[{res, updatedModel},
        {res, updatedModel} = ComputePlotData[selectedPlotId, currentModel];
        plotCache[selectedPlotId] = res;
@@ -621,49 +623,30 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
 
   Column[{
     Row[{
-      (* LEFT PANEL: Model Selection + Controls *)
+      (* LEFT PANEL ... (без изменений) ... *)
       Panel[
+        (* ... код левой панели ... *)
         Column[{
-          (* Model Selector Widget *)
-          SelectModel[currentModel, 
-             modelsStack, 
+          SelectModel[currentModel, modelsStack, 
              Function[{}, 
-               (* При смене модели сбрасываем кэш *)
                plotCache = <||>;
+               (* Очищаем оверлей при смене модели или нет? 
+                  Обычно оверлей нужен ЧТОБЫ сравнить модели. Оставляем. *)
                currentModel["Numerical", "IsDirty"] = True;
-               (* Авто-расчет только для легких графиков *)
                If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
              ]
           ],
-          
           Spacer[15],
-
-          PresetControlPanel[currentModel, 
-             Function[{newModel}, 
-                currentModel = newModel;
-                needsUpdate = True; (* Trigger re-render *)
-             ]
-          ],
-          
+          PresetControlPanel[currentModel, Function[{m}, currentModel = m; needsUpdate = True;]],
           Spacer[10],
-          
-          (* Sliders & Button Panel *)
-          PlotControlPanel[
-            currentModel, 
-            
-            (* onSliderChange Callback *)
+          PlotControlPanel[currentModel, 
             Function[{}, 
                If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
-                  performUpdate[], (* Легкие графики обновляем сразу (Preemptive) *)
-                  plotCache[selectedPlotId] = Missing["Stale"] (* Тяжелые помечаем как устаревшие *)
+                  performUpdate[], 
+                  plotCache[selectedPlotId] = Missing["Stale"] 
                ]
             ],
-            
-            (* onButtonPress Callback (Queued via PlotControlPanel definition) *)
-            Function[{}, 
-               currentModel["Numerical", "IsDirty"] = True; (* Форсируем пересчет *)
-               performUpdate[] (* Запускаем расчет в потоке кнопки (без лимита времени) *)
-            ]
+            Function[{}, currentModel["Numerical", "IsDirty"] = True; performUpdate[]]
           ]
         }],
         Alignment -> Top
@@ -673,58 +656,109 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       
       (* RIGHT PANEL: Plot Area *)
       Column[{
+
+        (* HEADER: Selector + Overlay Controls *)
         Row[{
            "Plot Type: ",
-           (* При смене типа графика сразу запускаем расчет, если он легкий *)
            PopupMenu[Dynamic[selectedPlotId, 
              Function[{v}, 
-               selectedPlotId = v; 
+               selectedPlotId = v;
                If[$PlotRegistry[selectedPlotId]["Type"] === "Light", 
                   performUpdate[],
-                  (* Для тяжелых проверяем кэш, если пусто - просим нажать кнопку *)
                   If[!KeyExistsQ[plotCache, selectedPlotId], plotCache[selectedPlotId] = Missing["Init"]]
                ]
              ]], 
              Keys[$PlotRegistry]
+           ],
+           
+           Spacer[30],
+           
+           (* OVERLAY CONTROLS *)
+           Button["Add to Overlay",
+             Module[{curr},
+               curr = plotCache[selectedPlotId];
+               If[!MissingQ[curr] && !FailureQ[curr],
+                  (* Инициализируем список, если его нет *)
+                  If[!KeyExistsQ[overlayBasket, selectedPlotId], overlayBasket[selectedPlotId] = {}];
+                  
+                  (* Используем исправленный ExtractGraphicOnly *)
+                  AppendTo[overlayBasket[selectedPlotId], ExtractGraphicOnly[curr]];
+               ]
+             ],
+             (* Кнопка активна только для Графики или Legended графики *)
+             Enabled -> Dynamic[
+                MatchQ[plotCache[selectedPlotId], _Graphics | _Legended]
+             ],
+             ImageSize -> {100, Automatic}
+           ],
+           
+           Spacer[5],
+           
+           Button["Clear",
+             overlayBasket[selectedPlotId] = {},
+             Enabled -> Dynamic[Length[Lookup[overlayBasket, selectedPlotId, {}]] > 0],
+             ImageSize -> {50, Automatic}
+           ],
+           
+           Spacer[5],
+           
+           Dynamic[
+             Style[
+               "(" <> ToString[Length[Lookup[overlayBasket, selectedPlotId, {}]]] <> ")", 
+               Gray
+             ]
            ]
         }],
+        
         Spacer[10],
         
-        (* 3. DISPLAY ONLY (Logic moved to Button) *)
+        (* DISPLAY AREA *)
         Dynamic[
-          Switch[plotCache[selectedPlotId],
-            "Computing...", 
-              Panel[Column[{
-                Style["Computing...", Blue, Bold],
-                ProgressIndicator[Appearance -> "Indeterminate"]
-              }, Alignment->Center], ImageSize->{300,300}],
+          Module[{curr, saved, combined},
+            curr = plotCache[selectedPlotId];
+            saved = Lookup[overlayBasket, selectedPlotId, {}];
             
-            _Missing, 
-              If[plotCache[selectedPlotId] === Missing["Stale"],
+            Switch[curr,
+              "Computing...", 
+              Panel[Column[{Style["Computing...", Blue, Bold], ProgressIndicator[Appearance -> "Indeterminate"]}, Alignment->Center], ImageSize->{300,300}],
+            
+              _Missing, 
+              If[curr === Missing["Stale"],
                  Panel[Style["Parameters changed. Press Update.", Gray, 16], ImageSize->{400,300}],
                  Panel[Style["Select plot or Press Update", Gray], ImageSize->{300,300}]
               ],
               
-            _, plotCache[selectedPlotId]
+              _, 
+              (* ЛОГИКА ОТОБРАЖЕНИЯ С ОВЕРЛЕЕМ *)
+              If[Length[saved] > 0 && (MatchQ[curr, _Graphics] || MatchQ[curr, _Legended]),
+                 
+                 (* Если у нас есть и сохраненные, и текущий график *)
+                 Show[
+                    Join[saved, {curr}], (* Рисуем сохраненные снизу, текущий сверху *)
+                    PlotRange -> All     (* Чтобы старые графики не обрезались осями нового *)
+                 ],
+                 
+                 (* Иначе (нет сохраненных ИЛИ это не график, а таблица) -> просто выводим текущий *)
+                 curr
+              ]
+            ]
           ],
-          
-          TrackedSymbols :> {plotCache, selectedPlotId}
+          TrackedSymbols :> {plotCache, selectedPlotId, overlayBasket}
         ]
       }, Alignment -> Top]
     }, Alignment -> Top],
     
-    (* Debug Footer *)
-    Dynamic @ Row[{"Cache Keys: ", Keys[plotCache]}, BaseStyle->{FontSize->10, Color->Gray}]
+    (* Footer *)
+    Dynamic @ Row[{"Cache: ", Keys[plotCache], " | Overlays: ", Keys[overlayBasket]}, BaseStyle->{FontSize->10, Color->Gray}]
   }],
   
-  UnsavedVariables :> {plotCache},
+  UnsavedVariables :> {plotCache, overlayBasket},
   Initialization :> {
     plotCache = <||>;
-    (* При старте считаем график, только если он легкий *)
+    overlayBasket = <||>;
     If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
   },
-  SynchronousInitialization -> False,
-  SaveDefinitions -> False
+  SynchronousInitialization -> False
 ];
 
 End[];
