@@ -607,6 +607,10 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     selectedPlotId = "PlasmonSpectrum",
     plotCache = <||>,
     overlayBasket = <||>, (* <| "PlotId" -> {g1, g2...} |> *)
+
+    showExportSettings = False,
+    exportPreset = "Screen", (* Default *)
+
     performUpdate
   },
   
@@ -711,7 +715,92 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
         }],
         
         Spacer[10],
+
+        (* --- SAVE & EXPORT CONTROLS --- *)
+        DynamicModule[{file},
+           Column[{
+             Row[{
+               (* Кнопка SAVE *)
+               Button[
+                  Row[{Style["Save PDF...", Bold], Spacer[5], Style["\[DownArrow]", Gray]}],
+                  Module[{targetFile, gToSave, finalG, savedOverlays},
+                     (* 1. Спрашиваем куда сохранить *)
+                     targetFile = SystemDialogInput["FileSave", "plot.pdf"];
+                     
+                     If[StringQ[targetFile],
+                        (* 2. Собираем текущую сцену (с оверлеями, если есть) *)
+                        savedOverlays = Lookup[overlayBasket, selectedPlotId, {}]; (* Возвращает {} если ключа нет *)
+                        gToSave = If[Length[savedOverlays] > 0,
+                           Show[Join[savedOverlays, {plotCache[selectedPlotId]}], PlotRange->All],
+                           plotCache[selectedPlotId]
+                        ];
+                        
+                        (* 3. Применяем пресет (Screen/Publication) *)
+                        (* Важно: делаем это только для файла, экран не меняется *)
+                        finalG = QED`Style`ApplyExportPreset[gToSave, exportPreset];
+                        
+                        (* 4. Экспорт *)
+                        Check[
+                           Export[targetFile, finalG, "PDF"];
+                           (* Можно добавить уведомление, например Beep *)
+                           Beep[], 
+                           (* else error *)
+                           Beep[]; Beep[]
+                        ]
+                     ];
+                  ],
+                  Method -> "Queued", (* Важно для диалога сохранения *)
+                  ImageSize -> {110, Automatic}
+               ],
+               
+               Spacer[5],
+               
+               (* Кнопка SETTINGS (Toggle) *)
+               Button[
+                  MouseAppearance[
+                     Style["\[Cogwheel]", 18, If[showExportSettings, Darker[Blue], Gray]],
+                     "LinkHand"
+                  ],
+                  showExportSettings = !showExportSettings,
+                  Appearance -> "Frameless",
+                  ImageSize -> {30, 30}
+               ]
+             }],
+             
+            (* DRAWER: Выезжающая панель настроек *)
+             Pane[
+               Dynamic[  (* <--- ГЛАВНОЕ ИСПРАВЛЕНИЕ: Обертка Dynamic *)
+                   If[showExportSettings,
+                      Framed[
+                        Column[{
+                           Style["Export Settings", Bold, 10],
+                           Spacer[5],
+                           Row[{"Preset: ", 
+                              PopupMenu[Dynamic[exportPreset], {
+                                 "Screen" -> "Screen (WYSIWYG)", 
+                                 "Publication" -> "Publication (Thick Lines, Arial)"
+                              }]
+                           }],
+                           Spacer[5],
+                           Text[Style["Tip: 'Publication' scales lines and fonts\nfor Illustrator editing.", Gray, 8]]
+                        }],
+                        FrameStyle -> LightGray,
+                        Background -> Lighter[Gray, 0.95],
+                        RoundingRadius -> 4,
+                        ImageMargins -> {{0,0}, {5,5}}
+                      ],
+                      Spacer[0] (* Используем Spacer[0] вместо Nothing для надежности *)
+                   ]
+               ],
+               ImageSize -> {Automatic, Automatic},
+               ImageSizeAction -> "ShrinkToFit",
+               Alignment -> Center
+             ]
+           }]
+        ],
         
+        Spacer[10],
+
         (* DISPLAY AREA *)
         Dynamic[
           Module[{curr, saved, combined},
