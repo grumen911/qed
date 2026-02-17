@@ -1,17 +1,10 @@
 BeginPackage["QED`Scattering`", {"QED`Model`"}];
 
-(* Публичные функции *)
-BuildSymbolicScattering::usage = 
-  "BuildSymbolicScattering[topology, primaryParams, options] строит символьную S-матрицу.
-   Возвращает:
-     \"SMatrix\" - упрощенная рациональная функция.
-     \"SMatrixRaw\" - необработанная дробь для численной стабильности.";
+BuildSymbolicScattering::usage = "BuildSymbolicScattering[topology, primaryParams, options] computes symbolic S-matrix. Note: Ignores topological GroundNode (floating ground assumption).";
 
-ComputeNumericalScattering::usage = 
-  "ComputeNumericalScattering[model, frequencyList] вычисляет S-параметры (численно).";
+ComputeNumericalScattering::usage = "ComputeNumericalScattering[model, frequencyList] computes numerical S-parameters.";
 
-GetEffectiveInductances::usage = 
-  "GetEffectiveInductances[model, explicitFluxes] возвращает правила для L_eff.";
+GetEffectiveInductances::usage = "GetEffectiveInductances[model, explicitFluxes] returns effective inductance rules.";
 
 Begin["`Private`"];
 
@@ -20,14 +13,14 @@ Begin["`Private`"];
 (* ════════════════════════════════════════════════════════════════ *)
 
 Options[BuildSymbolicScattering] = {
-  Ports -> Automatic, 
+  Ports -> {1,2}, (* Automatic *)
   ReferenceImpedance -> 50,
   IgnoreJunctionCapacitance -> False
 };
 
 BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : OptionsPattern[]] := 
  Module[{
-    nodes, groundNode, activeNodes, nNodes,
+    nodes, activeNodes, nNodes,
     components, yMatrix, portIndices, z0, ignoreCap,
     sVar, internalIndices, 
     Ypp, Ypi, Yip, Yii, Yschur, 
@@ -35,47 +28,51 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
     nodeCounts, candidatePorts, allCompNodes
  },
   
-  nodes = topology["Nodes"];
-  groundNode = topology["GroundNode"];
   components = topology["Components"];
-  activeNodes = Cases[nodes, Except[groundNode]];
+  
+  (* ИЗМЕНЕНИЕ 1: Игнорируем GroundNode. Берем ВСЕ узлы, участвующие в компонентах. *)
+  (* Для S-матрицы земля - это внешний "висящий" потенциал. *)
+  nodes = Union[Flatten[components[[All, 2 ;; 3]]]];
+  
+  (* Все узлы схемы являются активными (potential != 0 относительно внешней земли) *)
+  activeNodes = nodes; 
   nNodes = Length[activeNodes];
   
   z0 = OptionValue[ReferenceImpedance];
   ignoreCap = TrueQ[OptionValue[IgnoreJunctionCapacitance]];
   sVar = Symbol["s"]; 
   
-  (* 1. Определение портов ЛОКАЛЬНО (без изменения Topology) *)
+  (* ИЗМЕНЕНИЕ 2: Автопоиск портов теперь ищет по ВСЕМ узлам *)
   If[OptionValue[Ports] === Automatic,
-     (* Считаем, сколько раз каждый узел встречается в компонентах *)
+     (* Считаем вхождения *)
      allCompNodes = Flatten[components[[All, 2 ;; 3]]];
      nodeCounts = Counts[allCompNodes];
      
-     (* Порты = активные узлы, к которым подключен всего 1 компонент *)
+     (* Порт = Узел, к которому подключен только 1 компонент *)
      candidatePorts = Select[activeNodes, (Lookup[nodeCounts, #, 0] == 1) &];
      
-     (* Если портов не нашли (например, кольцо), берем 1-й и N-й узел *)
      If[Length[candidatePorts] >= 1,
         portIndices = Flatten[FirstPosition[activeNodes, #] & /@ candidatePorts],
-        portIndices = {1, nNodes}
+        portIndices = {1, nNodes} (* Fallback: берем первый и последний из списка *)
      ];
   ,
-     (* Если порты заданы вручную *)
+     (* Если порты заданы вручную, ищем их индексы в полном списке nodes *)
      portIndices = Flatten[FirstPosition[activeNodes, #] & /@ OptionValue[Ports]]
   ];
 
+  (* Размер матрицы теперь равен полному количеству узлов *)
   yMatrix = ConstantArray[0, {nNodes, nNodes}];
   
-  (* 2. Заполнение матрицы (берем символы из primaryParams) *)
+  (* ИЗМЕНЕНИЕ 3: Заполнение матрицы без исключения GroundNode *)
   Do[
     Module[{type, n1, n2, name, u, v, val, sym, symC, valC, valL},
       {type, n1, n2, name} = comp[[1;;4]];
       
-      u = If[n1 === groundNode, 0, FirstPosition[activeNodes, n1][[1]]];
-      v = If[n2 === groundNode, 0, FirstPosition[activeNodes, n2][[1]]];
+      (* Ищем индексы узлов в списке activeNodes *)
+      u = FirstPosition[activeNodes, n1][[1]];
+      v = FirstPosition[activeNodes, n2][[1]];
       
-      If[u == 0 && v == 0, Continue[]];
-
+      (* Вычисляем проводимость ветви *)
       val = Switch[type,
         "Capacitor",
            sym = primaryParams[name]["C"]["Symbol"];
@@ -88,24 +85,22 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
         "JosephsonJunction",
            symC = primaryParams[name]["CJ"]["Symbol"];
            valC = If[ignoreCap, 0, sVar * symC];
-           (* Индуктивность перехода всегда динамическая -> Subscript["L", name] *)
            valL = 1 / (sVar * Subscript["L", name]);
            valC + valL,
            
         _, 0
       ];
 
-      If[u > 0, yMatrix[[u, u]] += val];
-      If[v > 0, yMatrix[[v, v]] += val];
-      If[u > 0 && v > 0, 
-        yMatrix[[u, v]] -= val;
-        yMatrix[[v, u]] -= val;
-      ];
+      (* Заполняем матрицу. Узлов "земли" внутри схемы нет, поэтому u и v всегда > 0 *)
+      yMatrix[[u, u]] += val;
+      yMatrix[[v, v]] += val;
+      yMatrix[[u, v]] -= val;
+      yMatrix[[v, u]] -= val;
     ],
     {comp, components}
   ];
 
-  (* 3. Свертка (Schur Complement) *)
+  (* 3. Свертка (Schur Complement) - сворачиваем все узлы, кроме портов *)
   internalIndices = Complement[Range[nNodes], portIndices];
   
   If[Length[internalIndices] > 0,
@@ -124,7 +119,7 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
   (* 4. S-Matrix *)
   rawSMatrix = (unitMatrix - z0 * Yschur) . Inverse[unitMatrix + z0 * Yschur];
   
-  (* Упрощение для аналитики *)
+  (* Упрощение *)
   sMatrix = Map[
     Function[expr,
       Module[{frac = Together[expr]}, 
@@ -142,7 +137,7 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
     "SMatrixRaw" -> rawSMatrix, 
     "FrequencyVariable" -> sVar,
     "PortIndices" -> portIndices,
-    "ActiveNodes" -> activeNodes
+    "ActiveNodes" -> activeNodes (* Теперь это полный список узлов *)
   |>
  ];
 
@@ -158,10 +153,9 @@ GetEffectiveInductances[model_Association, explicitFluxes : (_List | Automatic) 
   primary = model["Primary"]; 
   components = topology["Components"];
   subRules = model["SubstitutionRules"];
-  groundNode = topology["GroundNode"];
+  groundNode = topology["GroundNode"]; (* Для потоков земля все еще важна! *)
   phi0Val = QED`$Phi0Value;
   
-  (* Если потоки переданы явно (из Model.wl), используем их *)
   phiMin = If[explicitFluxes === Automatic,
      QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"],
      explicitFluxes
@@ -175,6 +169,7 @@ GetEffectiveInductances[model_Association, explicitFluxes : (_List | Automatic) 
          params = primary[name];
          ejVal = (params["EJ"]["Symbol"] /. subRules); 
          
+         (* Тут мы используем КВАНТОВУЮ землю для расчета фаз *)
          phi1 = If[n1 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n1] /. phiMin];
          phi2 = If[n2 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n2] /. phiMin];
          
@@ -193,7 +188,6 @@ ComputeNumericalScattering[model_Association, frequencyList_List] :=
  Module[{symScattering, components, primary, valRules, lJeffRules, 
         sMatrixExpr, sVarSym, sMatrixNumFunction, omegaList},
   
-  (* Здесь тоже вызываем с primaryParams *)
   symScattering = BuildSymbolicScattering[model["Topology"], model["Primary"]];
   
   components = model["Topology"]["Components"];

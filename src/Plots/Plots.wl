@@ -1157,8 +1157,8 @@ PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] 
      PlotLabel -> Style[label, 14, FontFamily -> "Times"],
      
      (* Качество *)
-     MaxRecursion -> 2,
-     PlotPoints -> 50
+     MaxRecursion -> 4,
+     PlotPoints -> 500
   ]
  ];
 
