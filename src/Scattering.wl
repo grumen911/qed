@@ -109,7 +109,15 @@ BuildSymbolicScattering[topology_Association, opts : OptionsPattern[]] :=
   rawSMatrix = (unitMatrix - z0 * Yschur) . Inverse[unitMatrix + z0 * Yschur];
   
   (* 2. Simplified S-Matrix (для аналитики) *)
-  sMatrix = Map[Together, rawSMatrix, {2}];
+  sMatrix = Map[
+    Function[expr,
+      Module[{frac = Together[expr]}, 
+         Collect[Numerator[frac], sVar] / Collect[Denominator[frac], sVar]
+      ]
+    ], 
+    rawSMatrix, 
+    {2}
+  ];
 
   <|
     "YMatrixFull" -> yMatrix,

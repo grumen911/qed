@@ -3,6 +3,7 @@ BeginPackage["QED`Model`"];
 Needs["QED`CircuitTopology`"];
 Needs["QED`Numeric`"];
 Needs["QED`Analytic`"];
+Needs["QED`Scattering`"];
 
 CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]"
 GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
@@ -342,7 +343,7 @@ GenerateDefaultParameters[topology_] :=
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
- 		 potentialGradient, currentOp, voltageOperatorsSym, nodes},
+ 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -362,6 +363,8 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
   (*Градиент потенциала для поиска равновесия *)
   potentialGradient = BuildPotentialGradient[hamiltonian, topology];
 
+  scattering = QED`Scattering`BuildSymbolicScattering[topology];
+
   <|
     "CapacitanceMatrix" -> capMatrix,
     "Hamiltonian" -> hamiltonian,
@@ -369,7 +372,8 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
     "InductanceMatrix" -> indMatrix,
     "PotentialGradient" -> potentialGradient,
     "CurrentOperator" -> currentOp,
-    "VoltageOperators" -> voltageOperatorsSym
+    "VoltageOperators" -> voltageOperatorsSym,
+    "Scattering" -> scattering
   |>
  ];
 
