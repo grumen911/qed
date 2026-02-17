@@ -363,7 +363,7 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
   (*Градиент потенциала для поиска равновесия *)
   potentialGradient = BuildPotentialGradient[hamiltonian, topology];
 
-  scattering = QED`Scattering`BuildSymbolicScattering[topology];
+  scattering = QED`Scattering`BuildSymbolicScattering[topology, primaryParams];
 
   <|
     "CapacitanceMatrix" -> capMatrix,
