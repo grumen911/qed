@@ -98,15 +98,21 @@ Options:
   \"PinkNoiseLogFactor\" -> 3.0";
 
 PlotFrequencyResponse::usage = 
-  "PlotFrequencyResponse[model, {fMin, fMax}] builds an interactive plot of S-parameters (S11, S21) in dB.
-   fMin and fMax should be in GHz.
-   Requires: ComputeNumericalHarmonicPerturbation to be run first.";
+  "PlotFrequencyResponse[model, {fMin, fMax}] plots the magnitude of S-parameters (Linear scale).
+   Options:
+     \"Measurement\" -> \"S21\" (default) | \"S11\"
+     fMin, fMax in GHz.
+   Requires ComputeNumericalHarmonicPerturbation.";
 
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
 
 Begin["`Private`"];
+
+Options[PlotFrequencyResponse] = {
+    "Measurement" -> "S21" (* "S11" or "S21" *)
+};
 
 Options[PlotPlasmonSpectrum] = {
   NumModes -> 2,
@@ -1095,61 +1101,64 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
     ]
 ];
 
-(* ════════════════════════════════════════════════════════════════ *)
-(* S-PARAMETERS PLOTTING                                            *)
-(* ════════════════════════════════════════════════════════════════ *)
-
-PlotFrequencyResponse[model_Association, {fMin_, fMax_}] := 
- Module[{cacheEntry, sNumExpr, sVar, s11Func, s21Func},
+PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] := 
+ Module[{cacheEntry, sNumExpr, sVar, plotFunc, measure, color, label},
   
-  (* 1. Берем запись кэша НАПРЯМУЮ (без GetCacheEntry) *)
-  (* Нам нужны и Value, и FrequencyVariable *)
+  measure = OptionValue["Measurement"];
+  
+  (* 1. Достаем закэшированную функцию (Полусимвольную) *)
   cacheEntry = model["Numerical"]["Cache"]["SMatrixNumerical"];
 
-  (* Проверка: существует ли запись и готова ли она *)
   If[MissingQ[cacheEntry] || Lookup[cacheEntry, "State"] =!= "Ready",
-     Return[Style["S-Matrix data not found or not ready. Run ComputeNumericalHarmonicPerturbation first.", Red]]
+     Return[Graphics[{
+        Red, 
+        Text[Style["S-Matrix not ready.\nRun Analysis first.", 14], {0,0}]
+     }, ImageSize -> 400, Frame -> True]]
   ];
 
-  (* 2. Извлекаем данные *)
-  sNumExpr = cacheEntry["Value"];              (* Матрица {{S11, S12}, {S21, S22}} *)
-  sVar = cacheEntry["FrequencyVariable"];      (* Символ частоты (s) *)
+  sNumExpr = cacheEntry["Value"];         (* Матрица {{S11, S12}, {S21, S22}} *)
+  sVar = cacheEntry["FrequencyVariable"]; (* Символ 's' *)
 
-  (* 3. Создаем быстрые функции для отрисовки *)
-  (* Подставляем s -> I * 2 * Pi * f_GHz * 10^9 *)
+  (* 2. Формируем функцию для Plot *)
+  (* S11 = [[1,1]], S21 = [[2,1]] *)
+  (* Подставляем s -> I * 2Pi * f * 10^9. Plot будет вызывать это адаптивно. *)
+  plotFunc = Switch[measure,
+     "S11", Function[fGHz, Abs[ sNumExpr[[1, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]],
+     "S21", Function[fGHz, Abs[ sNumExpr[[2, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]],
+     _, Return[$Failed]
+  ];
+
+  (* 3. Настройка стилей (как в PlotPlasmonSpectrum) *)
+  color = Switch[measure, 
+     "S11", RGBColor[0.12, 0.47, 0.71], (* Синий *)
+     _, RGBColor[1.0, 0.50, 0.05]       (* Оранжевый *)
+  ];
   
-  (* S11 (Reflection) *)
-  s11Func = Function[fGHz, 
-     20 * Log10[Abs[ sNumExpr[[1, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ] + 10^-20]
-  ];
+  label = Switch[measure, "S11", "|S11| (Reflection)", _, "|S21| (Transmission)"];
 
-  (* S21 (Transmission) *)
-  s21Func = Function[fGHz, 
-     20 * Log10[Abs[ sNumExpr[[2, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ] + 10^-20]
-  ];
-
-  (* 4. Интерактивный график *)
-  Manipulate[
-    Plot[
-       Switch[measure,
-          "S11 (Reflection)", s11Func[f],
-          "S21 (Transmission)", s21Func[f]
-       ],
-       {f, fMin, fMax},
-       
-       PlotRange -> All, 
-       Frame -> True,
-       FrameLabel -> {"Frequency (GHz)", "Magnitude (dB)"},
-       GridLines -> Automatic,
-       PlotStyle -> Switch[measure, "S11 (Reflection)", Blue, "S21 (Transmission)", Red],
-       PlotTheme -> "Scientific",
-       ImageSize -> 500,
-       PlotLabel -> Style[measure, 12]
-    ],
-    
-    {{measure, "S21 (Transmission)", "Measurement"}, 
-     {"S11 (Reflection)", "S21 (Transmission)"}, 
-     ControlType -> SetterBar}
+  (* 4. Рисуем красивый Plot *)
+  Plot[plotFunc[f], {f, fMin, fMax},
+     
+     (* Оформление 1-в-1 как у других графиков *)
+     Frame -> True,
+     FrameLabel -> {
+         Style["Frequency (GHz)", 16], 
+         Style["Magnitude |S|", 16]
+     },
+     FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+     TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
+     
+     PlotRange -> {0, 1.02}, (* Линейная шкала 0..1 с небольшим запасом *)
+     PlotStyle -> Directive[color, Thickness[0.006]],
+     
+     GridLines -> Automatic,
+     AspectRatio -> 0.6,
+     ImageSize -> 600,
+     PlotLabel -> Style[label, 14, FontFamily -> "Times"],
+     
+     (* Качество *)
+     MaxRecursion -> 2,
+     PlotPoints -> 50
   ]
  ];
 
