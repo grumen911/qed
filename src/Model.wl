@@ -470,6 +470,38 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     $CurrentModel = ReplacePart[$CurrentModel, {"Numerical", "Cache"} -> cache];
     
     (* ════════════════════════════════════════════════════════════ *)
+    (* Шаг 2.5: S-матрица (Semi-Symbolic) и Эффективные индуктивности *)
+    (* ════════════════════════════════════════════════════════════ *)
+    Module[{effRules, symS, sRaw, sNum, fullRules},
+        (* 1. Считаем L_eff используя ТОЛЬКО ЧТО найденные потоки *)
+        effRules = QED`Scattering`GetEffectiveInductances[model, equilibriumFluxesContinuation];
+        
+        cache["EffectiveInductances"] = <|
+            "State" -> "Ready", 
+            "Value" -> effRules
+        |>;
+
+        (* 2. Формируем полусимвольную S-матрицу (числа + s) *)
+        If[effRules =!= $Failed,
+            symS = analytical["Scattering"];
+            sRaw = symS["SMatrixRaw"]; 
+            
+            (* Объединяем статические параметры (C, L_linear) и динамические (L_eff) *)
+            fullRules = Join[subRules, effRules];
+            
+            sNum = sRaw /. fullRules;
+            
+            cache["SMatrixNumerical"] = <|
+                "State" -> "Ready", 
+                "Value" -> sNum, (* Матрица чисел, зависящая от s *)
+                "FrequencyVariable" -> symS["FrequencyVariable"]
+            |>;
+        ,
+            cache["SMatrixNumerical"] = <|"State" -> "Failed", "Error" -> "Could not calc effective inductances"|>
+        ];
+    ];
+
+    (* ════════════════════════════════════════════════════════════ *)
     (*         Шаг 2a: Численный оператор тока                      *)
     (* ════════════════════════════════════════════════════════════ *)
 

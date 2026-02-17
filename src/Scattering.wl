@@ -135,7 +135,9 @@ BuildSymbolicScattering[topology_Association, opts : OptionsPattern[]] :=
 (* ЧИСЛЕННАЯ ПОДСТАНОВКА *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-GetEffectiveInductances[model_Association] := 
+(* src/Scattering.wl *)
+
+GetEffectiveInductances[model_Association, explicitFluxes : (_List | Automatic) : Automatic] := 
  Module[{topology, primary, subRules, components, groundNode, 
         phiMin, phi0Val},
   
@@ -146,7 +148,12 @@ GetEffectiveInductances[model_Association] :=
   groundNode = topology["GroundNode"];
   phi0Val = QED`$Phi0Value; 
   
-  phiMin = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
+  (* ИЗМЕНЕНИЕ: Если переданы явные потоки, используем их. Иначе лезем в кэш. *)
+  phiMin = If[explicitFluxes === Automatic,
+     QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"],
+     explicitFluxes
+  ];
+  
   If[phiMin === $Failed, Return[$Failed]];
   
   Cases[components, 
@@ -156,6 +163,7 @@ GetEffectiveInductances[model_Association] :=
          params = primary[name];
          ejVal = (params["EJ"]["Symbol"] /. subRules); 
          
+         (* Важно: phiMin может быть списком правил или ассоциацией *)
          phi1 = If[n1 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n1] /. phiMin];
          phi2 = If[n2 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n2] /. phiMin];
          
