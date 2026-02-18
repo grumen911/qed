@@ -3,6 +3,7 @@ BeginPackage["QED`Model`"];
 Needs["QED`CircuitTopology`"];
 Needs["QED`Numeric`"];
 Needs["QED`Analytic`"];
+Needs["QED`Scattering`"];
 
 CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]"
 GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
@@ -342,7 +343,7 @@ GenerateDefaultParameters[topology_] :=
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
- 		 potentialGradient, currentOp, voltageOperatorsSym, nodes},
+ 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -362,6 +363,8 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
   (*Градиент потенциала для поиска равновесия *)
   potentialGradient = BuildPotentialGradient[hamiltonian, topology];
 
+  scattering = QED`Scattering`BuildSymbolicScattering[topology, primaryParams];
+
   <|
     "CapacitanceMatrix" -> capMatrix,
     "Hamiltonian" -> hamiltonian,
@@ -369,7 +372,8 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
     "InductanceMatrix" -> indMatrix,
     "PotentialGradient" -> potentialGradient,
     "CurrentOperator" -> currentOp,
-    "VoltageOperators" -> voltageOperatorsSym
+    "VoltageOperators" -> voltageOperatorsSym,
+    "Scattering" -> scattering
   |>
  ];
 
@@ -465,6 +469,38 @@ ComputeNumericalHarmonicPerturbation[model_Association] := Module[
     (* ОБНОВИТЬ $CurrentModel чтобы правила подстановки работали! *)
     $CurrentModel = ReplacePart[$CurrentModel, {"Numerical", "Cache"} -> cache];
     
+    (* ════════════════════════════════════════════════════════════ *)
+    (* Шаг 2.5: S-матрица (Semi-Symbolic) и Эффективные индуктивности *)
+    (* ════════════════════════════════════════════════════════════ *)
+    Module[{effRules, symS, sRaw, sNum, fullRules},
+        (* 1. Считаем L_eff используя ТОЛЬКО ЧТО найденные потоки *)
+        effRules = QED`Scattering`GetEffectiveInductances[model, equilibriumFluxesContinuation];
+        
+        cache["EffectiveInductances"] = <|
+            "State" -> "Ready", 
+            "Value" -> effRules
+        |>;
+
+        (* 2. Формируем полусимвольную S-матрицу (числа + s) *)
+        If[effRules =!= $Failed,
+            symS = analytical["Scattering"];
+            sRaw = symS["SMatrixRaw"]; 
+            
+            (* Объединяем статические параметры (C, L_linear) и динамические (L_eff) *)
+            fullRules = Join[subRules, effRules];
+            
+            sNum = sRaw /. fullRules;
+            
+            cache["SMatrixNumerical"] = <|
+                "State" -> "Ready", 
+                "Value" -> sNum, (* Матрица чисел, зависящая от s *)
+                "FrequencyVariable" -> symS["FrequencyVariable"]
+            |>;
+        ,
+            cache["SMatrixNumerical"] = <|"State" -> "Failed", "Error" -> "Could not calc effective inductances"|>
+        ];
+    ];
+
     (* ════════════════════════════════════════════════════════════ *)
     (*         Шаг 2a: Численный оператор тока                      *)
     (* ════════════════════════════════════════════════════════════ *)
@@ -775,6 +811,14 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
         $Failed
     ];
 
+    effRules = QED`Scattering`GetEffectiveInductances[model, rules];
+
+    (* Рассчитываем численную S-матрицу (numbers + s) *)
+    sMatrixNum = If[effRules =!= $Failed,
+        analytical["Scattering"]["SMatrixRaw"] /. Join[rules, effRules],
+        $Failed
+    ];
+
     (* 4. Формируем обновления для кэша *)
     newCache = <|
         "CapacitanceMatrixNumerical"       -> <|"State" -> "Ready", "Value" -> capNum|>,
@@ -784,7 +828,14 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
         "CurrentOperatorNumerical"         -> <|"State" -> "Ready", "Value" -> currentOpNum|>,
         "VoltageOperatorsNumerical"        -> <|"State" -> "Ready", "Value" -> voltageOpsNum|>,
         "HarmonicDiagonalization"          -> <|"State" -> "Ready", "Value" -> diag|>,
-        
+
+        "EffectiveInductances"             -> <|"State" -> "Ready", "Value" -> effRules|>,
+        "SMatrixNumerical"                 -> <|
+                                                "State" -> "Ready", 
+                                                "Value" -> sMatrixNum,
+                                                "FrequencyVariable" -> analytical["Scattering"]["FrequencyVariable"]
+                                              |>,
+
         "PlasmonFrequencies" -> <|
             "State" -> "Ready", 
             "Value" -> Sort[If[diag === $Failed, $Failed, diag["NormalModeFrequencies"]]]

@@ -97,11 +97,46 @@ Options:
   \"FluxNoiseAmplitude\" -> 1.0*^-6
   \"PinkNoiseLogFactor\" -> 3.0";
 
+PlotFrequencyResponse::usage = 
+  "PlotFrequencyResponse[model, {fMin, fMax}] plots the magnitude of S-parameters (Linear scale).
+   Options:
+     \"Measurement\" -> \"S21\" (default) | \"S11\"
+     fMin, fMax in GHz.
+   Requires ComputeNumericalHarmonicPerturbation.";
+
+PlotSParameterMap::usage = 
+"PlotSParameterMap[model, {fMin, fMax}] creates a density plot (heatmap) of S-parameters magnitude.
+Axes: X = External Flux (Φ/Φ₀), Y = Frequency (GHz).
+
+Options:
+  FluxRange -> {-0.5, 0.5}
+  \"Measurement\" -> \"S21\" (default) | \"S11\"
+  PlotPoints -> 50 
+  ColorFunction -> \"TemperatureMap\"
+  
+Performance:
+  Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
 
 Begin["`Private`"];
+
+Options[PlotSParameterMap] = {
+  FluxRange -> {0., 0.5},
+  "Measurement" -> "S21",
+  PlotPoints -> 50,
+  ColorFunction -> "SunsetColors",
+  FrameLabel -> {
+    "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)", 
+    "Frequency (GHz)"
+  }
+};
+
+Options[PlotFrequencyResponse] = {
+    "Measurement" -> "S21" (* "S11" or "S21" *)
+};
 
 Options[PlotPlasmonSpectrum] = {
   NumModes -> 2,
@@ -1089,6 +1124,129 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
         PlotPoints -> ControlActive[20, 80]
     ]
 ];
+
+PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] := 
+ Module[{cacheEntry, sNumExpr, sVar, plotFunc, measure, color, label},
+  
+  measure = OptionValue["Measurement"];
+  
+  (* 1. Достаем закэшированную функцию (Полусимвольную) *)
+  cacheEntry = model["Numerical"]["Cache"]["SMatrixNumerical"];
+
+  If[MissingQ[cacheEntry] || Lookup[cacheEntry, "State"] =!= "Ready",
+     Return[Graphics[{
+        Red, 
+        Text[Style["S-Matrix not ready.\nRun Analysis first.", 14], {0,0}]
+     }, ImageSize -> 400, Frame -> True]]
+  ];
+
+  sNumExpr = cacheEntry["Value"];         (* Матрица {{S11, S12}, {S21, S22}} *)
+  sVar = cacheEntry["FrequencyVariable"]; (* Символ 's' *)
+
+  (* 2. Формируем функцию для Plot *)
+  (* S11 = [[1,1]], S21 = [[2,1]] *)
+  (* Подставляем s -> I * 2Pi * f * 10^9. Plot будет вызывать это адаптивно. *)
+  plotFunc = Switch[measure,
+     "S11", Function[fGHz, Abs[ sNumExpr[[1, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]],
+     "S21", Function[fGHz, Abs[ sNumExpr[[2, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]],
+     _, Return[$Failed]
+  ];
+
+  (* 3. Настройка стилей (как в PlotPlasmonSpectrum) *)
+  color = Switch[measure, 
+     "S11", RGBColor[0.12, 0.47, 0.71], (* Синий *)
+     _, RGBColor[1.0, 0.50, 0.05]       (* Оранжевый *)
+  ];
+  
+  label = Switch[measure, "S11", "|S11| (Reflection)", _, "|S21| (Transmission)"];
+
+  (* 4. Рисуем красивый Plot *)
+  Plot[plotFunc[f], {f, fMin, fMax},
+     
+     (* Оформление 1-в-1 как у других графиков *)
+     Frame -> True,
+     FrameLabel -> {
+         Style["Frequency (GHz)", 16], 
+         Style["Magnitude |S|", 16]
+     },
+     FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+     TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
+     
+     PlotRange -> {0, 1.02}, (* Линейная шкала 0..1 с небольшим запасом *)
+     PlotStyle -> Directive[color, Thickness[0.006]],
+     
+     GridLines -> Automatic,
+     AspectRatio -> 0.6,
+     ImageSize -> 600,
+     PlotLabel -> Style[label, 14, FontFamily -> "Times"],
+     
+     (* Качество *)
+     MaxRecursion -> 4,
+     PlotPoints -> 500
+  ]
+ ];
+
+PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, opts:OptionsPattern[]] := 
+  Module[{
+    fMin, fMax, fluxRange, measure, plotPoints, colFunc,
+    sIndex, label, legendLabel, analyzerFunc, sweepFunc,
+    plot, legend
+  },
+  
+  {fMin, fMax} = range;
+  fluxRange = OptionValue[FluxRange];
+  measure = OptionValue["Measurement"];
+  plotPoints = OptionValue[PlotPoints];
+  colFunc = OptionValue[ColorFunction];
+  
+  sIndex = If[measure === "S11", {1, 1}, {2, 1}];
+  label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
+  legendLabel = If[measure === "S11", "|S11|", "|S21|"];
+
+  analyzerFunc = Function[{tempModel},
+      Function[{fGHz}, Abs[QED`Scattering`CalculateSParameter[tempModel, fGHz * 10^9, sIndex]]]
+  ];
+  sweepFunc = QED`Numeric`GenerateFluxSweep[model, analyzerFunc];
+
+  If[sweepFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
+  ];
+
+  (* 1. Чистый график *)
+  plot = DensityPlot[
+     sweepFunc[phi][f], 
+     {phi, fluxRange[[1]], fluxRange[[2]]}, 
+     {f, fMin, fMax},
+     
+     PlotPoints -> plotPoints,
+     PlotRange -> {0, 1.05}, 
+     ColorFunction -> colFunc,
+     Frame -> True,
+     FrameLabel -> OptionValue[FrameLabel],
+     FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+     PlotLabel -> Style[label, 16, FontFamily -> "Times"],
+     PlotLegends -> None, 
+     ImageSize -> 600,
+     MaxRecursion -> 1
+  ];
+
+  (* 2. Чистая векторная легенда *)
+  legend = BarLegend[
+      {colFunc, {0, 1.05}},
+      LegendLabel -> Style[legendLabel, FontSize -> 16, FontFamily -> "Times"],
+      LabelStyle -> Directive[Black, 14, FontFamily -> "Times"],
+      LegendMarkerSize -> {20, 300},
+      
+      (* Эти опции нужны для корректного отображения в блокноте *)
+      Frame -> False,
+      Axes -> False,
+      LegendFunction -> None
+  ];
+
+  (* 3. Возвращаем семантический объект *)
+  Legended[plot, Placed[legend, Right]]
+];
+
 
 End[];
 EndPackage[];
