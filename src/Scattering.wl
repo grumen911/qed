@@ -147,15 +147,18 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
 
 GetEffectiveInductances[model_Association, explicitFluxes : (_List | Automatic) : Automatic] := 
  Module[{topology, primary, subRules, components, groundNode, 
-        phiMin, phi0Val},
+        phiMin, phi0Val, fluxLoops},
   
   topology = model["Topology"];
   primary = model["Primary"]; 
   components = topology["Components"];
   subRules = model["SubstitutionRules"];
-  groundNode = topology["GroundNode"]; (* Для потоков земля все еще важна! *)
+  groundNode = topology["GroundNode"];
   phi0Val = QED`$Phi0Value;
   
+  (* 1. Достаем информацию о петлях, чтобы знать, где добавлять внешний поток *)
+  fluxLoops = Lookup[topology["GraphStructure"], "fluxLoops", <||>];
+
   phiMin = If[explicitFluxes === Automatic,
      QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"],
      explicitFluxes
@@ -165,19 +168,38 @@ GetEffectiveInductances[model_Association, explicitFluxes : (_List | Automatic) 
   
   Cases[components, 
     {type_, n1_, n2_, name_, ___} /; type === "JosephsonJunction" :> 
-     Module[{params, ejVal, phi1, phi2, phiDiff, phaseDrop, cosPhi, lVal},
+     Module[{params, ejVal, phi1, phi2, phiDiff, phaseDrop, cosPhi, lVal, 
+             extFluxVal, loopInfo, fluxSym},
+         
          params = primary[name];
          ejVal = (params["EJ"]["Symbol"] /. subRules); 
          
-         (* Тут мы используем КВАНТОВУЮ землю для расчета фаз *)
+         (* Узловые потоки *)
          phi1 = If[n1 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n1] /. phiMin];
          phi2 = If[n2 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n2] /. phiMin];
          
-         phiDiff = (phi1 - phi2);
+         (* ИЗМЕНЕНИЕ: Учет внешнего потока, если элемент - хорда *)
+         extFluxVal = 0.;
+         If[KeyExistsQ[fluxLoops, name],
+            loopInfo = fluxLoops[name];
+            fluxSym = loopInfo["ExternalFluxSymbol"];
+            
+            (* Ищем значение потока в переменных (если он варьировался) или в параметрах модели *)
+            extFluxVal = (fluxSym /. phiMin);
+            If[!NumericQ[extFluxVal], extFluxVal = (fluxSym /. subRules)];
+            If[!NumericQ[extFluxVal], extFluxVal = 0.];
+         ];
+
+         (* Добавляем внешний поток к разности узловых *)
+         phiDiff = (phi1 - phi2) + extFluxVal;
+         
          phaseDrop = 2 * Pi * phiDiff / phi0Val;
          cosPhi = Cos[phaseDrop];
          
-         If[cosPhi <= 10^-6, cosPhi = 10^-6];
+         (* Защита от деления на ноль при Pi/2 *)
+         If[Abs[cosPhi] <= 10^-6, cosPhi = Sign[cosPhi] * 10^-6];
+         If[cosPhi == 0, cosPhi = 10^-6]; 
+
          lVal = (phi0Val / (2 * Pi))^2 / (ejVal * cosPhi);
          Subscript["L", name] -> lVal
      ]

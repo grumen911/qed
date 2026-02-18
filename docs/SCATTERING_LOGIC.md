@@ -62,13 +62,15 @@ where $U$ is the identity matrix.
 
 Although `GroundNode` is ignored when building the linear S-matrix, it **returns** at the stage of numerical calculation of nonlinear inductances.
 
-The effective inductance of a Josephson junction depends on the phase difference:
-$$L_{eff} \propto \frac{1}{E_J \cos(\phi_1 - \phi_2)}$$
+The effective inductance of a Josephson junction depends on the total gauge-invariant phase difference, which includes both the node phase difference and the external magnetic flux (depending on the loop topology and gauge):
 
-Here, phases $\phi_1, \phi_2$ are taken from the static calculation (`EquilibriumFluxes`), which is **rigidly linked** to the quantum ground ($\phi_{ground} = 0$).
+$$L_{eff} = \left( \frac{\Phi_0}{2\pi} \right)^2 \frac{1}{E_J \cos\left(\frac{2\pi}{\Phi_0}(\Phi_1 - \Phi_2) + \varphi_{ext}\right)}$$
+
+Here, phases $\Phi_1, \Phi_2$ are taken from the static calculation (`EquilibriumFluxes`), which is **rigidly linked** to the quantum ground ($\Phi_{ground} = 0$).
+
 Thus:
-* **Static (DC):** Uses `GroundNode` for phase uniqueness.
-* **Dynamic (RF):** Ignores `GroundNode` for correct signal propagation.
+* **Static (DC):** Uses `GroundNode` for phase uniqueness to determine the equilibrium point.
+* **Dynamic (RF):** Ignores `GroundNode` (assumes floating ground) for correct signal propagation analysis around that equilibrium point.
 
 ---
 
