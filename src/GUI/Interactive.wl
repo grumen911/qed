@@ -321,7 +321,7 @@ RegisterPlot["Smatrix", "Scattering Parameters (S-matrix)", "Light",
 ];
 
 RegisterPlot["SmatrixHeatmap", "Scattering Parameters Heatmap", "Heavy", 
-  Function[{m}, QED`Plots`PlotSParameterMap[m, {0.1, 20.}, {"PhiExt", 0, 0.5}]]
+  Function[{m}, QED`Plots`PlotSParameterMap[m, {0.1, 20.}]]
 ];
 
 (* 

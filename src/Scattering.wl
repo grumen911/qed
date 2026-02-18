@@ -147,6 +147,8 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
 
 (* src/Scattering.wl *)
 
+(* src/Scattering.wl *)
+
 GetEffectiveInductances[model_Association, runtimeRules : (_List | Automatic) : Automatic] := 
  Module[{topology, primary, subRules, components, groundNode, 
         phi0Val, fluxLoops, effectiveRules},
@@ -160,19 +162,24 @@ GetEffectiveInductances[model_Association, runtimeRules : (_List | Automatic) : 
   
   fluxLoops = Lookup[topology["GraphStructure"], "fluxLoops", <||>];
   
-  (* 1. ФОРМИРОВАНИЕ ЕДИНОГО КОНТЕКСТА ПРАВИЛ *)
-  (* Если переданы runtimeRules (например, из свипа), они имеют приоритет. *)
-  (* Если нет - берем равновесные потоки из кэша. *)
+  (* 1. ФОРМИРОВАНИЕ ПРАВИЛ *)
   effectiveRules = If[runtimeRules === Automatic,
      Module[{eqFluxes},
         eqFluxes = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
-        If[eqFluxes === $Failed, Return[$Failed]];
-        (* Базовый случай: Равновесие + Статика модели *)
-        Join[eqFluxes, subRules]
+        
+        (* FIX: Если ошибка, возвращаем $Failed как значение Module, 
+           а снаружи проверяем результат *)
+        If[eqFluxes === $Failed, 
+            $Failed, 
+            Join[eqFluxes, subRules]
+        ]
      ],
-     (* Свип: Переданные правила (override) + Статика модели (fallback) *)
+     (* Свип: Переданные правила имеют приоритет *)
      Join[runtimeRules, subRules]
   ];
+
+  (* Если не удалось получить правила, выходим *)
+  If[effectiveRules === $Failed, Return[$Failed]];
   
   Cases[components, 
     {type_, n1_, n2_, name_, ___} /;
@@ -181,26 +188,20 @@ GetEffectiveInductances[model_Association, runtimeRules : (_List | Automatic) : 
              extFluxVal, loopInfo, fluxSym},
          
          params = primary[name];
-         (* Параметры ищем в effectiveRules. Если это свип EJ, новое значение будет в начале списка. *)
+         (* Используем ReplaceRepeated (//.) для разрешения цепочек *)
          ejVal = (params["EJ"]["Symbol"] //. effectiveRules); 
          
-         (* 2. УЗЛОВЫЕ ПОТОКИ *)
-         (* Используем //. (ReplaceRepeated) чтобы разрешить возможные цепочки *)
          phi1 = If[n1 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n1] //. effectiveRules];
          phi2 = If[n2 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n2] //. effectiveRules];
 
-         (* 3. ВНЕШНИЙ ПОТОК *)
          extFluxVal = 0.;
          If[KeyExistsQ[fluxLoops, name],
             loopInfo = fluxLoops[name];
             fluxSym = loopInfo["ExternalFluxSymbol"];
             
-            (* ГЛАВНОЕ ИСПРАВЛЕНИЕ: *)
-            (* Ищем символ потока во всем контексте effectiveRules. *)
-            (* //. разрешает цепочку Loop -> PhiExt -> Value за один проход. *)
+            (* ГЛАВНОЕ: Ищем значение во всем контексте (//.) *)
             extFluxVal = (fluxSym //. effectiveRules);
             
-            (* Если в правилах не нашлось числа, значит потока нет или он 0 *)
             If[!NumericQ[extFluxVal], extFluxVal = 0.];
          ];
          
@@ -208,7 +209,6 @@ GetEffectiveInductances[model_Association, runtimeRules : (_List | Automatic) : 
          phaseDrop = 2 * Pi * phiDiff / phi0Val;
          cosPhi = Cos[phaseDrop];
          
-         (* Защита от сингулярности 1/cos(pi/2) *)
          If[Abs[cosPhi] <= 10^-6, cosPhi = Sign[cosPhi] * 10^-6];
          If[cosPhi == 0, cosPhi = 10^-6]; 
 

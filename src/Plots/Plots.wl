@@ -124,7 +124,7 @@ PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceCon
 Begin["`Private`"];
 
 Options[PlotSParameterMap] = {
-  FluxRange -> {-0.5, 0.5},
+  FluxRange -> {0., 0.5},
   "Measurement" -> "S21",
   PlotPoints -> 50,
   ColorFunction -> "TemperatureMap",
@@ -1186,12 +1186,17 @@ PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] 
   ]
  ];
 
-PlotSParameterMap[model_Association, {fMin_?NumericQ, fMax_?NumericQ}, opts:OptionsPattern[]] := 
+(* src/Plots/Plots.wl *)
+
+PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, opts:OptionsPattern[]] := 
   Module[{
+    fMin, fMax,
     fluxRange, measure, plotPoints, colFunc,
     sIndex, label, 
     analyzerFunc, sweepFunc
   },
+  
+  {fMin, fMax} = range; (* Распаковываем диапазон *)
 
   (* 1. Настройки *)
   fluxRange = OptionValue[FluxRange];
@@ -1203,23 +1208,16 @@ PlotSParameterMap[model_Association, {fMin_?NumericQ, fMax_?NumericQ}, opts:Opti
   label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
 
   (* 2. Анализатор *)
-  (* Вся физика теперь считается внутри UpdateModelWithRules, который вызывается в GenerateFluxSweep. *)
-  (* Мы просто забираем готовую численную S-матрицу из кэша. *)
   analyzerFunc = Function[{tempModel},
      Module[{sCache, sMatNum, sVar, targetElement},
-        
         sCache = tempModel["Numerical"]["Cache"]["SMatrixNumerical"];
-        
-        If[sCache["State"] =!= "Ready",
-            (* Если расчет не удался, возвращаем 0 *)
+        If[MissingQ[sCache] || sCache["State"] =!= "Ready",
             Function[{f}, 0.0],
             
-            (* Если успех: *)
-            sMatNum = sCache["Value"];             (* Матрица чисел, зависящая от s *)
-            sVar = sCache["FrequencyVariable"];    (* Символ s *)
+            sMatNum = sCache["Value"];
+            sVar = sCache["FrequencyVariable"];
             targetElement = sMatNum[[ sIndex[[1]], sIndex[[2]] ]];
             
-            (* Возвращаем функцию S(f) *)
             Function[{fGHz}, 
                Abs[ targetElement /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]
             ]
@@ -1228,7 +1226,6 @@ PlotSParameterMap[model_Association, {fMin_?NumericQ, fMax_?NumericQ}, opts:Opti
   ];
 
   (* 3. Генерация свипа *)
-  (* GenerateFluxSweep сам найдет равновесие, обновит модель и посчитает S-матрицу (благодаря правке в Model.wl) *)
   sweepFunc = QED`Numeric`GenerateFluxSweep[model, analyzerFunc];
 
   If[sweepFunc === $Failed,
@@ -1244,16 +1241,13 @@ PlotSParameterMap[model_Association, {fMin_?NumericQ, fMax_?NumericQ}, opts:Opti
      PlotPoints -> plotPoints,
      PlotRange -> {0, 1.05}, 
      ColorFunction -> colFunc,
-     
      Frame -> True,
      FrameLabel -> OptionValue[FrameLabel],
      FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-     
      PlotLabel -> Style[label, 16, FontFamily -> "Times"],
      PlotLegends -> Automatic,
-     
      ImageSize -> 600,
-     MaxRecursion -> 1 (* Для скорости *)
+     MaxRecursion -> 1
   ]
 ];
 
