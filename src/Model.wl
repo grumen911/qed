@@ -811,6 +811,14 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
         $Failed
     ];
 
+    effRules = QED`Scattering`GetEffectiveInductances[model, rules];
+
+    (* Рассчитываем численную S-матрицу (numbers + s) *)
+    sMatrixNum = If[effRules =!= $Failed,
+        analytical["Scattering"]["SMatrixRaw"] /. Join[rules, effRules],
+        $Failed
+    ];
+
     (* 4. Формируем обновления для кэша *)
     newCache = <|
         "CapacitanceMatrixNumerical"       -> <|"State" -> "Ready", "Value" -> capNum|>,
@@ -820,7 +828,14 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
         "CurrentOperatorNumerical"         -> <|"State" -> "Ready", "Value" -> currentOpNum|>,
         "VoltageOperatorsNumerical"        -> <|"State" -> "Ready", "Value" -> voltageOpsNum|>,
         "HarmonicDiagonalization"          -> <|"State" -> "Ready", "Value" -> diag|>,
-        
+
+        "EffectiveInductances"             -> <|"State" -> "Ready", "Value" -> effRules|>,
+        "SMatrixNumerical"                 -> <|
+                                                "State" -> "Ready", 
+                                                "Value" -> sMatrixNum,
+                                                "FrequencyVariable" -> analytical["Scattering"]["FrequencyVariable"]
+                                              |>,
+
         "PlasmonFrequencies" -> <|
             "State" -> "Ready", 
             "Value" -> Sort[If[diag === $Failed, $Failed, diag["NormalModeFrequencies"]]]

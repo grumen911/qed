@@ -104,11 +104,35 @@ PlotFrequencyResponse::usage =
      fMin, fMax in GHz.
    Requires ComputeNumericalHarmonicPerturbation.";
 
+PlotSParameterMap::usage = 
+"PlotSParameterMap[model, {fMin, fMax}] creates a density plot (heatmap) of S-parameters magnitude.
+Axes: X = External Flux (Φ/Φ₀), Y = Frequency (GHz).
+
+Options:
+  FluxRange -> {-0.5, 0.5}
+  \"Measurement\" -> \"S21\" (default) | \"S11\"
+  PlotPoints -> 50 
+  ColorFunction -> \"TemperatureMap\"
+  
+Performance:
+  Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
 
 Begin["`Private`"];
+
+Options[PlotSParameterMap] = {
+  FluxRange -> {-0.5, 0.5},
+  "Measurement" -> "S21",
+  PlotPoints -> 50,
+  ColorFunction -> "TemperatureMap",
+  FrameLabel -> {
+    "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)", 
+    "Frequency (GHz)"
+  }
+};
 
 Options[PlotFrequencyResponse] = {
     "Measurement" -> "S21" (* "S11" or "S21" *)
@@ -1161,6 +1185,77 @@ PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] 
      PlotPoints -> 500
   ]
  ];
+
+PlotSParameterMap[model_Association, {fMin_?NumericQ, fMax_?NumericQ}, opts:OptionsPattern[]] := 
+  Module[{
+    fluxRange, measure, plotPoints, colFunc,
+    sIndex, label, 
+    analyzerFunc, sweepFunc
+  },
+
+  (* 1. Настройки *)
+  fluxRange = OptionValue[FluxRange];
+  measure = OptionValue["Measurement"];
+  plotPoints = OptionValue[PlotPoints];
+  colFunc = OptionValue[ColorFunction];
+  
+  sIndex = If[measure === "S11", {1, 1}, {2, 1}];
+  label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
+
+  (* 2. Анализатор *)
+  (* Вся физика теперь считается внутри UpdateModelWithRules, который вызывается в GenerateFluxSweep. *)
+  (* Мы просто забираем готовую численную S-матрицу из кэша. *)
+  analyzerFunc = Function[{tempModel},
+     Module[{sCache, sMatNum, sVar, targetElement},
+        
+        sCache = tempModel["Numerical"]["Cache"]["SMatrixNumerical"];
+        
+        If[sCache["State"] =!= "Ready",
+            (* Если расчет не удался, возвращаем 0 *)
+            Function[{f}, 0.0],
+            
+            (* Если успех: *)
+            sMatNum = sCache["Value"];             (* Матрица чисел, зависящая от s *)
+            sVar = sCache["FrequencyVariable"];    (* Символ s *)
+            targetElement = sMatNum[[ sIndex[[1]], sIndex[[2]] ]];
+            
+            (* Возвращаем функцию S(f) *)
+            Function[{fGHz}, 
+               Abs[ targetElement /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]
+            ]
+        ]
+     ]
+  ];
+
+  (* 3. Генерация свипа *)
+  (* GenerateFluxSweep сам найдет равновесие, обновит модель и посчитает S-матрицу (благодаря правке в Model.wl) *)
+  sweepFunc = QED`Numeric`GenerateFluxSweep[model, analyzerFunc];
+
+  If[sweepFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
+  ];
+
+  (* 4. Отрисовка *)
+  DensityPlot[
+     sweepFunc[phi][f], 
+     {phi, fluxRange[[1]], fluxRange[[2]]}, 
+     {f, fMin, fMax},
+     
+     PlotPoints -> plotPoints,
+     PlotRange -> {0, 1.05}, 
+     ColorFunction -> colFunc,
+     
+     Frame -> True,
+     FrameLabel -> OptionValue[FrameLabel],
+     FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+     
+     PlotLabel -> Style[label, 16, FontFamily -> "Times"],
+     PlotLegends -> Automatic,
+     
+     ImageSize -> 600,
+     MaxRecursion -> 1 (* Для скорости *)
+  ]
+];
 
 End[];
 EndPackage[];

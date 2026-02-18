@@ -320,6 +320,10 @@ RegisterPlot["Smatrix", "Scattering Parameters (S-matrix)", "Light",
   Function[{m}, QED`Plots`PlotFrequencyResponse[m, {0.1, 20.}]]
 ];
 
+RegisterPlot["SmatrixHeatmap", "Scattering Parameters Heatmap", "Heavy", 
+  Function[{m}, QED`Plots`PlotSParameterMap[m, {0.1, 20.}, {"PhiExt", 0, 0.5}]]
+];
+
 (* 
    COMPUTE WORKER (FUNCTIONAL STYLE)
    Input: plotId, model (Value)

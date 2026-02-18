@@ -145,9 +145,11 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
 (* ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-GetEffectiveInductances[model_Association, explicitFluxes : (_List | Automatic) : Automatic] := 
+(* src/Scattering.wl *)
+
+GetEffectiveInductances[model_Association, runtimeRules : (_List | Automatic) : Automatic] := 
  Module[{topology, primary, subRules, components, groundNode, 
-        phiMin, phi0Val, fluxLoops},
+        phi0Val, fluxLoops, effectiveRules},
   
   topology = model["Topology"];
   primary = model["Primary"]; 
@@ -156,51 +158,62 @@ GetEffectiveInductances[model_Association, explicitFluxes : (_List | Automatic) 
   groundNode = topology["GroundNode"];
   phi0Val = QED`$Phi0Value;
   
-  (* 1. Достаем информацию о петлях, чтобы знать, где добавлять внешний поток *)
   fluxLoops = Lookup[topology["GraphStructure"], "fluxLoops", <||>];
-
-  phiMin = If[explicitFluxes === Automatic,
-     QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"],
-     explicitFluxes
+  
+  (* 1. ФОРМИРОВАНИЕ ЕДИНОГО КОНТЕКСТА ПРАВИЛ *)
+  (* Если переданы runtimeRules (например, из свипа), они имеют приоритет. *)
+  (* Если нет - берем равновесные потоки из кэша. *)
+  effectiveRules = If[runtimeRules === Automatic,
+     Module[{eqFluxes},
+        eqFluxes = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
+        If[eqFluxes === $Failed, Return[$Failed]];
+        (* Базовый случай: Равновесие + Статика модели *)
+        Join[eqFluxes, subRules]
+     ],
+     (* Свип: Переданные правила (override) + Статика модели (fallback) *)
+     Join[runtimeRules, subRules]
   ];
   
-  If[phiMin === $Failed, Return[$Failed]];
-  
   Cases[components, 
-    {type_, n1_, n2_, name_, ___} /; type === "JosephsonJunction" :> 
+    {type_, n1_, n2_, name_, ___} /;
+    type === "JosephsonJunction" :> 
      Module[{params, ejVal, phi1, phi2, phiDiff, phaseDrop, cosPhi, lVal, 
              extFluxVal, loopInfo, fluxSym},
          
          params = primary[name];
-         ejVal = (params["EJ"]["Symbol"] /. subRules); 
+         (* Параметры ищем в effectiveRules. Если это свип EJ, новое значение будет в начале списка. *)
+         ejVal = (params["EJ"]["Symbol"] //. effectiveRules); 
          
-         (* Узловые потоки *)
-         phi1 = If[n1 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n1] /. phiMin];
-         phi2 = If[n2 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n2] /. phiMin];
-         
-         (* ИЗМЕНЕНИЕ: Учет внешнего потока, если элемент - хорда *)
+         (* 2. УЗЛОВЫЕ ПОТОКИ *)
+         (* Используем //. (ReplaceRepeated) чтобы разрешить возможные цепочки *)
+         phi1 = If[n1 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n1] //. effectiveRules];
+         phi2 = If[n2 === groundNode, 0., Subscript[QED`$FluxSymbol, "min", n2] //. effectiveRules];
+
+         (* 3. ВНЕШНИЙ ПОТОК *)
          extFluxVal = 0.;
          If[KeyExistsQ[fluxLoops, name],
             loopInfo = fluxLoops[name];
             fluxSym = loopInfo["ExternalFluxSymbol"];
             
-            (* Ищем значение потока в переменных (если он варьировался) или в параметрах модели *)
-            extFluxVal = (fluxSym /. phiMin);
-            If[!NumericQ[extFluxVal], extFluxVal = (fluxSym /. subRules)];
+            (* ГЛАВНОЕ ИСПРАВЛЕНИЕ: *)
+            (* Ищем символ потока во всем контексте effectiveRules. *)
+            (* //. разрешает цепочку Loop -> PhiExt -> Value за один проход. *)
+            extFluxVal = (fluxSym //. effectiveRules);
+            
+            (* Если в правилах не нашлось числа, значит потока нет или он 0 *)
             If[!NumericQ[extFluxVal], extFluxVal = 0.];
          ];
-
-         (* Добавляем внешний поток к разности узловых *)
-         phiDiff = (phi1 - phi2) + extFluxVal;
          
+         phiDiff = (phi1 - phi2) + extFluxVal;
          phaseDrop = 2 * Pi * phiDiff / phi0Val;
          cosPhi = Cos[phaseDrop];
          
-         (* Защита от деления на ноль при Pi/2 *)
+         (* Защита от сингулярности 1/cos(pi/2) *)
          If[Abs[cosPhi] <= 10^-6, cosPhi = Sign[cosPhi] * 10^-6];
          If[cosPhi == 0, cosPhi = 10^-6]; 
 
          lVal = (phi0Val / (2 * Pi))^2 / (ejVal * cosPhi);
+         
          Subscript["L", name] -> lVal
      ]
   ]
