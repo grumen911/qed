@@ -127,7 +127,7 @@ Options[PlotSParameterMap] = {
   FluxRange -> {0., 0.5},
   "Measurement" -> "S21",
   PlotPoints -> 50,
-  ColorFunction -> "TemperatureMap",
+  ColorFunction -> "SunsetColors",
   FrameLabel -> {
     "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)", 
     "Frequency (GHz)"
@@ -1186,19 +1186,14 @@ PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] 
   ]
  ];
 
-(* src/Plots/Plots.wl *)
-
 PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, opts:OptionsPattern[]] := 
   Module[{
-    fMin, fMax,
-    fluxRange, measure, plotPoints, colFunc,
-    sIndex, label, 
-    analyzerFunc, sweepFunc
+    fMin, fMax, fluxRange, measure, plotPoints, colFunc,
+    sIndex, label, legendLabel, analyzerFunc, sweepFunc,
+    plot, legend
   },
   
-  {fMin, fMax} = range; (* Распаковываем диапазон *)
-
-  (* 1. Настройки *)
+  {fMin, fMax} = range;
   fluxRange = OptionValue[FluxRange];
   measure = OptionValue["Measurement"];
   plotPoints = OptionValue[PlotPoints];
@@ -1206,34 +1201,19 @@ PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, o
   
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
   label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
+  legendLabel = If[measure === "S11", "|S11|", "|S21|"];
 
-  (* 2. Анализатор *)
   analyzerFunc = Function[{tempModel},
-     Module[{sCache, sMatNum, sVar, targetElement},
-        sCache = tempModel["Numerical"]["Cache"]["SMatrixNumerical"];
-        If[MissingQ[sCache] || sCache["State"] =!= "Ready",
-            Function[{f}, 0.0],
-            
-            sMatNum = sCache["Value"];
-            sVar = sCache["FrequencyVariable"];
-            targetElement = sMatNum[[ sIndex[[1]], sIndex[[2]] ]];
-            
-            Function[{fGHz}, 
-               Abs[ targetElement /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]
-            ]
-        ]
-     ]
+      Function[{fGHz}, Abs[QED`Scattering`CalculateSParameter[tempModel, fGHz * 10^9, sIndex]]]
   ];
-
-  (* 3. Генерация свипа *)
   sweepFunc = QED`Numeric`GenerateFluxSweep[model, analyzerFunc];
 
   If[sweepFunc === $Failed,
       Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
   ];
 
-  (* 4. Отрисовка *)
-  DensityPlot[
+  (* 1. Чистый график *)
+  plot = DensityPlot[
      sweepFunc[phi][f], 
      {phi, fluxRange[[1]], fluxRange[[2]]}, 
      {f, fMin, fMax},
@@ -1245,11 +1225,28 @@ PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, o
      FrameLabel -> OptionValue[FrameLabel],
      FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
      PlotLabel -> Style[label, 16, FontFamily -> "Times"],
-     PlotLegends -> Automatic,
+     PlotLegends -> None, 
      ImageSize -> 600,
      MaxRecursion -> 1
-  ]
+  ];
+
+  (* 2. Чистая векторная легенда *)
+  legend = BarLegend[
+      {colFunc, {0, 1.05}},
+      LegendLabel -> Style[legendLabel, FontSize -> 16, FontFamily -> "Times"],
+      LabelStyle -> Directive[Black, 14, FontFamily -> "Times"],
+      LegendMarkerSize -> {20, 300},
+      
+      (* Эти опции нужны для корректного отображения в блокноте *)
+      Frame -> False,
+      Axes -> False,
+      LegendFunction -> None
+  ];
+
+  (* 3. Возвращаем семантический объект *)
+  Legended[plot, Placed[legend, Right]]
 ];
+
 
 End[];
 EndPackage[];
