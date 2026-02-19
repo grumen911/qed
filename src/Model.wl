@@ -26,6 +26,9 @@ UpdateModelWithRules::usage = "UpdateModelWithRules[model, rules] updates the mo
 (at root) and manually populates the numerical cache with matrices and diagonalization data, \
 setting IsDirty->False. This allows skipping the expensive FindPotentialMinimum step during sweeps.";
 
+GetParameterVector::usage = "GetParameterVector[model] returns a sorted PackedArray of Reals representing \
+the model's primary parameters for JIT compilation.";
+
 $CurrentModel::usage = "Global reference to the active circuit model for substitution rules";
 
 
@@ -117,6 +120,35 @@ BuildSubstitutionRules[primary_Association, topology_Association] := Module[
   Join[primaryRules, constantRules, equilibriumRules]
 ];
 
+GetParameterVector[modelAssoc_] := Module[
+  {allRules, paramRules, evaluatedRules, sortedRules, valuesVector},
+  
+  (* Извлекаем базовые правила подстановки *)
+  allRules = modelAssoc["SubstitutionRules"];
+  
+  (* Фильтруем физические константы и потоки равновесия (min) *)
+  paramRules = Select[allRules, 
+    Function[ruleItem, 
+      Not[StringContainsQ[ToString[ruleItem[[1]]], "min"]] &&
+      Not[MemberQ[{QED`$Phi0, QED`$hbar, QED`$e}, ruleItem[[1]]]]
+    ]
+  ];
+  
+  (* Раскрываем RuleDelayed (:>) и принудительно переводим в числа *)
+  evaluatedRules = Map[
+    Function[ruleItem, ruleItem[[1]] -> N[ReleaseHold[ruleItem[[2]]]]], 
+    paramRules
+  ];
+  
+  (* Жесткая сортировка ключей по алфавиту *)
+  sortedRules = SortBy[evaluatedRules, Function[ruleItem, ToString[ruleItem[[1]]]]];
+  
+  (* Извлекаем только значения *)
+  valuesVector = Map[Last, sortedRules];
+  
+  (* Упаковываем в плоский вектор для CompiledFunction *)
+  Developer`ToPackedArray[valuesVector, Real]
+];
 
 (* ════════════════════════════════════════════════════════════════ *)
 (* 		ГЕНЕРАЦИЯ PLACEHOLDER ИЗОБРАЖЕНИЯ                           *)
@@ -343,7 +375,7 @@ GenerateDefaultParameters[topology_] :=
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
- 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering},
+ 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering, potential},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -371,6 +403,7 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
     "HarmonicHamiltonian" -> harmonicHamiltonian,
     "InductanceMatrix" -> indMatrix,
     "PotentialGradient" -> potentialGradient,
+    "Potential" -> hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0,
     "CurrentOperator" -> currentOp,
     "VoltageOperators" -> voltageOperatorsSym,
     "Scattering" -> scattering
