@@ -15,61 +15,58 @@ Begin["`Private`"];
 
 CalcCompiledEngines[analytical_Association, fluxSymbols_List, paramSymbols_List] := Module[
   {
-    constantRules, gradSym, hessSym, 
+    phi0, energyScale, constantRules, 
+    potSym, potRescaled, gradSym, hessSym, 
     fluxRules, paramRules, allRules,
     heldGrad, heldHess, fastGrad, fastHess
   },
   
-  (* 1. Выделяем физические константы для пред-подстановки *)
+  (* 1. Определяем масштабы и константы *)
+  phi0 = QED`$Phi0Value;
+  energyScale = QED`$hbarValue * 2 * Pi * 10^9; (* Энергия фотона 1 ГГц в Джоулях *)
+  
   constantRules = {
-    QED`$Phi0 -> QED`$Phi0Value,
+    QED`$Phi0 -> phi0,
     QED`$hbar -> QED`$hbarValue,
     QED`$e   -> QED`$eValue
   };
   
-  (* Извлекаем аналитику и сразу подставляем константы (они не пойдут в вектор p) *)
-  gradSym = analytical["PotentialGradient"] /. constantRules;
-  hessSym = (D[analytical["PotentialGradient"], {fluxSymbols}]) /. constantRules;
+  (* 2. Извлекаем сырой потенциал и подставляем константы *)
+  potSym = analytical["Potential"] /. constantRules;
   
-  (* 2. БЕЗОПАСНЫЕ ПРАВИЛА (Лексическое замыкание)
-     Используем With для фиксации конкретного числа idx, 
-     чтобы внутрь RuleDelayed не утекла локальная переменная цикла. *)
-  fluxRules = Table[
-    With[{idx = i}, fluxSymbols[[idx]] :> phi[[idx]]], 
-    {i, Length[fluxSymbols]}
-  ];
-  paramRules = Table[
-    With[{idx = i}, paramSymbols[[idx]] :> p[[idx]]], 
-    {i, Length[paramSymbols]}
-  ];
+  (* 3. Символьное обезразмеривание: 
+     Делим энергию на масштаб, фазы заменяем на (безразмерная_фаза * Phi0) *)
+  potRescaled = (potSym / energyScale) /. 
+    Table[fluxSymbols[[i]] -> fluxSymbols[[i]] * phi0, {i, Length[fluxSymbols]}];
+
+    Print["[Debug] Rescaled Potential: ", potRescaled];
+  
+  (* 4. Берем производные по БЕЗРАЗМЕРНЫМ переменным *)
+  gradSym = D[potRescaled, {fluxSymbols}];
+  hessSym = D[gradSym, {fluxSymbols}];
+  
+  (* 5. Формируем правила для JIT-трансляции *)
+  fluxRules = Table[With[{idx = i}, fluxSymbols[[idx]] :> phi[[idx]]], {i, Length[fluxSymbols]}];
+  paramRules = Table[With[{idx = i}, paramSymbols[[idx]] :> p[[idx]]], {i, Length[paramSymbols]}];
   allRules = Join[fluxRules, paramRules];
   
-  (* 3. ЗАЩИТА ОТ ВЫЧИСЛЕНИЙ (Изоляция в Hold)
-     Оборачиваем выражения в Hold, чтобы Part ( [[idx]] ) не пытался вычислиться *)
+  (* 6. Защита в Hold *)
   heldGrad = With[{g = gradSym}, Hold[g]] /. allRules;
   heldHess = With[{h = hessSym}, Hold[h]] /. allRules;
   
-  (* 4. ГЕНЕРАЦИЯ COMPILE
-     Трансформируем Hold-контейнер напрямую в вызов Compile.
-     Это самый чистый способ передать готовое AST в компилятор. *)
-  fastGrad = heldGrad /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}}, 
-    body, 
-    CompilationTarget -> "C", 
+  (* 7. Компиляция в C с оптимизацией выражений *)
+  fastGrad = heldGrad /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}},
+    body,
+    CompilationTarget -> "C",
     RuntimeOptions -> "Speed",
-    CompilationOptions -> {
-        "ExpressionOptimization" -> True,
-        "InlineExternalDefinitions" -> True
-    }
+    CompilationOptions -> {"ExpressionOptimization" -> True, "InlineExternalDefinitions" -> True}
   ];
   
-  fastHess = heldHess /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}}, 
-    body, 
-    CompilationTarget -> "C", 
+  fastHess = heldHess /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}},
+    body,
+    CompilationTarget -> "C",
     RuntimeOptions -> "Speed",
-    CompilationOptions -> {
-        "ExpressionOptimization" -> True,
-        "InlineExternalDefinitions" -> True
-    }
+    CompilationOptions -> {"ExpressionOptimization" -> True, "InlineExternalDefinitions" -> True}
   ];
   
   {fastGrad, fastHess}
@@ -94,29 +91,35 @@ CalcStaticMatrices[analytical_Association, rules_List] := Module[
 ];
 
 CalcEquilibrium[{fastGrad_, fastHess_}, guess_List, paramVector_?Developer`PackedArrayQ] := Module[
-  {fg, fh, phiVec, root, phiMin},
+  {fg, fh, guessDimless, phiVec, root, phiMinDimless},
   
-  (* Блокируем символьное вычисление: функции сработают только если v - числовой вектор *)
+  (* 1. Обезразмериваем стартовую точку (Веберы -> Радианы/2Pi) *)
+  guessDimless = guess / QED`$Phi0Value;
+  
+  (* 2. Защита от символьного вычисления *)
   fg[v_?(VectorQ[#, NumericQ] &)] := fastGrad[v, paramVector];
   fh[v_?(VectorQ[#, NumericQ] &)] := fastHess[v, paramVector];
   
+  (* 3. Вызов метода Ньютона в безразмерных координатах *)
   root = Quiet[
     FindRoot[
       fg[phiVec],
-      {phiVec, guess},
+      {phiVec, guessDimless},
       Jacobian -> fh[phiVec],
       Method -> "Newton"
     ],
     {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
   ];
   
-  phiMin = If[root === $Failed, 
+  (* 4. Извлекаем безразмерный результат *)
+  phiMinDimless = If[root === $Failed, 
     $Failed, 
     phiVec /. root
   ];
   
-  If[phiMin =!= $Failed,
-    Developer`ToPackedArray[phiMin, Real],
+  (* 5. Возвращаем размерный результат (Веберы), упаковывая в C-массив *)
+  If[phiMinDimless =!= $Failed,
+    Developer`ToPackedArray[phiMinDimless * QED`$Phi0Value, Real],
     $Failed
   ]
 ];

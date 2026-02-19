@@ -375,7 +375,7 @@ GenerateDefaultParameters[topology_] :=
 
 ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
- 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering},
+ 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering, potential},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -403,6 +403,7 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
     "HarmonicHamiltonian" -> harmonicHamiltonian,
     "InductanceMatrix" -> indMatrix,
     "PotentialGradient" -> potentialGradient,
+    "Potential" -> hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0,
     "CurrentOperator" -> currentOp,
     "VoltageOperators" -> voltageOperatorsSym,
     "Scattering" -> scattering
