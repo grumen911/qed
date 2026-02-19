@@ -16,6 +16,9 @@ the numeric inverse inductance matrix using JIT.";
 CalcEigenSystem::usage = "CalcEigenSystem[invCNum, invLNum] computes normal mode frequencies \
 (omega) and eigenvectors from C^-1 . L^-1.";
 
+CalcSMatrixNumeric::usage = "CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0] \
+calculates the numerical S-matrix at a given angular frequency using floating ground expansion and Schur complement.";
+
 Begin["`Private`"];
 
 
@@ -142,6 +145,59 @@ CalcEigenSystem[invCNum_?MatrixQ, invLNum_?MatrixQ] := Module[
     "Frequencies" -> freqs[[sortingIndices]],
     "EigenVectors" -> vecs[[sortingIndices]]
   |>
+];
+
+ExpandToFloatingMatrix[mat_?MatrixQ] := Module[
+  {rowSums, colSums, totalSum},
+  rowSums = -Total[mat, {2}]; (* Сумма по строкам *)
+  colSums = -Total[mat, {1}]; (* Сумма по столбцам *)
+  totalSum = -Total[rowSums]; (* Сумма всех элементов *)
+  
+  (* Собираем новую матрицу блоками *)
+  ArrayFlatten[{{mat, Transpose[{rowSums}]}, {List[colSums], totalSum}}]
+];
+
+CalcSMatrixNumeric[omega_?NumericQ, cNum_?MatrixQ, invLNum_?MatrixQ, portIndices_List, z0_Real:50.0] := Module[
+  {
+    cFull, invLFull, yFull, 
+    pIdx, iIdx, 
+    yPP, yPI, yIP, yII, yReduced, 
+    nPorts, id, sMat
+  },
+  
+  (* 1. Восстанавливаем "плавающую землю" (GroundNode становится последним индексом N+1) *)
+  cFull = ExpandToFloatingMatrix[cNum];
+  invLFull = ExpandToFloatingMatrix[invLNum];
+  
+  (* 2. Собираем полную комплексную Y-матрицу схемы: Y = 1/(i w L) + i w C *)
+  yFull = (1.0 / (I * omega)) * invLFull + (I * omega) * cFull;
+  
+  (* 3. Распределяем индексы на Порты (P) и Внутренние (I) *)
+  pIdx = portIndices;
+  iIdx = Complement[Range[Length[yFull]], pIdx];
+  
+  (* 4. Блочное разбиение и Шуровское исключение внутренних узлов *)
+  yPP = yFull[[pIdx, pIdx]];
+  
+  If[Length[iIdx] > 0,
+    yPI = yFull[[pIdx, iIdx]];
+    yIP = yFull[[iIdx, pIdx]];
+    yII = yFull[[iIdx, iIdx]];
+    
+    (* Быстрое исключение через LAPACK/MKL: yPI . (yII^-1 . yIP) *)
+    yReduced = yPP - yPI . LinearSolve[yII, yIP];
+  ,
+    yReduced = yPP;
+  ];
+  
+  (* 5. Преобразование Y -> S *)
+  nPorts = Length[pIdx];
+  id = IdentityMatrix[nPorts, WorkingPrecision -> MachinePrecision];
+  
+  (* Формула: S = (I - Z0*Y) . (I + Z0*Y)^-1 *)
+  sMat = LinearSolve[id + z0 * yReduced, id - z0 * yReduced];
+  
+  Developer`ToPackedArray[sMat, Complex]
 ];
 
 End[];
