@@ -1,8 +1,15 @@
 BeginPackage["QED`Numeric`Calculators`"];
 
-CalcCompiledEngines::usage = "CalcCompiledEngines[analytical, fluxSymbols, paramSymbols] generates JIT-compiled C-functions {FastGrad, FastHess} for root finding.";
+
+CalcCompiledEngines::usage = "CalcCompiledEngines[analytical, fluxSymbols, paramSymbols] \
+generates JIT-compiled C-functions {FastGrad, FastHess} for root finding.";
+
+CalcStaticMatrices::usage = "CalcStaticMatrices[analytical, rules] computes the static \
+numerical capacitance matrix and its inverse. Returns {C_num, InvC_num}.";
+
 
 Begin["`Private`"];
+
 
 CalcCompiledEngines[analytical_Association, fluxSymbols_List, paramSymbols_List] := Module[
   {
@@ -46,16 +53,42 @@ CalcCompiledEngines[analytical_Association, fluxSymbols_List, paramSymbols_List]
   fastGrad = heldGrad /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}}, 
     body, 
     CompilationTarget -> "C", 
-    RuntimeOptions -> "Speed"
+    RuntimeOptions -> "Speed",
+    CompilationOptions -> {
+        "ExpressionOptimization" -> True,
+        "InlineExternalDefinitions" -> True
+    }
   ];
   
   fastHess = heldHess /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}}, 
     body, 
     CompilationTarget -> "C", 
-    RuntimeOptions -> "Speed"
+    RuntimeOptions -> "Speed",
+    CompilationOptions -> {
+        "ExpressionOptimization" -> True,
+        "InlineExternalDefinitions" -> True
+    }
   ];
   
   {fastGrad, fastHess}
+];
+
+CalcStaticMatrices[analytical_Association, rules_List] := Module[
+  {capSym, cNum, invCNum},
+  
+  (* Извлекаем символьную матрицу *)
+  capSym = analytical["CapacitanceMatrix"];
+  
+  (* Подставляем правила и приводим к машинным числам (Real) *)
+  cNum = N[capSym /. rules];
+  
+  (* Безопасное обращение матрицы *)
+  invCNum = If[Det[cNum] != 0, 
+    Inverse[cNum], 
+    $Failed
+  ];
+  
+  {cNum, invCNum}
 ];
 
 End[];
