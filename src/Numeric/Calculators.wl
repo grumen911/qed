@@ -7,6 +7,8 @@ generates JIT-compiled C-functions {FastGrad, FastHess} for root finding.";
 CalcStaticMatrices::usage = "CalcStaticMatrices[analytical, rules] computes the static \
 numerical capacitance matrix and its inverse. Returns {C_num, InvC_num}.";
 
+CalcEquilibrium::usage = "CalcEquilibrium[compiledEngines, guess, paramVector] performs \
+a fast local Newton search for equilibrium flux using JIT engines.";
 
 Begin["`Private`"];
 
@@ -89,6 +91,34 @@ CalcStaticMatrices[analytical_Association, rules_List] := Module[
   ];
   
   {cNum, invCNum}
+];
+
+CalcEquilibrium[{fastGrad_, fastHess_}, guess_List, paramVector_?Developer`PackedArrayQ] := Module[
+  {fg, fh, phiVec, root, phiMin},
+  
+  (* Блокируем символьное вычисление: функции сработают только если v - числовой вектор *)
+  fg[v_?(VectorQ[#, NumericQ] &)] := fastGrad[v, paramVector];
+  fh[v_?(VectorQ[#, NumericQ] &)] := fastHess[v, paramVector];
+  
+  root = Quiet[
+    FindRoot[
+      fg[phiVec],
+      {phiVec, guess},
+      Jacobian -> fh[phiVec],
+      Method -> "Newton"
+    ],
+    {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
+  ];
+  
+  phiMin = If[root === $Failed, 
+    $Failed, 
+    phiVec /. root
+  ];
+  
+  If[phiMin =!= $Failed,
+    Developer`ToPackedArray[phiMin, Real],
+    $Failed
+  ]
 ];
 
 End[];
