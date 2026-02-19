@@ -10,6 +10,12 @@ numerical capacitance matrix and its inverse. Returns {C_num, InvC_num}.";
 CalcEquilibrium::usage = "CalcEquilibrium[compiledEngines, guess, paramVector] performs \
 a fast local Newton search for equilibrium flux using JIT engines.";
 
+CalcSystemMatrices::usage = "CalcSystemMatrices[fastLInv, phiMin, paramVector] computes \
+the numeric inverse inductance matrix using JIT.";
+
+CalcEigenSystem::usage = "CalcEigenSystem[invCNum, invLNum] computes normal mode frequencies \
+(omega) and eigenvectors from C^-1 . L^-1.";
+
 Begin["`Private`"];
 
 
@@ -17,13 +23,13 @@ CalcCompiledEngines[analytical_Association, fluxSymbols_List, paramSymbols_List]
   {
     phi0, energyScale, constantRules, 
     potSym, potRescaled, gradSym, hessSym, 
+    minSymbols, linvSym, minRules, allRulesLInv, heldLInv, fastLInv,
     fluxRules, paramRules, allRules,
     heldGrad, heldHess, fastGrad, fastHess
   },
   
-  (* 1. Определяем масштабы и константы *)
   phi0 = QED`$Phi0Value;
-  energyScale = QED`$hbarValue * 2 * Pi * 10^9; (* Энергия фотона 1 ГГц в Джоулях *)
+  energyScale = QED`$hbarValue * 2 * Pi * 10^9; 
   
   constantRules = {
     QED`$Phi0 -> phi0,
@@ -31,45 +37,37 @@ CalcCompiledEngines[analytical_Association, fluxSymbols_List, paramSymbols_List]
     QED`$e   -> QED`$eValue
   };
   
-  (* 2. Извлекаем сырой потенциал и подставляем константы *)
+  (* --- БЛОК 1: РАВНОВЕСИЕ (Градиент и Гессиан) --- *)
   potSym = analytical["Potential"] /. constantRules;
-  
-  (* 3. Символьное обезразмеривание: 
-     Делим энергию на масштаб, фазы заменяем на (безразмерная_фаза * Phi0) *)
   potRescaled = (potSym / energyScale) /. 
     Table[fluxSymbols[[i]] -> fluxSymbols[[i]] * phi0, {i, Length[fluxSymbols]}];
-
-    Print["[Debug] Rescaled Potential: ", potRescaled];
   
-  (* 4. Берем производные по БЕЗРАЗМЕРНЫМ переменным *)
   gradSym = D[potRescaled, {fluxSymbols}];
   hessSym = D[gradSym, {fluxSymbols}];
   
-  (* 5. Формируем правила для JIT-трансляции *)
   fluxRules = Table[With[{idx = i}, fluxSymbols[[idx]] :> phi[[idx]]], {i, Length[fluxSymbols]}];
   paramRules = Table[With[{idx = i}, paramSymbols[[idx]] :> p[[idx]]], {i, Length[paramSymbols]}];
   allRules = Join[fluxRules, paramRules];
   
-  (* 6. Защита в Hold *)
   heldGrad = With[{g = gradSym}, Hold[g]] /. allRules;
   heldHess = With[{h = hessSym}, Hold[h]] /. allRules;
   
-  (* 7. Компиляция в C с оптимизацией выражений *)
-  fastGrad = heldGrad /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}},
-    body,
-    CompilationTarget -> "C",
-    RuntimeOptions -> "Speed",
-    CompilationOptions -> {"ExpressionOptimization" -> True, "InlineExternalDefinitions" -> True}
-  ];
+  fastGrad = heldGrad /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}}, body, CompilationTarget -> "C", RuntimeOptions -> "Speed", CompilationOptions -> {"ExpressionOptimization" -> True, "InlineExternalDefinitions" -> True}];
+  fastHess = heldHess /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}}, body, CompilationTarget -> "C", RuntimeOptions -> "Speed", CompilationOptions -> {"ExpressionOptimization" -> True, "InlineExternalDefinitions" -> True}];
   
-  fastHess = heldHess /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}},
-    body,
-    CompilationTarget -> "C",
-    RuntimeOptions -> "Speed",
-    CompilationOptions -> {"ExpressionOptimization" -> True, "InlineExternalDefinitions" -> True}
-  ];
+  (* --- БЛОК 2: ДИНАМИЧЕСКИЕ МАТРИЦЫ (L^-1) --- *)
+  (* Символы минимума: Subscript[Phi, "min", i] *)
+  minSymbols = fluxSymbols /. Subscript[s_, i_] :> Subscript[s, "min", i];
+  linvSym = analytical["InductanceMatrix"] /. constantRules;
   
-  {fastGrad, fastHess}
+  minRules = Table[With[{idx = i}, minSymbols[[idx]] :> phi[[idx]]], {i, Length[minSymbols]}];
+  allRulesLInv = Join[minRules, paramRules];
+  heldLInv = With[{m = linvSym}, Hold[m]] /. allRulesLInv;
+  
+  fastLInv = heldLInv /. Hold[body_] :> Compile[{{phi, _Real, 1}, {p, _Real, 1}}, body, CompilationTarget -> "C", RuntimeOptions -> "Speed", CompilationOptions -> {"ExpressionOptimization" -> True, "InlineExternalDefinitions" -> True}];
+  
+  (* Возвращаем тройку движков *)
+  {fastGrad, fastHess, fastLInv}
 ];
 
 CalcStaticMatrices[analytical_Association, rules_List] := Module[
@@ -90,7 +88,7 @@ CalcStaticMatrices[analytical_Association, rules_List] := Module[
   {cNum, invCNum}
 ];
 
-CalcEquilibrium[{fastGrad_, fastHess_}, guess_List, paramVector_?Developer`PackedArrayQ] := Module[
+CalcEquilibrium[{fastGrad_, fastHess_, ___}, guess_List, paramVector_?Developer`PackedArrayQ] := Module[
   {fg, fh, guessDimless, phiVec, root, phiMinDimless},
   
   (* 1. Обезразмериваем стартовую точку (Веберы -> Радианы/2Pi) *)
@@ -122,6 +120,28 @@ CalcEquilibrium[{fastGrad_, fastHess_}, guess_List, paramVector_?Developer`Packe
     Developer`ToPackedArray[phiMinDimless * QED`$Phi0Value, Real],
     $Failed
   ]
+];
+
+CalcSystemMatrices[fastLInv_CompiledFunction, phiMin_List, paramVector_?Developer`PackedArrayQ] := <|
+  "InverseInductance" -> fastLInv[phiMin, paramVector]
+|>;
+
+CalcEigenSystem[invCNum_?MatrixQ, invLNum_?MatrixQ] := Module[
+  {sysMat, vals, vecs, freqs, sortingIndices},
+  
+  sysMat = invCNum . invLNum;
+  {vals, vecs} = Eigensystem[sysMat];
+  
+  (* Извлекаем частоты. ComplexExpand страхует от отрицательных собственных чисел (мнимая частота = седловая точка) *)
+  freqs = Sqrt[ComplexExpand[vals]];
+  
+  (* Сортируем по возрастанию действительной части *)
+  sortingIndices = Ordering[Re[freqs]];
+  
+  <|
+    "Frequencies" -> freqs[[sortingIndices]],
+    "EigenVectors" -> vecs[[sortingIndices]]
+  |>
 ];
 
 End[];
