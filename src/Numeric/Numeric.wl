@@ -87,7 +87,19 @@ CalculateDephasingRates::usage = "CalculateDephasingRates[model, opts] calculate
 using robust numerical differentiation (Central Finite Difference) via FindPotentialMinimumContinuation. \
 Returns Association with derivatives dOmega/dPhi, d2Omega/dPhi2 and estimated rates.";
 
+GenerateSweepPipeline::usage = "GenerateSweepPipeline[modelAssoc, targetQuantity, opts] returns a function f[phiExt] that computes \
+targetQuantity at a given external flux φ_ext. \n\nArguments:\n\
+  modelAssoc: Association containing the QED model and pre-compiled engines.\n\
+  targetQuantity: String specifying the quantity to compute ('EquilibriumFluxes', 'SystemMatrices', 'PlasmonFrequencies').\n\
+  opts: Options for the continuation method (e.g., StepSize).\n\nExample:\n\
+  sweepFunc = GenerateSweepPipeline[modelAssoc, 'PlasmonFrequencies'];\n\
+  frequencies = sweepFunc[0.25];";
+
 Begin["`Private`"];
+
+Options[GenerateSweepPipeline] = {
+  MaxFluxStep -> 0.05
+};
 
 Options[CalculateDephasingRates] = {
   "FluxStep" -> 1.0*^-4,           (* Шаг h в единицах Phi0 *)
@@ -123,6 +135,90 @@ $DebugFindPotentialMinimumContinuation = False;
 $DebugFindPotentialMinimum = False;
 $DebugFindEquilibriumPoints = False;
 $DebugPlasmonFrequencies = False;
+
+
+GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := Module[
+  {
+    (* 1. Статический контекст (извлекается 1 раз) *)
+    engines, invCMatrix, paramVector, maxStep,
+    fastGrad, fastHess, fastLInv, numVars,
+    
+    (* ПЕРСИСТЕНТНЫЙ КЭШ ПУТЕЙ (живет внутри замыкания) *)
+    pathHistory = <||> 
+  },
+  
+  engines = QED`Model`Private`GetNumericalQuantity[modelAssoc, "CompiledEngines"];
+  If[engines === $Failed, Return[$Failed]];
+  
+  invCMatrix = QED`Model`Private`GetNumericalQuantity[modelAssoc, "InverseCapacitanceMatrix"];
+  paramVector = QED`Model`Private`GetParameterVector[modelAssoc];
+  
+  {fastGrad, fastHess, fastLInv} = engines;
+  numVars = Length[fastGrad["InputVariables"]] - 1;
+  maxStep = OptionValue[MaxFluxStep];
+
+  (* 2. ВОЗВРАЩАЕМОЕ ЗАМЫКАНИЕ *)
+  Function[{phiExtReq},
+    Module[
+      {targetPhi = phiExtReq, nearestPhi, currentGuess, steps, stepSize, currentPhi, i},
+      
+      (* --- Шаг 1: Поиск Initial Guess --- *)
+      If[Length[pathHistory] === 0,
+        (* Холодный старт: предполагаем старт с нуля *)
+        nearestPhi = 0.; 
+        currentGuess = ConstantArray[0., numVars];
+        ,
+        (* Теплый старт: ищем ближайшего соседа *)
+        nearestPhi = First[Nearest[Keys[pathHistory], targetPhi]];
+        currentGuess = pathHistory[nearestPhi];
+      ];
+
+      (* --- Шаг 2: Адаптивный Continuation (Mini-bridge) --- *)
+      (* Выполняем шаги, если точка далеко ИЛИ если это самый первый запуск *)
+      If[Abs[nearestPhi - targetPhi] > 10^-8 || Length[pathHistory] === 0,
+        
+        steps = Ceiling[Abs[targetPhi - nearestPhi] / maxStep];
+        (* Защита холодного старта: даже если targetPhi == 0, мы обязаны посчитать хотя бы 1 раз *)
+        If[steps == 0, steps = 1]; 
+        
+        stepSize = (targetPhi - nearestPhi) / steps;
+        
+        Do[
+          (* Явный расчет текущего потока для защиты от Floating Point ошибок *)
+          currentPhi = nearestPhi + i * stepSize;
+          
+          currentGuess = QED`Numeric`Calculators`CalcEquilibrium[
+            engines, currentPhi, currentGuess, paramVector
+          ];
+          
+          (* Сохраняем промежуточные точки в локальный кэш *)
+          pathHistory[currentPhi] = currentGuess;
+          ,
+          {i, 1, steps}
+        ];
+      ];
+
+      (* --- Шаг 3: Конвейер вывода финального значения --- *)
+      Switch[targetQuantity,
+        "EquilibriumFluxes", 
+          currentGuess,
+          
+        "SystemMatrices",    
+          QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, paramVector],
+          
+        "PlasmonFrequencies", 
+          QED`Numeric`Calculators`CalcEigenSystem[
+            invCMatrix, 
+            QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, paramVector]["InverseInductance"]
+          ]["Frequencies"],
+          
+        _, 
+          $Failed
+      ]
+    ]
+  ]
+];
+
 
 (*
   Physics: Find equilibrium positions φ_min where ∂U/∂φ = 0.
