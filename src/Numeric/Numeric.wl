@@ -3,10 +3,6 @@ BeginPackage["QED`Numeric`", {"QED`Numeric`HarmonicOscillator`"}];
 Needs["QED`Model`"];
 
 
-(* Экспорт символов *)
-PrepareNumericModel::usage = "PrepareNumericModel[symModel, params] prepares numeric functions.";
-ComputeEvolution::usage = "ComputeEvolution[model, tmax] computes NDSolve solution.";
-
 FindPotentialMinimum::usage = "FindPotentialMinimum[hamiltonian, topology, substitutionRules] \
 numerically finds equilibrium flux values φ_min that minimize potential energy U(φ). \
 Uses PrincipalAxis method (gradient-free local optimization) starting from external flux φ_ext. \
@@ -17,23 +13,12 @@ FindEquilibriumPoints::usage = "FindEquilibriumPoints[hamiltonian, topology, sub
 finds all equilibrium flux configurations by solving ∇U = 0 on a grid of starting points. \
 Returns Association with list of solutions, energies, and residuals.";
 
-FindPotentialMinimumContinuation::usage = 
-  "FindPotentialMinimumContinuation[gradient, hessian, fluxVars, topology, phiExtTarget, opts] \
-finds equilibrium flux using homotopy continuation with pre-cached symbolic derivatives. \
-Requires rescaled derivatives: gradient = D[U(φ̃*Φ₀), φ̃], hessian = D²[U(φ̃*Φ₀), φ̃²]. \
-Options: \"StepSize\" (0.05 Φ₀), \"MaxSteps\" (100), \"Tolerance\" (10^-10). \
-Performance: ~1 ms per call (vs 4 ms with on-the-fly differentiation).";
-
 FindPotentialMinimumContinuation::badstep = 
   "Continuation failed at step `1` of `2`. Try reducing StepSize option.";
 
 ComputeNormalModeFrequencies::usage = "ComputeNormalModeFrequencies[invCap, L] \
 computes normal mode frequencies ω_i from eigenvalues of C^(-1)·L matrix. \
 Returns frequencies in rad/s (SI units), sorted by increasing frequency.";
-
-PlasmonFrequenciesVsFlux::usage = 
-  "PlasmonFrequenciesVsFlux[model] возвращает численную функцию ω[φext_?NumericQ], \
-где φext в единицах Φ₀. Возвращает список частот {ω₁, ω₂, ...} в rad/s.";
 
 VerifyWaveFunction::usage = "VerifyWaveFunction[model, state] verifies that H_harm|psi> = E_harm|psi>.";
 
@@ -75,15 +60,6 @@ Channels included: \n\
 1. Inductive Coupling (RL): Relaxation via mutual inductance M to a resistor R (Flux bias line). \n\
 2. Capacitive Coupling (RC): Relaxation via capacitor Cc to a resistor R (Readout line / Purcell).";
 
-GenerateFluxSweep::usage = "GenerateFluxSweep[model, analysisFunction] returns a function f[phiExt] \
-that computes analysisFunction[model_at_phi] for a range of external fluxes. \
-\n\nArguments:\n\
-  model: The QED circuit model (must have initialized numerical cache).\n\
-  analysisFunction: A function accepting a 'warmed-up' model instance.\n\
-\n\nExample:\n\
-  sweep = GenerateFluxSweep[model, CalculateFermiRates];\n\
-  results = Table[sweep[phi], {phi, -0.5, 0.5, 0.01}];";
-
 CalculateDephasingRates::usage = "CalculateDephasingRates[model, opts] calculates pure dephasing time T_phi \
 using robust numerical differentiation (Central Finite Difference) via FindPotentialMinimumContinuation. \
 Returns Association with derivatives dOmega/dPhi, d2Omega/dPhi2 and estimated rates.";
@@ -96,7 +72,9 @@ targetQuantity at a given external flux φ_ext. \n\nArguments:\n\
   sweepFunc = GenerateSweepPipeline[modelAssoc, 'PlasmonFrequencies'];\n\
   frequencies = sweepFunc[0.25];";
 
+
 Begin["`Private`"];
+
 
 Options[GenerateSweepPipeline] = {
   MaxFluxStep -> 0.05
@@ -120,22 +98,14 @@ Options[CalculateFermiRates] = {
   "PortNode" -> 1 (* Node connected to readout/control *)
 };
 
-Options[FindPotentialMinimumContinuation] = {
-  "StepSize" -> 0.05,          (* Δφ в единицах Φ₀ *)
-  "MaxSteps" -> 100,           (* защита от бесконечного цикла *)
-  "Tolerance" -> 10^-8         (* точность FindRoot *)
-};
-
 Options[FindEquilibriumPoints] = {
   GridResolution -> 5,
   MaxResidual -> 10^-5,
   Method -> "Newton"
 };
 
-$DebugFindPotentialMinimumContinuation = False;
 $DebugFindPotentialMinimum = False;
 $DebugFindEquilibriumPoints = False;
-$DebugPlasmonFrequencies = False;
 
 
 GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := Module[
@@ -217,7 +187,15 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
             invCMatrix, 
             QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"]
           ]["Frequencies"],
-          
+        
+        "SMatrix",
+          Module[{invLNum, omega, portIndices},
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            omega = ReplaceAll[modelAssoc["Analytical"]["Scattering"]["FrequencyVariable"], modelAssoc["SubstitutionRules"]];
+            portIndices = modelAssoc["Analytical"]["Scattering"]["PortIndices"];
+            If[!NumericQ[omega], Return[$Failed]];
+            QED`Numeric`Calculators`CalcSMatrixNumeric[omega, staticMats[[1]], invLNum, portIndices, 50.0]
+          ],  
         _, 
           $Failed
       ]
@@ -566,140 +544,6 @@ If[$DebugFindEquilibriumPoints === True,
 
 
 (*
-  Physics: Continuation-based equilibrium tracking with pre-cached derivatives.
-  
-  Algorithm:
-  1. Receives pre-computed gradient ∇U and Hessian ∇²U from Model cache
-  2. Builds homotopy path: Φext = 0 → target
-  3. Newton-Raphson at each step with analytical Jacobian
-  
-  Performance: ~1 ms per call (vs 4 ms with symbolic differentiation)
-  
-  Reference: Allgower & Georg, "Numerical Continuation Methods" (1990)
-*)
-
-FindPotentialMinimumContinuation[
-  gradientRescaled_List,      (* Предвычисленный ∇U(φ̃) *)
-  hessianRescaled_List,       (* Предвычисленный ∇²U(φ̃) *)
-  fluxVars_List,              (* Список переменных {φ̃₁, φ̃₂, ...} *)
-  topology_Association,
-  phiExtTarget_?NumericQ,     (* Целевое значение в Weber *)
-  opts:OptionsPattern[]
-] := Module[{
-  nodes, phi0Value, phiExtDimensionless, stepSize, maxSteps,
-  nSteps, phiExtPath, initialSolution, solutionPath, finalSolution,
-  minSymbols, tolerance, startTime, endTime
-  },
-  
-  startTime = AbsoluteTime[];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* 1. PREPARATION                                                   *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
-  phi0Value = QED`$Phi0Value;
-  phiExtDimensionless = phiExtTarget / phi0Value;
-  
-  If[$DebugFindPotentialMinimumContinuation === True,
-    Print["[Continuation] Using pre-cached derivatives"];
-    Print["[Continuation] Target Phi_ext = ", Round[phiExtDimensionless, 0.001], " Phi_0"];
-  ];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* 2. BUILD PATH                                                    *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  stepSize = OptionValue["StepSize"];
-  maxSteps = OptionValue["MaxSteps"];
-  tolerance = OptionValue["Tolerance"];
-  
-  nSteps = Min[Ceiling[Abs[phiExtDimensionless] / stepSize], maxSteps];
-  phiExtPath = Subdivide[0.0, phiExtDimensionless, nSteps];
-  
-  If[$DebugFindPotentialMinimumContinuation === True,
-    Print["[Continuation] Steps: ", nSteps, " x ", stepSize, " Phi_0"];
-  ];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* 3. FUNCTIONAL LOOP: FoldList                                     *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  initialSolution = Thread[fluxVars -> 0.0];
-  
-  solutionPath = FoldList[
-    Function[{prevSol, phiExtCurrent},
-      Module[{gradVec, hessMat, startPoint, newSol, phiExtValue},
-        
-        phiExtValue = phiExtCurrent * phi0Value;
-        
-        (* Подставить Φext *)
-        gradVec = gradientRescaled /. {QED`$PhiExt -> phiExtValue};
-        hessMat = hessianRescaled /. {QED`$PhiExt -> phiExtValue};
-        
-        startPoint = Thread[{fluxVars, fluxVars /. prevSol}];
-        
-        (* Минимальный FindRoot *)
-        newSol = Quiet[
-          Check[
-            FindRoot[
-              Thread[gradVec == 0],
-              startPoint,
-              Jacobian -> hessMat
-            ],
-            $Failed,
-            {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
-          ],
-          {FindRoot::cvmit, FindRoot::lstol, FindRoot::jsing}
-        ];
-        
-        newSol
-      ]
-    ],
-    initialSolution,
-    Rest[phiExtPath]
-  ];
-
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* 4. HANDLE FAILURES                                               *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  solutionPath = TakeWhile[solutionPath, # =!= $Failed &];
-  
-  If[Length[solutionPath] < nSteps + 1,
-    Message[FindPotentialMinimumContinuation::badstep,
-            Length[solutionPath], nSteps];
-    Return[$Failed, Module]
-  ];
-  
-  finalSolution = Last[solutionPath];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* 5. FORMAT RESULT                                                 *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
-  
-  Module[{values},
-    values = (fluxVars /. finalSolution) * phi0Value;
-    
-    endTime = AbsoluteTime[];
-    
-    If[$DebugFindPotentialMinimumContinuation === True,
-      Print["[Continuation] Total execution time: ", endTime - startTime, " sec"];
-    ];
-    
-    Thread[minSymbols -> values]
-  ]
-];
-
-
-
-
-
-
-(*
   Physics: Normal mode frequencies from harmonic approximation.
   
   For quadratic Hamiltonian H = (1/2) q^T C^(-1) q + (1/2) φ^T L^(-1) φ,
@@ -731,216 +575,6 @@ ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
     "NumUnstableModes" -> Count[omega2, x_ /; x < -threshold]
   |>
 ];
-
-
-
-(*
-  Physics: Plasmon frequencies as function of external flux.
-  
-  Returns pure function ω[φext_?NumericQ] where φext is dimensionless (in Φ₀ units).
-  For each flux value, performs:
-  1. FindPotentialMinimumContinuation to find equilibrium (fast: ~1ms)
-  2. Eigenvalue decomposition of C⁻¹·L⁻¹
-  3. Returns sorted frequencies ω_i in rad/s
-  
-  Performance: Uses continuation method by default (~43x faster than global search).
-  Fallback: If continuation derivatives unavailable, returns $Failed.
-  
-  Reference: Koch et al., PRA 76, 042319 (2007), Eq. 8
-*)
-
-
-PlasmonFrequenciesVsFlux[model_Association] := Module[
-  {
-    capSym, lindInvSym, topology, rulesBase, phiExtSym, phi0,
-    gradientRescaled, hessianRescaled, fluxVars, nodes,
-    callCounter = 0, totalContinuationTime = 0, totalEigenTime = 0, totalOverhead = 0,
-    useContinuation
-  },
-  
-  (* Аналитические матрицы из модели *)
-  capSym     = model["Analytical"]["CapacitanceMatrix"];
-  lindInvSym = model["Analytical"]["InductanceMatrix"];  (* L⁻¹ *)
-  topology   = model["Topology"];  
-
-  
-  (* Физические константы *)
-  phiExtSym = QED`$PhiExt;
-  phi0      = QED`$Phi0Value;
-  
-  (* Извлечь узлы и переменные *)
-  nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
-  fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  
-  (* Удаляем И отложенные (:>), И мгновенные (->) правила *)
-  rulesBase = DeleteCases[
-    model["SubstitutionRules"],
-    (phiExtSym :> _) | (phiExtSym -> _) | 
-    (Subscript[QED`$FluxSymbol, "min", _] :> _) | (Subscript[QED`$FluxSymbol, "min", _] -> _)
-  ];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* ИЗВЛЕЧЕНИЕ CONTINUATION DERIVATIVES ИЗ КЭША                      *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  useContinuation = KeyExistsQ[model, "Numerical"] && 
-                    KeyExistsQ[model["Numerical"], "Cache"] &&
-                    KeyExistsQ[model["Numerical"]["Cache"], "ContinuationDerivatives"];
-  
-  If[useContinuation,
-    Module[{cache},
-      cache = model["Numerical"]["Cache"]["ContinuationDerivatives"];
-      gradientRescaled = Lookup[cache, "Gradient", $Failed];
-      hessianRescaled = Lookup[cache, "Hessian", $Failed];
-      
-      If[gradientRescaled === $Failed || hessianRescaled === $Failed,
-        useContinuation = False;
-        Print["[WARNING] Continuation derivatives not found in cache. This should not happen!"];
-      ];
-    ];
-  ];
-  
-  If[!useContinuation,
-    Print["[ERROR] PlasmonFrequenciesVsFlux requires continuation derivatives in model cache."];
-    Print["[ERROR] Make sure ComputeNumericalHarmonicPerturbation has been called."];
-    Return[$Failed];
-  ];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* ВОЗВРАЩАЕМ ЧИСЛЕННУЮ ФУНКЦИЮ С ПРОФИЛИРОВАНИЕМ                   *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  Function[{phiExtDimensionless},
-    Module[{phiExtPhysical, rulesWithFlux, capNum, lindInvNum, 
-            invCapNum, omega2, frequencies, equilibriumRules,
-            tStart, tAfterContinuation, tAfterEigen, tEnd},
-      
-      If[!NumericQ[phiExtDimensionless],
-        Return[$Failed, Module]
-      ];
-
-      tStart = AbsoluteTime[];
-      callCounter++;
-      
-      (* Конвертировать φext из единиц Φ₀ в Weber *)
-      phiExtPhysical = phiExtDimensionless * phi0;
-      
-      (* Подставить текущее значение внешнего потока *)
-      rulesWithFlux = Append[rulesBase, phiExtSym -> phiExtPhysical];
-      
-      (* ════════════════════════════════════════════════════════════════ *)
-      (* ПРОФИЛИРОВАНИЕ: FindPotentialMinimumContinuation                 *)
-      (* ════════════════════════════════════════════════════════════════ *)
-      
-      equilibriumRules = FindPotentialMinimumContinuation[
-        gradientRescaled,
-        hessianRescaled,
-        fluxVars,
-        topology,
-        phiExtPhysical
-      ];
-
-      tAfterContinuation = AbsoluteTime[];
-      
-      rulesWithFlux = Join[rulesWithFlux, equilibriumRules];
-      
-      If[$DebugPlasmonFrequencies === True,
-        Print["lindInvSym before substitution:"];
-        Print[Short[lindInvSym, 2]];
-        Print["Contains φ_min? ", !FreeQ[lindInvSym, Subscript[QED`$FluxSymbol, "min", _]]];
-        Print["Contains PhiExt? ", !FreeQ[lindInvSym, QED`$PhiExt]];
-      ];
-
-      (* Численные матрицы *)
-      capNum     = capSym //. rulesWithFlux;
-      lindInvNum = lindInvSym //. rulesWithFlux;
-      
-      If[$DebugPlasmonFrequencies === True,
-        Print["lindInvNum after substitution:"];
-        Print[Short[lindInvNum, 2]];
-        Print["Contains symbols? ", !FreeQ[lindInvNum, _Symbol]];
-        Print["Numerical? ", MatrixQ[lindInvNum, NumericQ]];
-      ];
-
-      (* C⁻¹ *)
-      If[Det[capNum] == 0, Return[$Failed]];
-      invCapNum = Inverse[capNum];
-      
-      (* ════════════════════════════════════════════════════════════════ *)
-      (* ПРОФИЛИРОВАНИЕ: Eigenvalue computation                           *)
-      (* ════════════════════════════════════════════════════════════════ *)
-      
-      (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
-      omega2 = Eigenvalues[N[invCapNum . lindInvNum]];
-      
-      tAfterEigen = AbsoluteTime[];
-      
-      (* √ω² с сортировкой, комплексные если неустойчивость *)
-      frequencies = Sort[Sqrt[omega2 + 0. I], Re[#1] < Re[#2] &];
-      
-      tEnd = AbsoluteTime[];
-      
-      
-      (* ════════════════════════════════════════════════════════════════ *)
-      (* ПРОФИЛИРОВАНИЕ: Накопление статистики                            *)
-      (* ════════════════════════════════════════════════════════════════ *)
-      If[$DebugPlasmonFrequencies === True,
-        Module[{dtContinuation, dtEigen, dtOverhead, dtTotal},
-          dtContinuation = (tAfterContinuation - tStart) * 1000;
-          dtEigen = (tAfterEigen - tAfterContinuation) * 1000;
-          dtTotal = (tEnd - tStart) * 1000;
-          dtOverhead = dtTotal - dtContinuation - dtEigen;
-          
-          totalContinuationTime += dtContinuation;
-          totalEigenTime += dtEigen;
-          totalOverhead += dtOverhead;
-          
-          
-          (* Вывод для первой и каждой 10-й точки *)
-          If[callCounter == 1 || Mod[callCounter, 10] == 0,
-            Print["[PROFILE Point ", callCounter, "]"];
-            Print["  Continuation: ", Round[dtContinuation, 0.1], " ms"];
-            Print["  Eigenvalues: ", Round[dtEigen, 0.1], " ms"];
-            Print["  Overhead: ", Round[dtOverhead, 0.1], " ms"];
-            Print["  Total: ", Round[dtTotal, 0.1], " ms"];
-          ];
-          
-          (* Итоговый отчёт после 25 и 50 вызовов *)
-          If[callCounter > 20 && Mod[callCounter, 25] == 0,
-            Print[""];
-            Print["[PROFILE SUMMARY after ", callCounter, " calls]"];
-            Print["  Continuation: ", Round[totalContinuationTime, 0.1], " ms (", 
-                  Round[100 * totalContinuationTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-            Print["  Eigenvalues: ", Round[totalEigenTime, 0.1], " ms (", 
-                  Round[100 * totalEigenTime / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-            Print["  Overhead: ", Round[totalOverhead, 0.1], " ms (", 
-                  Round[100 * totalOverhead / (totalContinuationTime + totalEigenTime + totalOverhead), 1], "%)"];
-            Print["  TOTAL: ", Round[totalContinuationTime + totalEigenTime + totalOverhead, 0.1], " ms"];
-            Print["  Average per point: ", Round[(totalContinuationTime + totalEigenTime + totalOverhead) / callCounter, 0.1], " ms"];
-          ];
-        ];
-      ];
-
-      Chop[frequencies]
-    ]
-  ]
-];
-
-(* ════════════════════════════════════════════════════════════════ *)
-(*                       DEBUG FLAG                                 *)
-(* ════════════════════════════════════════════════════════════════ *)
-  
-
-PrepareNumericModel[symModel_Association, params_Association] := Module[{sol},
-  (* подготовка численных функций из символики *)
-  sol
-];
-
-ComputeEvolution[model_, tmax_?NumericQ] := Module[{sol},
-  (* NDSolve *)
-  sol
-];
-
 
 (* Извлечь значение из записи кэша, вычисляя если нужно *)
 GetCacheEntry[cacheEntry_Association, model_Association] := Module[
@@ -1431,70 +1065,6 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     "CapacitiveRelaxationRate" -> Reverse[capacitiveRates],
     "TotalT1" -> Reverse[totalT1]
   |>
-];
-
-GenerateFluxSweep[model_Association, analysisFunction_Function] := Module[
-    {
-        cache, gradientRescaled, hessianRescaled, fluxVars, 
-        topology, phi0, baseRules, phiExtSym
-    },
-
-    (* 1. Проверка наличия Continuation Derivatives *)
-    (* Они создаются при первом запуске GetNumericalQuantity[model, "PlasmonFrequencies"] *)
-    If[!KeyExistsQ[model["Numerical"]["Cache"], "ContinuationDerivatives"],
-        Print["[Error] GenerateFluxSweep requires initialized continuation derivatives."];
-        Print["Please run GetNumericalQuantity[model, \"PlasmonFrequencies\"] once to initialize."];
-        Return[$Failed];
-    ];
-
-    cache = model["Numerical"]["Cache"]["ContinuationDerivatives"];
-    gradientRescaled = cache["Gradient"];
-    hessianRescaled = cache["Hessian"];
-    fluxVars = cache["FluxVars"];
-    
-    topology = model["Topology"];
-    phi0 = QED`$Phi0Value;
-    phiExtSym = QED`$PhiExt;
-    
-    (* Базовые правила: берем текущие, но убираем старые Flux и phi_min *)
-    baseRules = DeleteCases[
-        model["SubstitutionRules"],
-        (phiExtSym :> _) | (Subscript[QED`$FluxSymbol, "min", _] :> _)
-    ];
-
-    (* 2. Возвращаем замыкание *)
-    Function[{phiExtDimensionless},
-        Module[{phiExtPhysical, equilibriumRules, currentRules, tempModel},
-            
-            phiExtPhysical = phiExtDimensionless * phi0;
-            
-            (* А. Быстрый поиск равновесия (Continuation) *)
-            equilibriumRules = FindPotentialMinimumContinuation[
-                gradientRescaled,
-                hessianRescaled,
-                fluxVars,
-                topology,
-                phiExtPhysical
-            ];
-            
-            If[equilibriumRules === $Failed,
-                Return[$Failed]
-            ];
-            
-            (* Б. Сборка полных правил *)
-            currentRules = Join[
-                baseRules,
-                {phiExtSym -> phiExtPhysical},
-                equilibriumRules
-            ];
-            
-            (* В. Создание "прогретой" модели без пересчета равновесия *)
-            tempModel = QED`Model`UpdateModelWithRules[model, currentRules];
-            
-            (* Г. Вызов пользовательской функции *)
-            analysisFunction[tempModel]
-        ]
-    ]
 ];
 
 CalculateDephasingRates[model_Association, opts:OptionsPattern[]] := Module[

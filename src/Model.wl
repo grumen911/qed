@@ -545,6 +545,31 @@ $DependencyRegistry = <|
         depsData["SystemMatrices"]["InverseInductance"]
       ]
     ]
+  |>,
+
+  "SMatrix" -> <|
+    "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{cNum, invLNum, omega, portIndices, z0, analytical},
+        cNum = depsData["StaticMatrices"][[1]]; (* Первая матрица - C *)
+        invLNum = depsData["SystemMatrices"]["InverseInductance"];
+        analytical = modelAssoc["Analytical"];
+        
+        (* Извлекаем частоту и порты из правил (на будущее можно вынести в параметры GUI) *)
+        omega = ReplaceAll[analytical["Scattering"]["FrequencyVariable"], modelAssoc["SubstitutionRules"]];
+        
+        (* Если omega не задана числом, возвращаем Failed *)
+        If[!NumericQ[omega], Return[$Failed]];
+        
+        portIndices = analytical["Scattering"]["PortIndices"];
+        z0 = 50.0; (* Базовый импеданс линии *)
+        
+        QED`Numeric`Calculators`CalcSMatrixNumeric[
+          omega, cNum, invLNum, portIndices, z0
+        ]
+      ]
+    ]
   |>
 |>;
 
