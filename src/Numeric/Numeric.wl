@@ -2,6 +2,7 @@ BeginPackage["QED`Numeric`", {"QED`Numeric`HarmonicOscillator`"}];
 
 Needs["QED`Model`"];
 
+
 (* Экспорт символов *)
 PrepareNumericModel::usage = "PrepareNumericModel[symModel, params] prepares numeric functions.";
 ComputeEvolution::usage = "ComputeEvolution[model, tmax] computes NDSolve solution.";
@@ -147,11 +148,13 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
     pathHistory = <||> 
   },
   
-  engines = QED`Model`Private`GetNumericalQuantity[modelAssoc, "CompiledEngines"];
+  engines = QED`Model`GetNumericalQuantity[modelAssoc, "CompiledEngines"];
   If[engines === $Failed, Return[$Failed]];
   
-  invCMatrix = QED`Model`Private`GetNumericalQuantity[modelAssoc, "InverseCapacitanceMatrix"];
-  paramVector = QED`Model`Private`GetParameterVector[modelAssoc];
+  staticMats = QED`Model`GetNumericalQuantity[modelAssoc, "StaticMatrices"];
+  invCMatrix = staticMats[[2]];
+  
+  paramVector = QED`Model`GetParameterVector[modelAssoc];
   
   {fastGrad, fastHess, fastLInv} = engines;
   numVars = Length[fastGrad["InputVariables"]] - 1;
