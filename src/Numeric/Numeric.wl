@@ -182,11 +182,17 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
         "SystemMatrices",    
           QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector],
           
-        "PlasmonFrequencies", 
-          QED`Numeric`Calculators`CalcEigenSystem[
+        "HarmonicDiagonalization",
+          QED`Numeric`Calculators`CalcHarmonicDiagonalization[
             invCMatrix, 
             QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"]
-          ]["Frequencies"],
+          ],
+
+        "PlasmonFrequencies", 
+          QED`Numeric`Calculators`CalcHarmonicDiagonalization[
+            invCMatrix, 
+            QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"]
+          ]["NormalModeFrequencies"],
         
         "SMatrix",
           Module[{invLNum, portIndices},

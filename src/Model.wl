@@ -536,14 +536,22 @@ $DependencyRegistry = <|
     ]
   |>,
   
-  "PlasmonFrequencies" -> <|
+  "HarmonicDiagonalization" -> <|
     "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
     "RelevantHashes" -> {"Kinetic", "Potential", "External"},
     "Compute" -> Function[{modelAssoc, depsData},
-      QED`Numeric`Calculators`CalcEigenSystem[
+      QED`Numeric`Calculators`CalcHarmonicDiagonalization[
         depsData["StaticMatrices"][[2]], (* invCNum *)
         depsData["SystemMatrices"]["InverseInductance"]
       ]
+    ]
+  |>,
+
+  "PlasmonFrequencies" -> <|
+    "Dependencies" -> {"HarmonicDiagonalization"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      depsData["HarmonicDiagonalization"]["NormalModeFrequencies"]
     ]
   |>,
 
