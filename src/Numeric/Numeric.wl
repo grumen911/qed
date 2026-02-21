@@ -189,13 +189,15 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
           ]["Frequencies"],
         
         "SMatrix",
-          Module[{invLNum, omega, portIndices},
+          Module[{invLNum, portIndices},
             invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
-            omega = ReplaceAll[modelAssoc["Analytical"]["Scattering"]["FrequencyVariable"], modelAssoc["SubstitutionRules"]];
             portIndices = modelAssoc["Analytical"]["Scattering"]["PortIndices"];
-            If[!NumericQ[omega], Return[$Failed]];
-            QED`Numeric`Calculators`CalcSMatrixNumeric[omega, staticMats[[1]], invLNum, portIndices, 50.0]
-          ],  
+            
+            (* Возвращаем чистую функцию от частоты omega *)
+            Function[{omegaReq},
+              QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, staticMats[[1]], invLNum, portIndices, 50.0]
+            ]
+          ],
         _, 
           $Failed
       ]
