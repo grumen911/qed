@@ -140,12 +140,10 @@ $DebugPlasmonFrequencies = False;
 
 GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := Module[
   {
-    (* 1. Статический контекст (извлекается 1 раз) *)
-    engines, invCMatrix, paramVector, maxStep,
+    engines, staticMats, invCMatrix, paramVector, maxStep,
     fastGrad, fastHess, fastLInv, numVars,
-    
-    (* ПЕРСИСТЕНТНЫЙ КЭШ ПУТЕЙ (живет внутри замыкания) *)
-    pathHistory = <||> 
+    pathHistory = <||>,
+    paramSymbols, phiExtIndex
   },
   
   engines = QED`Model`GetNumericalQuantity[modelAssoc, "CompiledEngines"];
@@ -156,63 +154,68 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
   
   paramVector = QED`Model`GetParameterVector[modelAssoc];
   
+  (* --- УМНЫЙ РОУТИНГ ПАРАМЕТРА ПОТОКА --- *)
+  paramSymbols = QED`Model`GetParameterSymbols[modelAssoc];
+  phiExtIndex = FirstPosition[paramSymbols, QED`$PhiExt];
+  If[MissingQ[phiExtIndex], Return[$Failed]];
+  phiExtIndex = First[phiExtIndex];
+  
+  numVars = Length[Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]]];
   {fastGrad, fastHess, fastLInv} = engines;
-  numVars = Length[fastGrad["InputVariables"]] - 1;
   maxStep = OptionValue[MaxFluxStep];
 
-  (* 2. ВОЗВРАЩАЕМОЕ ЗАМЫКАНИЕ *)
+  (* ВОЗВРАЩАЕМОЕ ЗАМЫКАНИЕ *)
   Function[{phiExtReq},
     Module[
-      {targetPhi = phiExtReq, nearestPhi, currentGuess, steps, stepSize, currentPhi, i},
+      {targetPhi = phiExtReq, nearestPhi, currentGuess, steps, stepSize, currentPhi, i, currentParamVector},
       
-      (* --- Шаг 1: Поиск Initial Guess --- *)
+      currentParamVector = paramVector; (* Создаем локальную копию для мутаций *)
+      
       If[Length[pathHistory] === 0,
-        (* Холодный старт: предполагаем старт с нуля *)
         nearestPhi = 0.; 
         currentGuess = ConstantArray[0., numVars];
         ,
-        (* Теплый старт: ищем ближайшего соседа *)
         nearestPhi = First[Nearest[Keys[pathHistory], targetPhi]];
         currentGuess = pathHistory[nearestPhi];
       ];
 
-      (* --- Шаг 2: Адаптивный Continuation (Mini-bridge) --- *)
-      (* Выполняем шаги, если точка далеко ИЛИ если это самый первый запуск *)
       If[Abs[nearestPhi - targetPhi] > 10^-8 || Length[pathHistory] === 0,
-        
         steps = Ceiling[Abs[targetPhi - nearestPhi] / maxStep];
-        (* Защита холодного старта: даже если targetPhi == 0, мы обязаны посчитать хотя бы 1 раз *)
         If[steps == 0, steps = 1]; 
         
         stepSize = (targetPhi - nearestPhi) / steps;
         
         Do[
-          (* Явный расчет текущего потока для защиты от Floating Point ошибок *)
           currentPhi = nearestPhi + i * stepSize;
           
+          (* МУТИРУЕМ внешний поток в векторе параметров (переводим в Веберы!) *)
+          currentParamVector[[phiExtIndex]] = currentPhi * QED`$Phi0Value;
+          
+          (* Передаем только 3 аргумента! *)
           currentGuess = QED`Numeric`Calculators`CalcEquilibrium[
-            engines, currentPhi, currentGuess, paramVector
+            engines, currentGuess, currentParamVector
           ];
           
-          (* Сохраняем промежуточные точки в локальный кэш *)
           pathHistory[currentPhi] = currentGuess;
           ,
           {i, 1, steps}
         ];
       ];
 
-      (* --- Шаг 3: Конвейер вывода финального значения --- *)
+      (* Финальное значение потока для конвейера матриц *)
+      currentParamVector[[phiExtIndex]] = targetPhi * QED`$Phi0Value;
+
       Switch[targetQuantity,
         "EquilibriumFluxes", 
           currentGuess,
           
         "SystemMatrices",    
-          QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, paramVector],
+          QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector],
           
         "PlasmonFrequencies", 
           QED`Numeric`Calculators`CalcEigenSystem[
             invCMatrix, 
-            QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, paramVector]["InverseInductance"]
+            QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"]
           ]["Frequencies"],
           
         _, 

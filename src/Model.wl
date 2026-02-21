@@ -149,6 +149,19 @@ GetParameterVector[modelAssoc_] := Module[
   Developer`ToPackedArray[valuesVector, Real]
 ];
 
+GetParameterSymbols[modelAssoc_] := Module[
+  {allRules, paramRules, sortedRules},
+  allRules = modelAssoc["SubstitutionRules"];
+  paramRules = Select[allRules, 
+    Function[ruleItem, 
+      Not[StringContainsQ[ToString[ruleItem[[1]]], "min"]] &&
+      Not[MemberQ[{QED`$Phi0, QED`$hbar, QED`$e}, ruleItem[[1]]]]
+    ]
+  ];
+  sortedRules = SortBy[paramRules, Function[ruleItem, ToString[ruleItem[[1]]]]];
+  Map[First, sortedRules]
+];
+
 (* ════════════════════════════════════════════════════════════════ *)
 (* 		ГЕНЕРАЦИЯ PLACEHOLDER ИЗОБРАЖЕНИЯ                           *)
 (* ════════════════════════════════════════════════════════════════ *)
@@ -464,12 +477,18 @@ $DependencyRegistry = <|
   
   "CompiledEngines" -> <|
     "Dependencies" -> {},
-    "RelevantHashes" -> {}, (* Зависит только от аналитики, вычисляется 1 раз *)
+    "RelevantHashes" -> {},
     "Compute" -> Function[{modelAssoc, depsData},
-      QED`Numeric`Calculators`CalcCompiledEngines[
-        modelAssoc["Analytical"],
-        modelAssoc["Primary"],
-        GetParameterVector[modelAssoc]
+      Module[{nodes, fluxSymbols, paramSymbols},
+        nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+        fluxSymbols = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+        paramSymbols = GetParameterSymbols[modelAssoc];
+        
+        QED`Numeric`Calculators`CalcCompiledEngines[
+          modelAssoc["Analytical"],
+          fluxSymbols,
+          paramSymbols
+        ]
       ]
     ]
   |>,
@@ -489,16 +508,18 @@ $DependencyRegistry = <|
     "Dependencies" -> {"CompiledEngines"},
     "RelevantHashes" -> {"Potential", "External"},
     "Compute" -> Function[{modelAssoc, depsData},
-      Module[{engines, paramVector, extFluxRule, lastCacheEntry, initialGuess},
+      Module[{engines, paramVector, lastCacheEntry, initialGuess, numVars},
         engines = depsData["CompiledEngines"];
         paramVector = GetParameterVector[modelAssoc];
-        extFluxRule = ReplaceAll[QED`$PhiExt, modelAssoc["SubstitutionRules"]];
         
-        (* Извлечение InitialGuess из истории кэша *)
+        (* Надежный расчет размерности через топологию *)
+        numVars = Length[Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]]];
+        
         lastCacheEntry = Lookup[modelAssoc["Numerical", "VersionedCache", "Values"], "EquilibriumFluxes", <||>];
-        initialGuess = Lookup[lastCacheEntry, "Value", ConstantArray[0., Length[engines[[1]]["InputVariables"]] - 1]];
+        initialGuess = Lookup[lastCacheEntry, "Value", ConstantArray[0., numVars]];
         
-        QED`Numeric`Calculators`CalcEquilibrium[engines, extFluxRule, initialGuess, paramVector]
+        (* УБРАН лишний аргумент extFluxRule *)
+        QED`Numeric`Calculators`CalcEquilibrium[engines, initialGuess, paramVector]
       ]
     ]
   |>,
