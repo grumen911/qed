@@ -16,10 +16,6 @@ Returns Association with list of solutions, energies, and residuals.";
 FindPotentialMinimumContinuation::badstep = 
   "Continuation failed at step `1` of `2`. Try reducing StepSize option.";
 
-ComputeNormalModeFrequencies::usage = "ComputeNormalModeFrequencies[invCap, L] \
-computes normal mode frequencies ω_i from eigenvalues of C^(-1)·L matrix. \
-Returns frequencies in rad/s (SI units), sorted by increasing frequency.";
-
 VerifyWaveFunction::usage = "VerifyWaveFunction[model, state] verifies that H_harm|psi> = E_harm|psi>.";
 
 VerifyDiagonalization::usage = "VerifyDiagonalization[model] numerically checks if the calculated \
@@ -550,40 +546,6 @@ If[$DebugFindEquilibriumPoints === True,
   |>
 ];
 
-
-(*
-  Physics: Normal mode frequencies from harmonic approximation.
-  
-  For quadratic Hamiltonian H = (1/2) q^T C^(-1) q + (1/2) φ^T L^(-1) φ,
-  normal modes satisfy:
-  
-  ω_i^2 = eigenvalues(C⁻¹ · L⁻¹)
-  
-  Returns Association with:
-  - "Frequencies": ω_i in rad/s (SI units), sorted. Complex if unstable modes exist.
-  - "IsStable": True if all ω² > 0 (stable equilibrium)
-  - "NumUnstableModes": Count of modes with ω² < 0 (saddle point indicator)
-  
-  Reference: Devoret lectures, Les Houches (2004), Section 3.3
-*)
-
-ComputeNormalModeFrequencies[invCap_?MatrixQ, invInd_?MatrixQ] := Module[
-  {omega2, frequencies, threshold = 10^(-10)},
-
-  (* ω² = eigenvalues(C⁻¹ · L⁻¹) *)
-  omega2 = Eigenvalues[invCap . invInd];
-
-  (* Вычислить sqrt, для отрицательных → комплексные *)
-  frequencies = Sort[Sqrt[omega2 + 0. I], Re[#1] < Re[#2] &];
-  
-  (* Вернуть с диагностикой *)
-  <|
-    "Frequencies" -> Chop[frequencies],
-    "IsStable" -> AllTrue[omega2, # > threshold &],
-    "NumUnstableModes" -> Count[omega2, x_ /; x < -threshold]
-  |>
-];
-
 (* Извлечь значение из записи кэша, вычисляя если нужно *)
 GetCacheEntry[cacheEntry_Association, model_Association] := Module[
   {state, thunk},
@@ -1078,7 +1040,7 @@ CalculateFermiRates[model_Association, opts:OptionsPattern[]] := Module[
 CalculateDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
   {
     h, A, logFac,
-    cleanModel, freqFunc, phiExtDimless,
+    freqFunc, phiExtDimless,
     w0, wPlus, wMinus,
     d1, d2,
     gamma1, gamma2, totalRate, tPhi
@@ -1089,49 +1051,36 @@ CalculateDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
   A = OptionValue["FluxNoiseAmplitude"];
   logFac = OptionValue["PinkNoiseLogFactor"];
   
-  (* --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ --- *)
-  (* GenerateFluxSweep передает модель, где Phi жестко зафиксировано числом. *)
-  (* Если мы построим спектр по такой модели, он будет константой. *)
-  (* Мы создаем cleanModel, удаляя правило для потока, чтобы получить зависимость. *)
-  cleanModel = model;
-  cleanModel["SubstitutionRules"] = DeleteCases[
-      model["SubstitutionRules"], 
-      (QED`$PhiExt | Subscript[QED`$FluxSymbol, "ext"]) -> _
-  ];
-  
-  (* Теперь freqFunc - это честная функция от аргумента *)
-  freqFunc = PlasmonFrequenciesVsFlux[cleanModel];
-  
+  (* 2. Создаем замыкание через наш новый конвейер (без всяких cleanModel) *)
+  freqFunc = GenerateSweepPipeline[model, "PlasmonFrequencies"];
   If[freqFunc === $Failed, Return[$Failed]];
 
-  (* 2. Рабочую точку берем из ВХОДЯЩЕЙ модели (там где число прописано) *)
+  (* 3. Рабочая точка *)
   phiExtDimless = (QED`$PhiExt /. model["SubstitutionRules"]) / QED`$Phi0Value;
   If[!NumericQ[phiExtDimless], phiExtDimless = 0.0];
 
-  (* 3. Считаем частоты *)
+  (* 4. Считаем частоты (мгновенно благодаря JIT и кэшу путей!) *)
   w0 = freqFunc[phiExtDimless];
   wPlus = freqFunc[phiExtDimless + h];
   wMinus = freqFunc[phiExtDimless - h];
   
   If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], Return[$Failed]];
 
-  (* 4. Производные *)
+  (* 5. Численные производные (центральная разность) *)
   d1 = (wPlus - wMinus) / (2 * h);
   d2 = (wPlus - 2*w0 + wMinus) / (h^2);
   
-  (* 5. Скорости *)
+  (* 6. Скорости *)
   gamma1 = A * logFac * Abs[d1];
   gamma2 = (A^2) * logFac * Abs[d2]; 
-  
   totalRate = Sqrt[gamma1^2 + gamma2^2];
-  
-  (* 6. Время (обрабатываем список) *)
-  (* Если rate ~ 0, возвращаем Infinity. *)
+
+  (* 7. Время T_phi (защита от деления на ноль) *)
   tPhi = Map[
     Function[r, If[TrueQ[r < 1.0*^-20], Infinity, 1.0 / r]],
     totalRate
   ];
-  
+
   <|
     "Frequencies" -> w0,
     "dOmega_dPhi" -> d1,
