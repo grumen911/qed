@@ -12,6 +12,10 @@ GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
 
+RegisterModel::usage = "RegisterModel[model] stores the model in the global registry and returns its UUID.";
+GetModel::usage = "GetModel[id] retrieves a model from the global registry by its UUID.";
+UpdateModelParameter::usage = "UpdateModelParameter[id, tag, param, value] updates a parameter of a registered model. \
+Cache invalidation is handled automatically by sectoral hashes.";
 
 SavePreset::usage = "SavePreset[model, name] saves the current Primary parameters into the Presets registry under the given name. Returns updated model.";
 LoadPreset::usage = "LoadPreset[model, name] loads Primary parameters from the specified preset. Returns updated model with IsDirty=True.";
@@ -624,6 +628,27 @@ $DependencyRegistry = <|
     ]
   |>
 |>;
+
+
+(* === GLOBAL MODEL REGISTRY === *)
+$ModelRegistry = <||>;
+
+RegisterModel[model_Association] := Module[{id},
+  id = CreateUUID["model-"];
+  $ModelRegistry[id] = model;
+  id
+];
+
+GetModel[id_String] := Lookup[$ModelRegistry, id, $Failed];
+
+UpdateModelParameter[id_String, tag_String, param_String, val_] := Module[{m},
+  m = GetModel[id];
+  If[AssociationQ[m],
+    m["Primary", tag, param, "Value"] = val;
+    (* Кэш инвалидируется автоматически благодаря несовпадению хешей при следующем запросе *)
+    $ModelRegistry[id] = m;
+  ];
+];
 
 (* Новый универсальный резолвер *)
 GetNumericalQuantity[modelAssoc_, keyString_String] := Module[
