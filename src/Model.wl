@@ -578,6 +578,50 @@ $DependencyRegistry = <|
         ]
       ]
     ]
+  |>,
+
+  "CurrentOperatorNumerical" -> <|
+    "Dependencies" -> {"EquilibriumFluxes"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{nodes, minSymbols, phiMinRules, paramSymbols, paramVector, strictRules, cleanRules},
+        nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+        
+        minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+        phiMinRules = Thread[minSymbols -> depsData["EquilibriumFluxes"]];
+        
+        paramSymbols = GetParameterSymbols[modelAssoc];
+        paramVector = GetParameterVector[modelAssoc];
+        strictRules = Thread[paramSymbols -> paramVector];
+        
+        (* Вырезаем старые ссылки на кэш для phi_min *)
+        cleanRules = DeleteCases[modelAssoc["SubstitutionRules"], (Alternatives @@ minSymbols) :> _];
+        
+        (* Идеальный порядок: параметры -> равновесие -> константы *)
+        Lookup[modelAssoc["Analytical"], "CurrentOperator", 0] /. strictRules /. phiMinRules /. cleanRules
+      ]
+    ]
+  |>,
+
+  "VoltageOperatorsNumerical" -> <|
+    "Dependencies" -> {"EquilibriumFluxes"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{nodes, minSymbols, phiMinRules, paramSymbols, paramVector, strictRules, cleanRules},
+        nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+        
+        minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+        phiMinRules = Thread[minSymbols -> depsData["EquilibriumFluxes"]];
+        
+        paramSymbols = GetParameterSymbols[modelAssoc];
+        paramVector = GetParameterVector[modelAssoc];
+        strictRules = Thread[paramSymbols -> paramVector];
+        
+        cleanRules = DeleteCases[modelAssoc["SubstitutionRules"], (Alternatives @@ minSymbols) :> _];
+        
+        Lookup[modelAssoc["Analytical"], "VoltageOperators", <||>] /. strictRules /. phiMinRules /. cleanRules
+      ]
+    ]
   |>
 |>;
 
