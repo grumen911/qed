@@ -13,8 +13,9 @@ a fast local Newton search for equilibrium flux using JIT engines.";
 CalcSystemMatrices::usage = "CalcSystemMatrices[fastLInv, phiMin, paramVector] computes \
 the numeric inverse inductance matrix using JIT.";
 
-CalcEigenSystem::usage = "CalcEigenSystem[invCNum, invLNum] computes normal mode frequencies \
-(omega) and eigenvectors from C^-1 . L^-1.";
+CalcHarmonicDiagonalization::usage = 
+"CalcHarmonicDiagonalization[invC, invL] performs canonical diagonalization \
+of quadratic Hamiltonian. Returns Association with normal mode transformation matrices.";
 
 CalcSMatrixNumeric::usage = "CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0] \
 calculates the numerical S-matrix at a given angular frequency using floating ground expansion and Schur complement.";
@@ -129,21 +130,65 @@ CalcSystemMatrices[fastLInv_CompiledFunction, phiMin_List, paramVector_?Develope
   "InverseInductance" -> fastLInv[phiMin, paramVector]
 |>;
 
-CalcEigenSystem[invCNum_?MatrixQ, invLNum_?MatrixQ] := Module[
-  {sysMat, vals, vecs, freqs, sortingIndices},
+$DebugHarmonicDiagonalization = False;
+
+CalcHarmonicDiagonalization[invC_?MatrixQ, invL_?MatrixQ] := 
+ Module[{omega0, C0, L0, invCscaled, invLscaled, 
+         M, N1, s1, s2, d1, j, Ntransform, Mtransform, signCorrection,
+         jScaled, CdiagScaled, LdiagScaled, omega2Scaled, effectiveCaps},
   
-  sysMat = invCNum . invLNum;
-  {vals, vecs} = Eigensystem[sysMat];
+  If[$DebugHarmonicDiagonalization,
+    Print["=== CalcHarmonicDiagonalization ==="];
+    Print["Input C^-1 dimensions: ", Dimensions[invC]];
+    Print["Input L^-1 dimensions: ", Dimensions[invL]];
+  ];
+
+  (* Step 0: Define scales for dimensionless matrices *)
+  omega0 = Min[Abs[Sqrt[Eigenvalues[invC . invL]]]];  (* Use Abs for complex frequencies *)
+  C0 = Max[Abs[Diagonal[Inverse[invC]]]];
+  L0 = 1/(C0 * omega0^2);
+
+  invCscaled = invC * C0;
+  invLscaled = invL * L0;
   
-  (* Извлекаем частоты. ComplexExpand страхует от отрицательных собственных чисел (мнимая частота = седловая точка) *)
-  freqs = Sqrt[ComplexExpand[vals]];
+  (* Step 1: Diagonalize dimensionless C^(-1) *)
+  {s1, s2} = JordanDecomposition[invCscaled];
+  M = s1 . Inverse[Chop[Sqrt[s2]]];
   
-  (* Сортируем по возрастанию действительной части *)
-  sortingIndices = Ordering[Re[freqs]];
+  (* Step 2: Canonical conjugate transformation *)
+  N1 = s1 . Chop[Sqrt[s2]];
   
+  (* Step 3: Diagonalize transformed dimensionless L^(-1) *)
+  {d1, j} = JordanDecomposition[Transpose[N1] . invLscaled . N1];
+  
+  (* Step 4: Apply rotation and sign correction *)
+  signCorrection = DiagonalMatrix[Sign[Diagonal[Inverse[N1 . d1]]]];
+  Ntransform = N1 . d1 . signCorrection;
+  
+  (* Step 5: Derive M from commutation relation *)
+  Mtransform = Inverse[Transpose[Ntransform]];
+
+  (* Step 6: Restore physical dimensions for matrices and frequencies *)
+  jScaled = j / L0;
+  CdiagScaled = Transpose[Mtransform] . invC . Mtransform;
+  LdiagScaled = Transpose[Ntransform] . invL . Ntransform;
+  omega2Scaled = Diagonal[CdiagScaled] * Diagonal[LdiagScaled];
+
+  (* Calculate effective capacitances: C_k = 1 / (M^T C^-1 M)_kk *)
+  effectiveCaps = 1.0 / Diagonal[CdiagScaled];
+
   <|
-    "Frequencies" -> freqs[[sortingIndices]],
-    "EigenVectors" -> vecs[[sortingIndices]]
+    "ChargeTransform" -> Mtransform,
+    "FluxTransform" -> Ntransform,
+    "DiagonalizedInductance" -> jScaled,
+    "EffectiveCapacitances" -> effectiveCaps,
+    "NormalModeFrequencies" -> Sqrt[omega2Scaled],
+    "RotationMatrix" -> d1,
+    "Scales" -> <|
+      "Frequency" -> omega0,
+      "Capacitance" -> C0,
+      "Inductance" -> L0
+    |>
   |>
 ];
 

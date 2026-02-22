@@ -8,7 +8,6 @@ Needs["QED`Scattering`"];
 CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]"
 GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
 GetNumericalQuantity::usage = "GetNumericalQuantity[model, key]"
-GetNumericalParams::usage = "GetNumericalParams[model]"
 GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]"
 UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
 SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
@@ -150,6 +149,19 @@ GetParameterVector[modelAssoc_] := Module[
   Developer`ToPackedArray[valuesVector, Real]
 ];
 
+GetParameterSymbols[modelAssoc_] := Module[
+  {allRules, paramRules, sortedRules},
+  allRules = modelAssoc["SubstitutionRules"];
+  paramRules = Select[allRules, 
+    Function[ruleItem, 
+      Not[StringContainsQ[ToString[ruleItem[[1]]], "min"]] &&
+      Not[MemberQ[{QED`$Phi0, QED`$hbar, QED`$e}, ruleItem[[1]]]]
+    ]
+  ];
+  sortedRules = SortBy[paramRules, Function[ruleItem, ToString[ruleItem[[1]]]]];
+  Map[First, sortedRules]
+];
+
 (* ════════════════════════════════════════════════════════════════ *)
 (* 		ГЕНЕРАЦИЯ PLACEHOLDER ИЗОБРАЖЕНИЯ                           *)
 (* ════════════════════════════════════════════════════════════════ *)
@@ -221,8 +233,8 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
     
     (* Сборка *)
     model = <|
-    	  "ModelVersion" -> "1.1",
-    	  "Topology" -> topology,
+      "ModelVersion" -> "1.1",
+      "Topology" -> topology,
       "Primary" -> defaultPrimary,
       "Image" -> circuitImage,
       "SubstitutionRules" -> {},
@@ -230,8 +242,14 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
       "Presets" -> <||>,
       "Numerical" -> <|
         "Method" -> method,
-        "Cache" -> <||>,
-        "IsDirty" -> True,
+        
+        (* === НОВАЯ АРХИТЕКТУРА КЭША === *)
+        "VersionedCache" -> <|
+          "Values" -> <||> (* Здесь будут храниться результаты и их хеши *)
+        |>,
+        
+        (* IsDirty удален за ненадобностью *)
+        
         "ComputationTime" -> Null,
         "ComputationStatus" -> <||>
       |>
@@ -412,375 +430,250 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         			NUMERICAL PARAMETERS                              ║ *)
-(* ║   (Численные вычисления для DynamicModule с кэшированием)      ║ *)
-(* ╚════════════════════════════════════════════════════════════════╝ *)
-
-
-ComputeNumericalHarmonicPerturbation[model_Association] := Module[
-    {analytical, topology, subRules, cache, capNum, hamNum, indNum,
-     equilibriumFluxes, equilibriumFluxesContinuation,
-     equilibriumPoints, subRulesWithoutPhiExt},
-     
-    analytical = model["Analytical"];
-    subRules = model["SubstitutionRules"];
-    topology = model["Topology"];
-    cache = <||>;
-
-    (* ════════════════════════════════════════════════════════════════ *)
-    (* Шаг 1: Численный гамильтониан + производные для continuation     *)
-    (* ════════════════════════════════════════════════════════════════ *)
-
-    (* Полный гамильтониан для NMinimize *)
-    hamNum = analytical["Hamiltonian"] /. subRules;
-    cache["HamiltonianNumerical"] = <|"State" -> "Ready", "Value" -> hamNum|>;
-
-    (* Частичный гамильтониан (без Φext) для continuation *)
-    subRulesWithoutPhiExt = DeleteCases[subRules, QED`$PhiExt :> _];
-    hamNumPartial = analytical["Hamiltonian"] /. subRulesWithoutPhiExt;
-
-    cache["HamiltonianNumericalPartial"] = <|
-      "State" -> "Ready", 
-      "Value" -> hamNumPartial
-    |>;
-
-    (* Предвычисление производных для continuation *)
-    Module[{nodes, fluxVars, potential, potentialRescaled, phi0},
-      nodes = Cases[topology["Nodes"], Except[topology["GroundNode"]]];
-      fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-      phi0 = QED`$Phi0Value;
-      
-      (* Потенциал: U(φ) = H(q=0, φ) *)
-      potential = hamNumPartial /. Subscript[QED`$ChargeSymbol, _] -> 0;
-      
-      (* Обезразмерить: U(φ) → U(φ̃ * Φ₀) *)
-      potentialRescaled = potential /. Thread[fluxVars -> fluxVars * phi0];
-      
-      (* Символьное дифференцирование (один раз!) *)
-      cache["ContinuationDerivatives"] = <|
-        "State" -> "Ready",
-        "Gradient" -> Simplify@(D[potentialRescaled, #] & /@ fluxVars),
-        "Hessian" -> Simplify@D[potentialRescaled, {fluxVars, 2}],
-        "FluxVars" -> fluxVars
-      |>;
-    ];
-
-
-    (* ════════════════════════════════════════════════════════════ *)
-    (* Шаг 2: Равновесные потоки (ПЕРЕНЕСЛИ СЮДА!)                 *)
-    (* ════════════════════════════════════════════════════════════ *)
-    
-      equilibriumFluxes = FindPotentialMinimum[hamNum, topology, subRules];
-
-      equilibriumFluxesContinuation = QED`Numeric`FindPotentialMinimumContinuation[
-        cache["ContinuationDerivatives"]["Gradient"],
-        cache["ContinuationDerivatives"]["Hessian"],
-        cache["ContinuationDerivatives"]["FluxVars"],
-        topology,
-        QED`$PhiExt /. subRules
-      ];
-
-      cache["EquilibriumFluxes1231"] = <|"State" -> "Ready", "Value" -> equilibriumFluxes|>;
-      cache["EquilibriumFluxes"] = <|
-        "State" -> "Ready", 
-        "Value" -> equilibriumFluxesContinuation
-      |>;
-
-    (* Равновесные точки (LAZY) *)
-    cache["EquilibriumPoints"] = <|
-      "State" -> "Lazy",
-      "Thunk" -> Function[{m},
-        FindEquilibriumPoints[
-          hamNum,
-          analytical["PotentialGradient"],
-          topology,
-          subRules
-        ]
-      ]
-    |>;
-
-    (* ОБНОВИТЬ $CurrentModel чтобы правила подстановки работали! *)
-    $CurrentModel = ReplacePart[$CurrentModel, {"Numerical", "Cache"} -> cache];
-    
-    (* ════════════════════════════════════════════════════════════ *)
-    (* Шаг 2.5: S-матрица (Semi-Symbolic) и Эффективные индуктивности *)
-    (* ════════════════════════════════════════════════════════════ *)
-    Module[{effRules, symS, sRaw, sNum, fullRules},
-        (* 1. Считаем L_eff используя ТОЛЬКО ЧТО найденные потоки *)
-        effRules = QED`Scattering`GetEffectiveInductances[model, equilibriumFluxesContinuation];
-        
-        cache["EffectiveInductances"] = <|
-            "State" -> "Ready", 
-            "Value" -> effRules
-        |>;
-
-        (* 2. Формируем полусимвольную S-матрицу (числа + s) *)
-        If[effRules =!= $Failed,
-            symS = analytical["Scattering"];
-            sRaw = symS["SMatrixRaw"]; 
-            
-            (* Объединяем статические параметры (C, L_linear) и динамические (L_eff) *)
-            fullRules = Join[subRules, effRules];
-            
-            sNum = sRaw /. fullRules;
-            
-            cache["SMatrixNumerical"] = <|
-                "State" -> "Ready", 
-                "Value" -> sNum, (* Матрица чисел, зависящая от s *)
-                "FrequencyVariable" -> symS["FrequencyVariable"]
-            |>;
-        ,
-            cache["SMatrixNumerical"] = <|"State" -> "Failed", "Error" -> "Could not calc effective inductances"|>
-        ];
-    ];
-
-    (* ════════════════════════════════════════════════════════════ *)
-    (*         Шаг 2a: Численный оператор тока                      *)
-    (* ════════════════════════════════════════════════════════════ *)
-
-    Module[{opSym, opNum},
-        (* Извлекаем символьный оператор (если он был посчитан в Analytic) *)
-        opSym = Lookup[analytical, "CurrentOperator", 0];
-        
-        (* Подставляем числа: параметры EJ, C, PhiExt И найденные phi_min *)
-        opNum = opSym /. subRules;
-        
-        cache["CurrentOperatorNumerical"] = <|
-            "State" -> "Ready", 
-            "Value" -> opNum
-        |>;
-    ];  
-    (* Шаг 2b: Численные операторы напряжения *)
-    Module[{opsSym, opsNum},
-        opsSym = Lookup[analytical, "VoltageOperators", <||>];
-        
-        (* Подставляем параметры (C, L, ...) и равновесные потоки *)
-        opsNum = opsSym /. subRules;
-        
-        cache["VoltageOperatorsNumerical"] = <|
-            "State" -> "Ready", 
-            "Value" -> opsNum
-        |>;
-    ];
-
-    (* ════════════════════════════════════════════════════════════ *)
-    (* Шаг 3: Остальные матрицы (ТЕПЕРЬ с φ_min!)                   *)
-    (* ════════════════════════════════════════════════════════════ *)
-    
-    {capNum, indNum} = {
-      analytical["CapacitanceMatrix"] /. subRules,
-      analytical["InductanceMatrix"] /. subRules
-    };
-    
-    cache["CapacitanceMatrixNumerical"] = <|"State" -> "Ready", "Value" -> capNum|>;
-    cache["InductanceMatrixInverseNumerical"] = <|"State" -> "Ready", "Value" -> indNum|>;
-    
-    (* ════════════════════════════════════════════════════════════ *)
-    (* Обратные матрицы                                             *)
-    (* ════════════════════════════════════════════════════════════ *)
-    
-    If[Det[capNum] != 0,
-      cache["InverseCapacitanceMatrix"] = <|"State" -> "Ready", "Value" -> Inverse[capNum]|>,
-      cache["InverseCapacitanceMatrix"] = <|"State" -> "Failed", "Error" -> "Singular matrix"|>
-    ];
-    
-    If[Det[indNum] != 0,
-      cache["InductanceMatrixNumerical"] = <|"State" -> "Ready", "Value" -> Inverse[indNum]|>,
-      cache["InductanceMatrixNumerical"] = <|"State" -> "Failed", "Error" -> "Singular inductance matrix"|>
-    ];
-    
-    (* ════════════════════════════════════════════════════════════ *)
-    (* Плазмонные частоты (собственные моды)                        *)
-    (* ════════════════════════════════════════════════════════════ *)
-    
-    If[cache["InverseCapacitanceMatrix"]["State"] === "Ready" && 
-       cache["InductanceMatrixInverseNumerical"]["State"] === "Ready",
-      
-      Module[{invC, invL, result},
-        invC = cache["InverseCapacitanceMatrix"]["Value"];
-        invL = cache["InductanceMatrixInverseNumerical"]["Value"];
-        
-        result = ComputeNormalModeFrequencies[invC, invL];
-        
-        cache["PlasmonFrequencies"] = <|
-          "State" -> "Ready",
-          "Value" -> result["Frequencies"],           (* Для GetNumericalQuantity *)
-          "Frequencies" -> result["Frequencies"],      (* Явный доступ *)
-          "IsStable" -> result["IsStable"],
-          "NumUnstableModes" -> result["NumUnstableModes"]
-        |>
-      ],
-      
-      (* Если матрицы сингулярные *)
-      cache["PlasmonFrequencies"] = <|"State" -> "Failed", "Error" -> "Singular matrices"|>
-    ];
-
-    (* ════════════════════════════════════════════════════════════════ *)
-    (* Plasmon Frequencies vs Flux (Lazy)                              *)
-    (* ════════════════════════════════════════════════════════════════ *)
-
-    cache["PlasmonFrequenciesVsFlux"] = <|
-      "State" -> "Lazy",
-      "Thunk" -> Function[{m},
-        QED`Numeric`PlasmonFrequenciesVsFlux[m]
-      ]
-    |>;
-    
-	(* ════════════════════════════════════════════════════════════════ *)
-	(* Harmonic mode diagonalization (READY)                            *)
-	(* ════════════════════════════════════════════════════════════════ *)
-	
-	If[cache["InverseCapacitanceMatrix"]["State"] === "Ready" && 
-	   cache["InductanceMatrixInverseNumerical"]["State"] === "Ready",
-	  
-	  Module[{invC, invL, diag},
-	    invC = cache["InverseCapacitanceMatrix"]["Value"];
-	    invL = cache["InductanceMatrixInverseNumerical"]["Value"];
-	    
-	    diag = DiagonalizeHarmonicHamiltonian[invC, invL];
-	    
-	    cache["HarmonicDiagonalization"] = <|
-	      "State" -> "Ready",
-	      "Value" -> diag
-	    |>
-	  ],
-	  
-	  (* Если матрицы Failed *)
-	  cache["HarmonicDiagonalization"] = <|
-	    "State" -> "Failed", 
-	    "Error" -> "Capacitance or inductance matrix unavailable"
-	  |>
-	];
-    
-    (* ════════════════════════════════════════════════════════════ *)
-    (* Lazy кэш (пример для PlotTest)                              *)
-    (* ════════════════════════════════════════════════════════════ *)
-    
-    cache["PlotTest"] = <|
-      "State" -> "Lazy",
-      "Thunk" -> Function[{m},
-        Module[{invC, element},
-          invC = GetNumericalQuantity[m, "InverseCapacitanceMatrix"];
-          If[invC === $Failed, $Failed,
-            element = invC[[1, 1]];
-            Plot[element * Sin[x], {x, 0, 1},
-              PlotLabel -> Row[{"Test: Sin(", ScientificForm[element], " × x × 10¹⁵)"}],
-              PlotTheme -> "Scientific",
-              ImageSize -> 400
-            ]
-          ]
-        ]
-      ]
-    |>;
-    
-    cache
-  ];
-
-
-
-(*вычисляет все*)
-GetNumericalParams[model_Association] := Module[{
-  analytical = model["Analytical"],
-  numerical = model["Numerical"]
-},
-  (* Проверить, нужен ли пересчёт *)
-  If[numerical["IsDirty"],
-    numerical["Cache"] = Switch[numerical["Method"],
-      "HarmonicPerturbation",
-      ComputeNumericalHarmonicPerturbation[model],
-      
-      "Diagonalization",
-      ComputeNumericalDiagonalization[model],
-      
-      _,
-      $Failed
-    ];
-    numerical["IsDirty"] = False;
-    numerical["ComputationTime"] = Now
-  ];
-  
-  numerical["Cache"]
-];
-
-
-(* ╔════════════════════════════════════════════════════════════════╗ *)
 (* ║                  УПРАВЛЕНИЕ И КЭШИРОВАНИЕ                      ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
 
-(* Извлечь значение из записи кэша, вычисляя если нужно *)
-GetCacheEntry[cacheEntry_Association, model_Association] := Module[
-  {state, thunk},
+(* ════════════════════════════════════════════════════════════════ *)
+(* ФАЗА 2: ДВИЖОК ЗАВИСИМОСТЕЙ (DEPENDENCY ENGINE)                  *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+GetSectoralHashes[modelAssoc_] := Module[
+  {primaryData, valuePaths, extractSector},
   
-  state = Lookup[cacheEntry, "State", "Unknown"];
+  primaryData = modelAssoc["Primary"];
   
-  Which[
-    state === "Ready",
-      Lookup[cacheEntry, "Value", $Failed],
+  (* 1. Собираем все пути к значениям (используем уже существующую функцию) *)
+  valuePaths = Select[
+    QED`Model`Private`getAllPaths[primaryData], 
+    Last[#] === "Value" &
+  ];
+  
+  (* 2. Вспомогательная функция сборки хеша сектора *)
+  extractSector[paramNamesList_List] := Module[
+    {sectorPaths, sectorValues},
     
-    state === "Lazy",
-      thunk = Lookup[cacheEntry, "Thunk", $Failed];
-      If[thunk === $Failed, $Failed, thunk[model]],
+    (* Фильтруем пути: предпоследний элемент пути - это имя параметра (C, EJ и т.д.) *)
+    sectorPaths = Select[valuePaths, MemberQ[paramNamesList, #[[ -2 ]]] &];
     
-    True,
-      $Failed
-  ]
+    (* Жесткая лексикографическая сортировка путей для защиты от смены порядка *)
+    sectorPaths = Sort[sectorPaths];
+    
+    (* Извлекаем сами голые числа по отсортированным путям *)
+    sectorValues = Map[Extract[primaryData, #] &, sectorPaths];
+    
+    Hash[sectorValues]
+  ];
+  
+  (* 3. Распределяем физические параметры по доменам *)
+  <|
+    "Kinetic" -> extractSector[{"C", "CJ"}],
+    "Potential" -> extractSector[{"L", "EJ"}],
+    "External" -> extractSector[{"Fext"}]
+  |>
 ];
 
-
-(* Получить одно численное значение по ключу *)
-GetNumericalQuantity[model_Association, key_String] := Module[
-    {num, entry},
-    
-    num = model["Numerical"];
-    
-    (* Шаг 1: Если кэш грязный, сначала его пересчитать *)
-    If[num["IsDirty"],
-       num["Cache"] = Switch[num["Method"],
-           "HarmonicPerturbation",
-             ComputeNumericalHarmonicPerturbation[model],
-           "Diagonalization",
-             ComputeNumericalDiagonalization[model],
-           _, $Failed
-         ];
-       num["IsDirty"] = False;
-       num["ComputationTime"] = Now;
-      
-      $CurrentModel = ReplacePart[$CurrentModel, "Numerical" -> num];  (* Обновить model *)
-     ];
-    
-    (* Шаг 2: Получить запрошенный ключ из кэша *)
-  	entry = Lookup[num["Cache"], key, Missing["UnknownKey"]];
-    
-    If[entry === Missing["UnknownKey"],
-       Message[GetNumericalQuantity::unknown, key];
-       Return[$Failed]
-     ];
-    
-    (* Шаг 3: Использовать GetCacheEntry для получения значения *)
-    GetCacheEntry[entry, $CurrentModel]
-  ];
-
-GetNumericalQuantity::unknown = "Unknown key: `1`";
-
-
-UpdateAnaliticalParam[model_Association, path_List, newValue_] := 
-  Module[{updated},
-    
-    updated = model;
-    
-    (* Пересчитать аналитические параметры *)
-    updated["Analytical"] = ComputeAnalyticalParams[
-      updated["Primary"]["Topology"],
-      updated["Primary"]["Elements"],
-      updated["Numerical"]["Method"]
-    ];
-    
-    updated
-  ];
-
+$DependencyRegistry = <|
   
-GetAnalyticalParams[model_Association] := model["Analytical"]
+  "CompiledEngines" -> <|
+    "Dependencies" -> {},
+    "RelevantHashes" -> {},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{nodes, fluxSymbols, paramSymbols},
+        nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+        fluxSymbols = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+        paramSymbols = GetParameterSymbols[modelAssoc];
+        
+        QED`Numeric`Calculators`CalcCompiledEngines[
+          modelAssoc["Analytical"],
+          fluxSymbols,
+          paramSymbols
+        ]
+      ]
+    ]
+  |>,
+  
+  "StaticMatrices" -> <|
+    "Dependencies" -> {},
+    "RelevantHashes" -> {"Kinetic"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      QED`Numeric`Calculators`CalcStaticMatrices[
+        modelAssoc["Analytical"], 
+        modelAssoc["SubstitutionRules"]
+      ]
+    ]
+  |>,
+  
+  "EquilibriumFluxes" -> <|
+    "Dependencies" -> {"CompiledEngines"},
+    "RelevantHashes" -> {"Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{engines, paramVector, lastCacheEntry, initialGuess, numVars},
+        engines = depsData["CompiledEngines"];
+        paramVector = GetParameterVector[modelAssoc];
+        
+        (* Надежный расчет размерности через топологию *)
+        numVars = Length[Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]]];
+        
+        lastCacheEntry = Lookup[modelAssoc["Numerical", "VersionedCache", "Values"], "EquilibriumFluxes", <||>];
+        initialGuess = Lookup[lastCacheEntry, "Value", ConstantArray[0., numVars]];
+        
+        (* УБРАН лишний аргумент extFluxRule *)
+        QED`Numeric`Calculators`CalcEquilibrium[engines, initialGuess, paramVector]
+      ]
+    ]
+  |>,
+  
+  "SystemMatrices" -> <|
+    "Dependencies" -> {"CompiledEngines", "EquilibriumFluxes"},
+    "RelevantHashes" -> {"Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      QED`Numeric`Calculators`CalcSystemMatrices[
+        depsData["CompiledEngines"][[3]], (* fastLInv *)
+        depsData["EquilibriumFluxes"],
+        GetParameterVector[modelAssoc]
+      ]
+    ]
+  |>,
+  
+  "HarmonicDiagonalization" -> <|
+    "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      QED`Numeric`Calculators`CalcHarmonicDiagonalization[
+        depsData["StaticMatrices"][[2]], (* invCNum *)
+        depsData["SystemMatrices"]["InverseInductance"]
+      ]
+    ]
+  |>,
+
+  "PlasmonFrequencies" -> <|
+    "Dependencies" -> {"HarmonicDiagonalization"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      depsData["HarmonicDiagonalization"]["NormalModeFrequencies"]
+    ]
+  |>,
+
+  "SMatrix" -> <|
+    "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{cNum, invLNum, omega, portIndices, z0, analytical},
+        cNum = depsData["StaticMatrices"][[1]]; (* Первая матрица - C *)
+        invLNum = depsData["SystemMatrices"]["InverseInductance"];
+        analytical = modelAssoc["Analytical"];
+        
+        (* Извлекаем частоту и порты из правил (на будущее можно вынести в параметры GUI) *)
+        omega = ReplaceAll[analytical["Scattering"]["FrequencyVariable"], modelAssoc["SubstitutionRules"]];
+        
+        (* Если omega не задана числом, возвращаем Failed *)
+        If[!NumericQ[omega], Return[$Failed]];
+        
+        portIndices = analytical["Scattering"]["PortIndices"];
+        z0 = 50.0; (* Базовый импеданс линии *)
+        
+        QED`Numeric`Calculators`CalcSMatrixNumeric[
+          omega, cNum, invLNum, portIndices, z0
+        ]
+      ]
+    ]
+  |>,
+
+  "CurrentOperatorNumerical" -> <|
+    "Dependencies" -> {"EquilibriumFluxes"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{nodes, minSymbols, phiMinRules, paramSymbols, paramVector, strictRules, cleanRules},
+        nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+        
+        minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+        phiMinRules = Thread[minSymbols -> depsData["EquilibriumFluxes"]];
+        
+        paramSymbols = GetParameterSymbols[modelAssoc];
+        paramVector = GetParameterVector[modelAssoc];
+        strictRules = Thread[paramSymbols -> paramVector];
+        
+        (* Вырезаем старые ссылки на кэш для phi_min *)
+        cleanRules = DeleteCases[modelAssoc["SubstitutionRules"], (Alternatives @@ minSymbols) :> _];
+        
+        (* Идеальный порядок: параметры -> равновесие -> константы *)
+        Lookup[modelAssoc["Analytical"], "CurrentOperator", 0] /. strictRules /. phiMinRules /. cleanRules
+      ]
+    ]
+  |>,
+
+  "VoltageOperatorsNumerical" -> <|
+    "Dependencies" -> {"EquilibriumFluxes"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{nodes, minSymbols, phiMinRules, paramSymbols, paramVector, strictRules, cleanRules},
+        nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+        
+        minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+        phiMinRules = Thread[minSymbols -> depsData["EquilibriumFluxes"]];
+        
+        paramSymbols = GetParameterSymbols[modelAssoc];
+        paramVector = GetParameterVector[modelAssoc];
+        strictRules = Thread[paramSymbols -> paramVector];
+        
+        cleanRules = DeleteCases[modelAssoc["SubstitutionRules"], (Alternatives @@ minSymbols) :> _];
+        
+        Lookup[modelAssoc["Analytical"], "VoltageOperators", <||>] /. strictRules /. phiMinRules /. cleanRules
+      ]
+    ]
+  |>
+|>;
+
+(* Новый универсальный резолвер *)
+GetNumericalQuantity[modelAssoc_, keyString_String] := Module[
+  {registryNode, currentHashes, cachedValues, cachedEntry, isCacheValid, depsData, computedValue},
+  
+  registryNode = Lookup[$DependencyRegistry, keyString, $Failed];
+  If[registryNode === $Failed, 
+    Message[GetNumericalQuantity::unknown, keyString]; 
+    Return[$Failed]
+  ];
+  
+  currentHashes = GetSectoralHashes[modelAssoc];
+  
+  (* Инициализация структуры кэша, если её нет *)
+  If[!KeyExistsQ[modelAssoc["Numerical"], "VersionedCache"],
+    $CurrentModel["Numerical", "VersionedCache"] = <|"Values" -> <||>|>;
+  ];
+  
+  cachedValues = Lookup[modelAssoc["Numerical", "VersionedCache"], "Values", <||>];
+  cachedEntry = Lookup[cachedValues, keyString, <||>];
+  
+  (* Проверяем актуальность доменных хешей *)
+  isCacheValid = If[Length[cachedEntry] > 0,
+    AllTrue[registryNode["RelevantHashes"], currentHashes[#] === cachedEntry["Hashes", #] &],
+    False
+  ];
+  
+  If[isCacheValid,
+    Return[cachedEntry["Value"]]
+  ];
+  
+  (* Рекурсивный сбор зависимостей *)
+  depsData = AssociationMap[
+    Function[depKey, GetNumericalQuantity[modelAssoc, depKey]], 
+    registryNode["Dependencies"]
+  ];
+  
+  (* JIT Вычисление *)
+  computedValue = registryNode["Compute"][modelAssoc, depsData];
+  
+  (* Сохраняем результат и хеши в $CurrentModel *)
+  $CurrentModel["Numerical", "VersionedCache", "Values", keyString] = <|
+    "Value" -> computedValue,
+    "Hashes" -> KeyTake[currentHashes, registryNode["RelevantHashes"]]
+  |>;
+  
+  computedValue
+];
+
+GetNumericalQuantity::unknown = "Unknown dependency key: `1`";
 
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
@@ -883,7 +776,6 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
     newModel = model;
     newModel["SubstitutionRules"] = rules;
     newModel["Numerical"]["Cache"] = Join[existingCache, newCache];
-    newModel["Numerical"]["IsDirty"] = False;
 
     newModel
 ];
@@ -921,8 +813,6 @@ LoadPreset[model_Association, name_String] :=
     (* Примечание: BuildSubstitutionRules зависит от текущей model, но мы передаем данные явно *)
     (* В текущей архитектуре параметры подставляются через SubstitutionRules, 
        которые ссылаются на Primary. Но лучше сбросить кэш. *)
-       
-    updatedModel["Numerical", "IsDirty"] = True;
     
     updatedModel
   ];
@@ -946,12 +836,6 @@ DeletePreset[model_Association, name_String] :=
 
 GetPresetNames[model_Association] := Keys[model["Presets"]];
 
-(* Удобный доступ ко всем параметрам *)
-GetAllParams[model_Association] := <|
-  "Primary" -> model["Primary"],
-  "Analytical" -> model["Analytical"],
-  "Numerical" -> GetNumericalParams[model]
-|>;
 
 End[];
 EndPackage[];

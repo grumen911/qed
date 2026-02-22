@@ -35,8 +35,7 @@ InitQED[] := Module[{srcDir, loadTime},
     loadPackage["Plots/Plots.wl"];
     loadPackage["Plots/PlotStyle.wl"];
     loadPackage["Analytic/Analytic.wl"];
-    loadPackage["Numeric/Calculators.wl"];
-    loadPackage["Numeric/HarmonicOscillator.wl"];    
+    loadPackage["Numeric/Calculators.wl"];   
     loadPackage["Numeric/Numeric.wl"];
     loadPackage["CircuitTopology.wl"];
     loadPackage["Model.wl"];
