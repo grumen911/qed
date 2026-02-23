@@ -49,8 +49,8 @@ CalcCompiledEngines[analytical_Association, fluxSymbols_List, paramSymbols_List]
   gradSym = D[potRescaled, {fluxSymbols}];
   hessSym = D[gradSym, {fluxSymbols}];
   
-  fluxRules = Table[With[{idx = i}, fluxSymbols[[idx]] :> phi[[idx]]], {i, Length[fluxSymbols]}];
-  paramRules = Table[With[{idx = i}, paramSymbols[[idx]] :> p[[idx]]], {i, Length[paramSymbols]}];
+  fluxRules = Table[With[{idx = i}, fluxSymbols[[idx]] -> Indexed[phi, idx]], {i, Length[fluxSymbols]}];
+  paramRules = Table[With[{idx = i}, paramSymbols[[idx]] -> Indexed[p, idx]], {i, Length[paramSymbols]}];
   allRules = Join[fluxRules, paramRules];
   
   heldGrad = With[{g = gradSym}, Hold[g]] /. allRules;
@@ -64,7 +64,7 @@ CalcCompiledEngines[analytical_Association, fluxSymbols_List, paramSymbols_List]
   minSymbols = fluxSymbols /. Subscript[s_, i_] :> Subscript[s, "min", i];
   linvSym = analytical["InductanceMatrix"] /. constantRules;
   
-  minRules = Table[With[{idx = i}, minSymbols[[idx]] :> phi[[idx]]], {i, Length[minSymbols]}];
+  minRules = Table[With[{idx = i}, minSymbols[[idx]] -> Indexed[phi, idx]], {i, Length[minSymbols]}];
   allRulesLInv = Join[minRules, paramRules];
   heldLInv = With[{m = linvSym}, Hold[m]] /. allRulesLInv;
   
