@@ -25,6 +25,36 @@ RegisterPlot[id_String, label_String, type_String, computeFunc_] :=
     "Compute" -> computeFunc
   |>);
 
+(* ИНСПЕКТОР СОСТОЯНИЯ: Полный дамп модели через Dataset *)
+RegisterPlot["ModelState", "Model State Inspector (Dataset)", "Light",
+  Function[{m},
+    Module[{displayModel},
+      
+      (* 1. Убираем картинку схемы, чтобы она не раздувала высоту строк в Dataset *)
+      displayModel = KeyDrop[m, "Image"];
+
+      (* 2. Хирургическая обрезка: ищем любые списки (векторы/матрицы) больше 50 элементов 
+            и заменяем их на легкую текстовую заглушку с размерами *)
+      displayModel = Replace[displayModel,
+        val_List /; Length[Flatten[val]] > 50 :> 
+          Style["<Array: " <> ToString[Dimensions[val]] <> ">", Gray, Italic],
+        {0, Infinity}
+      ];
+
+      (* 3. Оборачиваем в Dataset и ограничиваем контейнер через Pane *)
+      Pane[
+        Dataset[displayModel, 
+          MaxItems -> {20, 10}, (* Ограничиваем количество показываемых строк/колонок на одной странице *)
+          HeaderAlignment -> Center
+        ],
+        ImageSize -> {700, 450}, (* Жесткие рамки, чтобы интерфейс не разъезжался *)
+        Scrollbars -> True,
+        AppearanceElements -> None
+      ]
+    ]
+  ]
+];  
+
 (* Регистрация базовых графиков *)
 RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light", 
   Function[{m}, QED`Plots`PlotPlasmonSpectrum[m]]
@@ -329,39 +359,33 @@ RegisterPlot["SmatrixHeatmap", "Scattering Parameters Heatmap", "Heavy",
    Input: plotId, model (Value)
    Output: {Graphics, UpdatedModel (Value)}
 *)
-ComputePlotData[plotId_, model_Association] := 
-  Block[{$CurrentModel = model},
+(* COMPUTE WORKER (HANDLE-BASED) *)
+(* Теперь принимает не ассоциацию, а строковый ID модели *)
+ComputePlotData[plotId_String, modelId_String] := 
+  Module[{model, info, func, graphic},
     
-    (* 0. Zombie Protection *)
-    If[Length[$CurrentModel["Numerical", "Cache"]] === 0,
-       $CurrentModel["Numerical", "IsDirty"] = True;
-    ];
-    
-    (* 1. Warm up Cache (Updates $CurrentModel internally) *)
-    QED`Model`GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"];
-    
-    If[plotId === "Potential3D",
-       QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]
-    ];
+    model = QED`Model`GetModel[modelId];
+    If[!AssociationQ[model], Return[Graphics[{Red, Text["Invalid Model ID"]}]]];
 
-    (* Explicit warmup for DiagonalizationCheck using GetNumericalQuantity *)
-    If[plotId === "DiagonalizationCheck",
-       QED`Model`GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"]
+    $CurrentModel = model;
+    
+    (* 1. Прогрев кэша (JIT пишет данные внутрь $CurrentModel) *)
+    QED`Model`GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"];
+    If[plotId === "Potential3D", QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]];
+    If[plotId === "DiagonalizationCheck", QED`Model`GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"]];
+
+    (* ВАЖНО: Сохраняем прогретую модель с кэшем обратно в реестр Ядра! *)
+    Evaluate[Symbol["QED`Model`Private`$ModelRegistry"]][modelId] = $CurrentModel;
+
+    (* 2. Вызов функции отрисовки *)
+    info = $PlotRegistry[plotId];
+    graphic = If[MissingQ[info], 
+       Graphics[{Red, Text["Unknown Plot ID"]}],
+       func = info["Compute"];
+       func[$CurrentModel]
     ];
     
-    (* 2. Compute Graphic using warmed model *)
-    Module[{info, func, graphic},
-      info = $PlotRegistry[plotId];
-      
-      graphic = If[MissingQ[info], 
-         Graphics[{Red, Text["Unknown Plot ID"]}],
-         func = info["Compute"];
-         func[$CurrentModel]
-      ];
-      
-      (* 3. Return Result AND The Updated Model State *)
-      {graphic, $CurrentModel}
-    ]
+    graphic
   ];
 
 (* ═══════════════════════════════════════════════════════════════ *)
@@ -374,8 +398,7 @@ ExtractInteractiveParams[model_Association] :=
       Function[{tag, componentParams},
         KeyValueMap[
           {tag, #1, #2["Value"], {#2["Min"], #2["Max"], #2["Step"]}} &,
-          Select[componentParams, AssociationQ[#] && 
-            Lookup[#, "Interactive", False] === True &]
+          Select[componentParams, AssociationQ[#] && Lookup[#, "Interactive", False] === True &]
         ]
       ],
       model["Primary"]
@@ -383,62 +406,54 @@ ExtractInteractiveParams[model_Association] :=
     1
   ];
 
-(* Отрисовка слайдера с именем Tag.Param *)
+(* Слайдер теперь принимает ID модели и отправляет изменения прямо в Ядро *)
 SetAttributes[MakeParameterControl, HoldFirst];
-MakeParameterControl[model_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
-  Module[{currentVal = val},
-    Row[{
-      Style[tag <> "." <> param <> ": ", 12],
-      
-      Slider[
-        Dynamic[
-          model["Primary", tag, param, "Value"], 
-          
-          Function[{v},
-            model["Primary", tag, param, "Value"] = v;
-            model["Numerical", "IsDirty"] = True;
-            onUpdate[]
-          ]
-        ],
-        {min, max, step},
-        ImageSize -> 120
+MakeParameterControl[modelId_String, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
+  Row[{
+    Style[tag <> "." <> param <> ": ", 12],
+    
+    Slider[
+      Dynamic[
+        QED`Model`GetModel[modelId]["Primary", tag, param, "Value"], 
+        Function[{v},
+          QED`Model`UpdateModelParameter[modelId, tag, param, v];
+          onUpdate[]
+        ]
       ],
-      
-      Spacer[5],
-      
-      InputField[
-        Dynamic[
-          model["Primary", tag, param, "Value"],
-          Function[{v},
-            model["Primary", tag, param, "Value"] = v;
-            model["Numerical", "IsDirty"] = True;
-            onUpdate[]
-          ]
-        ],
-        Number, 
-        FieldSize -> {6, 1}
-      ]
-    }]
-  ];
+      {min, max, step},
+      ImageSize -> 120
+    ],
+    
+    Spacer[5],
+    
+    InputField[
+      Dynamic[
+        QED`Model`GetModel[modelId]["Primary", tag, param, "Value"],
+        Function[{v},
+          QED`Model`UpdateModelParameter[modelId, tag, param, v];
+          onUpdate[]
+        ]
+      ],
+      Number, 
+      FieldSize -> {6, 1}
+    ]
+  }];
 
-(* Выбор модели с картинками (Safe Version) *)
 SetAttributes[SelectModel, HoldFirst];
-SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
+SelectModel[currentModelIdSymbol_, modelIdsStack_List, onUpdate_] :=
   Row[{
     Pane[
       SetterBar[
-        Dynamic[modelSymbol, 
-           Function[{newModel},
-             modelSymbol = newModel;
-             onUpdate[]; (* Callback to clear cache/reset UI *)
+        Dynamic[currentModelIdSymbol, 
+           Function[{newId},
+             currentModelIdSymbol = newId;
+             onUpdate[]; 
            ]
         ],
-        (* Value (Model) -> Label (Thumbnail Image) *)
-        (* Added Lookup for Name safety *)
         (# -> Tooltip[
-                 Show[#["Image"], ImageSize->{60,60}, AspectRatio->1, Axes->False, Frame->True, FrameTicks->None], 
-                 Lookup[#["Topology"], "Name", "Circuit"]
-              ]) & /@ modelsStack,
+                 Show[QED`Model`GetModel[#]["Image"], ImageSize->{60,60}, AspectRatio->1, Axes->False, Frame->True, FrameTicks->None], 
+                 Lookup[QED`Model`GetModel[#]["Topology"], "Name", "Circuit"]
+              ]) & /@ modelIdsStack,
         Appearance -> "Vertical"
       ],
       ImageSize -> {80, 200},
@@ -446,77 +461,70 @@ SelectModel[modelSymbol_, modelsStack_List, onUpdate_] :=
     ],
     Spacer[10],
     
-    (* Big Preview of Current Model *)
     Dynamic[
-      Column[{
-        Style[Lookup[modelSymbol["Topology"], "Name", "Circuit"], Bold, 12],
-        Show[modelSymbol["Image"], ImageSize -> {180, 180}, AspectRatio->1]
-      }, Alignment -> Center]
+      Module[{m = QED`Model`GetModel[currentModelIdSymbol]},
+        Column[{
+          Style[Lookup[m["Topology"], "Name", "Circuit"], Bold, 12],
+          Show[m["Image"], ImageSize -> {180, 180}, AspectRatio->1]
+        }, Alignment -> Center]
+      ],
+      TrackedSymbols :> {currentModelIdSymbol}
     ]
   }];
 
 SetAttributes[PlotControlPanel, HoldFirst];
-PlotControlPanel[model_, onUpdate_, onForceUpdate_] := 
-  Module[{params},
-    params = ExtractInteractiveParams[model];
-    
-    Column[
-      Join[
-        Map[
-          MakeParameterControl[model, #, onUpdate] &,
-          params
-        ],
-        
-        {Spacer[10],
-         Button["Update Plot", 
-           onForceUpdate[],
-           Method -> "Queued",
-           ImageSize -> {140, 30}
-         ]}
+PlotControlPanel[modelIdSymbol_, onUpdate_, onForceUpdate_, triggerSymbol_] := 
+  Dynamic[
+    Module[{m = QED`Model`GetModel[modelIdSymbol], params},
+      If[!AssociationQ[m], Return[""]];
+      params = ExtractInteractiveParams[m];
+      Column[
+        Join[
+          Map[MakeParameterControl[modelIdSymbol, #, onUpdate] &, params],
+          {Spacer[10],
+           Button["Update Plot", 
+             onForceUpdate[],
+             Method -> "Queued",
+             ImageSize -> {140, 30}
+           ]}
+        ]
       ]
-    ]
+    ],
+    TrackedSymbols :> {modelIdSymbol, triggerSymbol} (* Перерисовываем слайдеры при загрузке пресета *)
   ];
 
 SetAttributes[PresetControlPanel, HoldFirst];
-PresetControlPanel[modelSymbol_, onModelUpdate_] := 
+PresetControlPanel[modelIdSymbol_, onModelUpdate_] := 
   DynamicModule[{selectedPreset = Null, getModelKey, hamburgerIcon},
     
-    getModelKey[m_] := Lookup[m["Topology"], "Name", "DefaultCircuit"];
+    getModelKey[id_] := Lookup[QED`Model`GetModel[id]["Topology"], "Name", "DefaultCircuit"];
 
-    (*Add ImagePadding -> 0 to remove hidden margins (not work)*)
     hamburgerIcon = Graphics[
       {GrayLevel[0.4], CapForm["Round"], Thickness[0.15], 
-       Line[{{0, 0.25}, {1, 0.25}}], 
-       Line[{{0, 0.5}, {1, 0.5}}], 
-       Line[{{0, 0.75}, {1, 0.75}}]}, 
-      ImageSize -> {12, 12}, 
-      PlotRange -> {{0, 1}, {0, 1}},
-      ImagePadding -> 0, 
-      BaselinePosition -> Center
+       Line[{{0, 0.25}, {1, 0.25}}], Line[{{0, 0.5}, {1, 0.5}}], Line[{{0, 0.75}, {1, 0.75}}]}, 
+      ImageSize -> {12, 12}, PlotRange -> {{0, 1}, {0, 1}}, ImagePadding -> 0, BaselinePosition -> Center
     ];
 
     Framed[
       Row[{
         Style["Presets: ", 10, Gray],
         
-        (* 1. Preset Selector *)
         Dynamic[
           PopupMenu[
             Dynamic[selectedPreset],
-            QED`Model`GetPresetNames[modelSymbol], 
+            QED`Model`GetPresetNames[QED`Model`GetModel[modelIdSymbol]], 
             "Select...",
             ImageSize -> {90, Automatic}
           ]
         ],
         Spacer[5],
         
-        (* 2. Load Button *)
         Button[
           Tooltip[Style["Load", 10], "Load selected preset"],
           If[StringQ[selectedPreset],
              Module[{updated},
-               updated = QED`Model`LoadPreset[modelSymbol, selectedPreset];
-               onModelUpdate[updated]; 
+               updated = QED`Model`LoadPreset[QED`Model`GetModel[modelIdSymbol], selectedPreset];
+               onModelUpdate[updated];
              ]
           ],
           Enabled -> Dynamic[StringQ[selectedPreset]],
@@ -524,7 +532,6 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
         ],
         Spacer[2],
         
-        (* 3. Save Button *)
         Button[
           Tooltip[Style["Save", 10], "Save current configuration"],
           Module[{name},
@@ -532,15 +539,12 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
                 Column[{
                   Style["Save Preset", Bold],
                   InputField[Dynamic[text], String],
-                  Row[{
-                    DefaultButton["Save", DialogReturn[text]], 
-                    CancelButton[]
-                  }]
+                  Row[{DefaultButton["Save", DialogReturn[text]], CancelButton[]}]
                 }]
              ];
              If[StringQ[name] && StringLength[name] > 0,
                 Module[{updated},
-                   updated = QED`Model`SavePreset[modelSymbol, name];
+                   updated = QED`Model`SavePreset[QED`Model`GetModel[modelIdSymbol], name];
                    onModelUpdate[updated];
                    selectedPreset = name; 
                 ]
@@ -551,12 +555,11 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
         ],
         Spacer[2],
         
-        (* 4. Delete Button *)
         Button[
            Tooltip[Style["X", 10, Red], "Delete selected preset"],
            If[StringQ[selectedPreset],
               Module[{updated},
-                 updated = QED`Model`DeletePreset[modelSymbol, selectedPreset];
+                 updated = QED`Model`DeletePreset[QED`Model`GetModel[modelIdSymbol], selectedPreset];
                  onModelUpdate[updated];
                  selectedPreset = Null;
               ]
@@ -567,118 +570,97 @@ PresetControlPanel[modelSymbol_, onModelUpdate_] :=
         
         Spacer[10],
         
-        (* 5. Compact Persistence Menu *)
         ActionMenu[
-           Tooltip[
-              MouseAppearance[
-                 (* Wrap in Pane to force vertical centering *)
-                 Pane[hamburgerIcon, ImageSize -> {20, 20}, Alignment -> Center], 
-                 "LinkHand"
-              ], 
-              "Notebook Storage Options"
-           ],
+           Tooltip[MouseAppearance[Pane[hamburgerIcon, ImageSize -> {20, 20}, Alignment -> Center], "LinkHand"], "Notebook Storage Options"],
            {
              "Save to Notebook..." :> Module[{key},
-                key = getModelKey[modelSymbol];
+                key = getModelKey[modelIdSymbol];
                 If[ChoiceDialog[
                      "Overwrite preset metadata in this notebook?\nExisting presets for this model in the file metadata will be replaced.",
                      {"Overwrite" -> True, "Cancel" -> False},
                      WindowTitle -> "Confirm Save to Notebook"
-                   ],
-                   CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}] = modelSymbol["Presets"];
+                  ],
+                   CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}] = QED`Model`GetModel[modelIdSymbol]["Presets"];
                 ]
              ],
              "Merge from Notebook" :> Module[{key, saved, updated},
-                key = getModelKey[modelSymbol];
+                key = getModelKey[modelIdSymbol];
                 saved = CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}];
                 If[AssociationQ[saved],
-                   updated = QED`Model`MergePresets[modelSymbol, saved];
+                   updated = QED`Model`MergePresets[QED`Model`GetModel[modelIdSymbol], saved];
                    onModelUpdate[updated];
                 ]
              ]
            },
-           Appearance -> "None",
-           ImageSize -> {20, 20},
-           Method -> "Queued"
+           Appearance -> "None", ImageSize -> {20, 20}, Method -> "Queued"
         ]
       }],
-      FrameStyle -> LightGray,
-      RoundingRadius -> 3,
-      ImageMargins -> 0
+      FrameStyle -> LightGray, RoundingRadius -> 3, ImageMargins -> 0
     ]
   ];
 
-(* Векторная иконка настроек (Draws a gear) *)
-makeGearIcon[color_] := Graphics[{
-    color, 
-    Disk[{0, 0}, 0.7], 
-    Table[
-        Rotate[
-            {EdgeForm[None], Rectangle[{-0.15, 0.6}, {0.15, 0.95}]}, 
-            ang, {0, 0}
-        ], 
-        {ang, 0, 2 Pi - 0.1, Pi/4}
-    ],
-    White, Disk[{0, 0}, 0.3]
-}, ImageSize -> 18, PlotRange -> {{-1, 1}, {-1, 1}}, BaselinePosition -> Center];
-
+makeGearIcon[color_] := Graphics[{color, Disk[{0, 0}, 0.7], Table[Rotate[{EdgeForm[None], Rectangle[{-0.15, 0.6}, {0.15, 0.95}]}, ang, {0, 0}], {ang, 0, 2 Pi - 0.1, Pi/4}], White, Disk[{0, 0}, 0.3]}, ImageSize -> 18, PlotRange -> {{-1, 1}, {-1, 1}}, BaselinePosition -> Center];
 ExtractGraphicOnly[expr_] := Replace[expr, Legended[g_, _] :> g];
 
 (* ═══════════════════════════════════════════════════════════════ *)
-(* 3. CORE: QUBIT DASHBOARD *)
+(* 3. CORE: QUBIT DASHBOARD (TRIGGER-BASED) *)
 (* ═══════════════════════════════════════════════════════════════ *)
 
-(* Модифицированный QubitDashboard *)
 QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   {
-    currentModel = First[modelsStack],
-    selectedPlotId = "PlasmonSpectrum",
+    (* Регистрируем схемы в Ядре и сохраняем только их ID! *)
+    modelIds = QED`Model`RegisterModel /@ modelsStack,
+    currentModelId,
+    
+    (* НАШ ТРИГГЕР ПЕРЕРИСОВКИ *)
+    uiTick = 1,
+    
+    selectedPlotId = "ModelState",
     plotCache = <||>,
-    overlayBasket = <||>, (* <| "PlotId" -> {g1, g2...} |> *)
-
+    overlayBasket = <||>,
     showExportSettings = False,
-    exportPreset = "Publication", (* Default *)
-
+    exportPreset = "Publication",
     performUpdate
   },
   
-  (* ... performUpdate тот же ... *)
   performUpdate = Function[{},
     plotCache[selectedPlotId] = "Computing...";
     FinishDynamic[];
-    Module[{res, updatedModel},
-       {res, updatedModel} = ComputePlotData[selectedPlotId, currentModel];
-       plotCache[selectedPlotId] = res;
-       currentModel = updatedModel;
-    ]
+    (* Вызываем Compute с передачей строки-идентификатора *)
+    plotCache[selectedPlotId] = ComputePlotData[selectedPlotId, currentModelId];
+    uiTick++;
   ];
 
   Column[{
     Row[{
-      (* LEFT PANEL ... (без изменений) ... *)
+      (* LEFT PANEL *)
       Panel[
-        (* ... код левой панели ... *)
         Column[{
-          SelectModel[currentModel, modelsStack, 
+          SelectModel[currentModelId, modelIds, 
              Function[{}, 
                plotCache = <||>;
-               (* Очищаем оверлей при смене модели или нет? 
-                  Обычно оверлей нужен ЧТОБЫ сравнить модели. Оставляем. *)
-               currentModel["Numerical", "IsDirty"] = True;
                If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
              ]
           ],
           Spacer[15],
-          PresetControlPanel[currentModel, Function[{m}, currentModel = m; needsUpdate = True;]],
+          PresetControlPanel[currentModelId, 
+             Function[{updatedModelAssoc}, 
+               (* Хак: обновляем реестр вручную при работе с пресетами *)
+               Evaluate[Symbol["QED`Model`Private`$ModelRegistry"]][currentModelId] = updatedModelAssoc;
+               performUpdate[];
+             ]
+          ],
           Spacer[10],
-          PlotControlPanel[currentModel, 
+          PlotControlPanel[currentModelId, 
             Function[{}, 
                If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
                   performUpdate[], 
                   plotCache[selectedPlotId] = Missing["Stale"] 
-               ]
+               ];
+               uiTick++; (* Приказываем перерисовать график! *)
             ],
-            Function[{}, currentModel["Numerical", "IsDirty"] = True; performUpdate[]]
+            Function[{}, performUpdate[]],
+            uiTick
           ]
         }],
         Alignment -> Top
@@ -688,9 +670,8 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       
       (* RIGHT PANEL: Plot Area *)
       Column[{
-        (* 1. UNIFIED TOOLBAR: Type | Overlay | Export *)
+        (* 1. UNIFIED TOOLBAR *)
         Row[{
-           (* A. Plot Type Selector *)
            "Plot Type: ",
            PopupMenu[Dynamic[selectedPlotId, 
              Function[{v}, 
@@ -698,20 +679,20 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
                If[$PlotRegistry[selectedPlotId]["Type"] === "Light", 
                   performUpdate[],
                   If[!KeyExistsQ[plotCache, selectedPlotId], plotCache[selectedPlotId] = Missing["Init"]]
-               ]
+               ];
+               uiTick++;
              ]], 
              Keys[$PlotRegistry]
            ],
            
            Spacer[20],
            
-           (* B. OVERLAY CONTROLS *)
            Button["Add to Overlay",
-             Module[{curr},
-               curr = plotCache[selectedPlotId];
+             Module[{curr = plotCache[selectedPlotId]},
                If[!MissingQ[curr] && !FailureQ[curr],
                   If[!KeyExistsQ[overlayBasket, selectedPlotId], overlayBasket[selectedPlotId] = {}];
                   AppendTo[overlayBasket[selectedPlotId], ExtractGraphicOnly[curr]];
+                  uiTick++;
                ]
              ],
              Enabled -> Dynamic[MatchQ[plotCache[selectedPlotId], _Graphics | _Legended]],
@@ -721,136 +702,73 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
            Spacer[5],
            
            Button["Clear",
-             overlayBasket[selectedPlotId] = {},
+             overlayBasket[selectedPlotId] = {}; uiTick++,
              Enabled -> Dynamic[Length[Lookup[overlayBasket, selectedPlotId, {}]] > 0],
              ImageSize -> {50, Automatic}
            ],
            
            Spacer[5],
+           Dynamic[Style["(" <> ToString[Length[Lookup[overlayBasket, selectedPlotId, {}]]] <> ")", Gray], TrackedSymbols :> {uiTick}],
            
-           Dynamic[
-             Style["(" <> ToString[Length[Lookup[overlayBasket, selectedPlotId, {}]]] <> ")", Gray]
-           ],
+           Spacer[30], 
            
-           Spacer[30], (* Разделитель групп *)
-           
-           (* C. SAVE & EXPORT CONTROLS *)
+           (* C. SAVE & EXPORT CONTROLS (без изменений) *)
            Button[
               Row[{Style["Save PDF...", Bold], Spacer[5], Style["\[DownArrow]", Gray]}],
               Module[{targetFile, gToSave, finalG, savedOverlays, initialPath, safePath},
-                 
-                 (* --- ЛОГИКА ЗАЩИЩЕННОГО ПУТИ --- *)
                  safePath = $DefaultExportPath;
-                 
-                 (* 1. Проверяем: это строка? папка существует? *)
-                 initialPath = If[StringQ[safePath] && DirectoryQ[safePath],
-                     (* Да: предлагаем сохранить "plot.pdf" внутри этой папки *)
-                     FileNameJoin[{safePath, "plot.pdf"}],
-                     (* Нет: отдаем на откуп системе (последняя папка или Документы) *)
-                     "plot.pdf"
-                 ];
-                 
-                 (* 2. Открываем диалог с вычисленным путем *)
+                 initialPath = If[StringQ[safePath] && DirectoryQ[safePath], FileNameJoin[{safePath, "plot.pdf"}], "plot.pdf"];
                  targetFile = SystemDialogInput["FileSave", initialPath];
-                 
                  If[StringQ[targetFile],
                     savedOverlays = Lookup[overlayBasket, selectedPlotId, {}];
-                    gToSave = If[Length[savedOverlays] > 0,
-                       Show[Join[savedOverlays, {plotCache[selectedPlotId]}], PlotRange->All],
-                       plotCache[selectedPlotId]
-                    ];
+                    gToSave = If[Length[savedOverlays] > 0, Show[Join[savedOverlays, {plotCache[selectedPlotId]}], PlotRange->All], plotCache[selectedPlotId]];
                     finalG = QED`Style`ApplyExportPreset[gToSave, exportPreset];
                     Check[Export[targetFile, finalG, "PDF"]; Beep[], Beep[]; Beep[]]
                  ];
               ],
-              Method -> "Queued", 
-              ImageSize -> {110, Automatic}
+              Method -> "Queued", ImageSize -> {110, Automatic}
            ],
-           
            Spacer[5],
-           
-           (* SETTINGS TOGGLE (Gear) *)
-           Button[
-              MouseAppearance[
-                 makeGearIcon[If[showExportSettings, Darker[Blue], Gray]],
-                 "LinkHand"
-              ],
-              showExportSettings = !showExportSettings,
-              Appearance -> "Frameless",
-              ImageSize -> {22, 22}
-           ]
+           Button[MouseAppearance[makeGearIcon[If[showExportSettings, Darker[Blue], Gray]], "LinkHand"], showExportSettings = !showExportSettings, Appearance -> "Frameless", ImageSize -> {22, 22}]
         }],
         
-        (* 2. DRAWER (Выезжает ВНИЗУ под строкой кнопок) *)
+        (* 2. DRAWER *)
         Pane[
            Dynamic[
                If[showExportSettings,
-                  Framed[
-                    Column[{
-                       Style["Export Settings", Bold, 10],
-                       Spacer[5],
-                       Row[{"Preset: ", 
-                          PopupMenu[Dynamic[exportPreset], {
-                             "Screen" -> "Screen (WYSIWYG)", 
-                             "Publication" -> "Publication (Thick Lines, Arial)"
-                          }]
-                       }],
-                       Spacer[5],
-                       Text[Style["Tip: 'Publication' scales lines and fonts\nfor Illustrator editing.", Gray, 8]]
-                    }],
-                    FrameStyle -> LightGray,
-                    Background -> Lighter[Gray, 0.95],
-                    RoundingRadius -> 4,
-                    ImageMargins -> {{0,0}, {5,5}}
-                  ],
+                  Framed[Column[{Style["Export Settings", Bold, 10], Spacer[5], Row[{"Preset: ", PopupMenu[Dynamic[exportPreset], {"Screen" -> "Screen (WYSIWYG)", "Publication" -> "Publication (Thick Lines, Arial)"}]}], Spacer[5], Text[Style["Tip: 'Publication' scales lines and fonts\nfor Illustrator editing.", Gray, 8]]}], FrameStyle -> LightGray, Background -> Lighter[Gray, 0.95], RoundingRadius -> 4, ImageMargins -> {{0,0}, {5,5}}],
                   Spacer[0]
                ]
            ],
-           ImageSize -> {Automatic, Automatic},
-           ImageSizeAction -> "ShrinkToFit",
-           Alignment -> Left (* Выравниваем панель по левому краю (под кнопками) *)
+           ImageSize -> {Automatic, Automatic}, ImageSizeAction -> "ShrinkToFit", Alignment -> Left
         ],
-        
         Spacer[10],
         
-        (* 3. DISPLAY AREA *)
+        (* 3. DISPLAY AREA - ТЕПЕРЬ СТРОГО СЛЕДИТ ЗА ТРИГГЕРОМ *)
         Dynamic[
-          Module[{curr, saved},
-            curr = plotCache[selectedPlotId];
-            saved = Lookup[overlayBasket, selectedPlotId, {}];
-            
-            Switch[curr,
-              "Computing...", 
-              Panel[Column[{Style["Computing...", Blue, Bold], ProgressIndicator[Appearance -> "Indeterminate"]}, Alignment->Center], ImageSize->{300,300}],
-            
-              _Missing, 
-              If[curr === Missing["Stale"],
-                 Panel[Style["Parameters changed. Press Update.", Gray, 16], ImageSize->{400,300}],
-                 Panel[Style["Select plot or Press Update", Gray], ImageSize->{300,300}]
-              ],
-              
-              _, 
-              If[Length[saved] > 0 && (MatchQ[curr, _Graphics] || MatchQ[curr, _Legended]),
-                 Show[Join[saved, {curr}], PlotRange -> All],
-                 curr
+          Refresh[
+            Module[{curr, saved},
+              curr = plotCache[selectedPlotId];
+              saved = Lookup[overlayBasket, selectedPlotId, {}];
+              Switch[curr,
+                "Computing...", Panel[Column[{Style["Computing...", Blue, Bold], ProgressIndicator[Appearance -> "Indeterminate"]}, Alignment->Center], ImageSize->{300,300}],
+                _Missing, If[curr === Missing["Stale"], Panel[Style["Parameters changed. Press Update.", Gray, 16], ImageSize->{400,300}], Panel[Style["Select plot or Press Update", Gray], ImageSize->{300,300}]],
+                _, If[Length[saved] > 0 && (MatchQ[curr, _Graphics] || MatchQ[curr, _Legended]), Show[Join[saved, {curr}], PlotRange -> All], curr]
               ]
-            ]
-          ],
-          TrackedSymbols :> {plotCache, selectedPlotId, overlayBasket}
+            ],
+            TrackedSymbols :> {uiTick, selectedPlotId, currentModelId}
+          ]
         ]
       }, Alignment -> Top]
     }, Alignment -> Top],
     
-    (* Footer *)
-    Dynamic @ Row[{"Cache: ", Keys[plotCache], " | Overlays: ", Keys[overlayBasket]}, BaseStyle->{FontSize->10, Color->Gray}]
+    Dynamic @ Row[{"Render Tick: ", uiTick, " | Active ID: ", StringTake[currentModelId, -6]}, BaseStyle->{FontSize->10, Color->Gray}]
   }],
   
-  UnsavedVariables :> {plotCache, overlayBasket},
-  Initialization :> {
-    plotCache = <||>;
-    overlayBasket = <||>;
+  Initialization :> (
+    currentModelId = First[modelIds];
     If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
-  },
+  ),
   SynchronousInitialization -> False
 ];
 

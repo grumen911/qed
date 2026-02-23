@@ -1,4 +1,4 @@
-BeginPackage["QED`Numeric`", {"QED`Numeric`HarmonicOscillator`"}];
+BeginPackage["QED`Numeric`"];
 
 Needs["QED`Model`"];
 
