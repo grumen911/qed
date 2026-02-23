@@ -16,6 +16,7 @@ RegisterModel::usage = "RegisterModel[model] stores the model in the global regi
 GetModel::usage = "GetModel[id] retrieves a model from the global registry by its UUID.";
 UpdateModelParameter::usage = "UpdateModelParameter[id, tag, param, value] updates a parameter of a registered model. \
 Cache invalidation is handled automatically by sectoral hashes.";
+UpdateModelCache::usage = "UpdateModelCache[id, modelAssoc] safely updates the model in the global registry.";
 
 SavePreset::usage = "SavePreset[model, name] saves the current Primary parameters into the Presets registry under the given name. Returns updated model.";
 LoadPreset::usage = "LoadPreset[model, name] loads Primary parameters from the specified preset. Returns updated model with IsDirty=True.";
@@ -44,6 +45,10 @@ $CurrentModel = Null;
 (* ════════════════════════════════════════════════════════════════ *)
 (* 		ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ПРАВИЛ ПОДСТАНОВКИ              *)
 (* ════════════════════════════════════════════════════════════════ *)
+
+UpdateModelCache[id_String, m_Association] := (
+  $ModelRegistry[id] = m;
+);
 
 SetModelValue[model_Association, path_List, value_] := 
   ($CurrentModel = ReplacePart[model, path -> value]);

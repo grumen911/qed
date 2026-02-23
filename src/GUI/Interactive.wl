@@ -362,22 +362,21 @@ RegisterPlot["SmatrixHeatmap", "Scattering Parameters Heatmap", "Heavy",
 (* COMPUTE WORKER (HANDLE-BASED) *)
 (* Теперь принимает не ассоциацию, а строковый ID модели *)
 ComputePlotData[plotId_String, modelId_String] := 
-  Module[{model, info, func, graphic},
+  Module[{info, func, graphic},
     
-    model = QED`Model`GetModel[modelId];
-    If[!AssociationQ[model], Return[Graphics[{Red, Text["Invalid Model ID"]}]]];
+    (* 1. Достаем модель и кладем в глобальный символ *)
+    $CurrentModel = QED`Model`GetModel[modelId];
+    If[!AssociationQ[$CurrentModel], Return[Graphics[{Red, Text["Invalid Model ID"]}]]];
 
-    $CurrentModel = model;
-    
-    (* 1. Прогрев кэша (JIT пишет данные внутрь $CurrentModel) *)
+    (* 2. Прогрев кэша (JIT обновляет ключи внутри глобальной $CurrentModel) *)
     QED`Model`GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"];
     If[plotId === "Potential3D", QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]];
     If[plotId === "DiagonalizationCheck", QED`Model`GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"]];
 
-    (* ВАЖНО: Сохраняем прогретую модель с кэшем обратно в реестр Ядра! *)
-    Evaluate[Symbol["QED`Model`Private`$ModelRegistry"]][modelId] = $CurrentModel;
+    (* 3. Безопасно сохраняем прогретый кэш обратно в ядро *)
+    QED`Model`UpdateModelCache[modelId, $CurrentModel];
 
-    (* 2. Вызов функции отрисовки *)
+    (* 4. Вызов функции отрисовки *)
     info = $PlotRegistry[plotId];
     graphic = If[MissingQ[info], 
        Graphics[{Red, Text["Unknown Plot ID"]}],
@@ -408,7 +407,7 @@ ExtractInteractiveParams[model_Association] :=
 
 (* Слайдер теперь принимает ID модели и отправляет изменения прямо в Ядро *)
 SetAttributes[MakeParameterControl, HoldFirst];
-MakeParameterControl[modelId_String, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
+MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
   Row[{
     Style[tag <> "." <> param <> ": ", 12],
     
