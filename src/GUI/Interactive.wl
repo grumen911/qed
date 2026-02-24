@@ -362,26 +362,28 @@ RegisterPlot["SmatrixHeatmap", "Scattering Parameters Heatmap", "Heavy",
 (* COMPUTE WORKER (HANDLE-BASED) *)
 (* Теперь принимает не ассоциацию, а строковый ID модели *)
 ComputePlotData[plotId_String, modelId_String] := 
-  Module[{info, func, graphic},
+  Module[{info, func, graphic, localModel},
     
-    (* 1. Достаем модель и кладем в глобальный символ *)
-    $CurrentModel = QED`Model`GetModel[modelId];
-    If[!AssociationQ[$CurrentModel], Return[Graphics[{Red, Text["Invalid Model ID"]}]]];
+    (* 1. Достаем базовую модель из реестра *)
+    localModel = QED`Model`GetModel[modelId];
+    If[!AssociationQ[localModel], Return[Graphics[{Red, Text["Invalid Model ID"]}]]];
 
-    (* 2. Прогрев кэша (JIT обновляет ключи внутри глобальной $CurrentModel) *)
-    QED`Model`GetNumericalQuantity[$CurrentModel, "PlasmonFrequencies"];
-    If[plotId === "Potential3D", QED`Model`GetNumericalQuantity[$CurrentModel, "EquilibriumPoints"]];
-    If[plotId === "DiagonalizationCheck", QED`Model`GetNumericalQuantity[$CurrentModel, "HarmonicDiagonalization"]];
+    (* 2. Прогрев кэша (JIT теперь сам безопасно обновляет $ModelRegistry по ModelID) *)
+    QED`Model`GetNumericalQuantity[localModel, "PlasmonFrequencies"];
+    
+    (* Примечание: в новом реестре ключ называется EquilibriumFluxes *)
+    If[plotId === "Potential3D", QED`Model`GetNumericalQuantity[localModel, "EquilibriumFluxes"]];
+    If[plotId === "DiagonalizationCheck", QED`Model`GetNumericalQuantity[localModel, "HarmonicDiagonalization"]];
 
-    (* 3. Безопасно сохраняем прогретый кэш обратно в ядро *)
-    QED`Model`UpdateModelCache[modelId, $CurrentModel];
+    (* 3. Забираем СВЕЖУЮ модель из реестра (уже с прогретым кэшем) *)
+    localModel = QED`Model`GetModel[modelId];
 
-    (* 4. Вызов функции отрисовки *)
+    (* 4. Вызов функции отрисовки (передаем чистую локальную копию!) *)
     info = $PlotRegistry[plotId];
     graphic = If[MissingQ[info], 
        Graphics[{Red, Text["Unknown Plot ID"]}],
        func = info["Compute"];
-       func[$CurrentModel]
+       func[localModel]
     ];
     
     graphic
