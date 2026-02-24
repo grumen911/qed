@@ -78,29 +78,34 @@ CreateDrillDownInspector[rawData_Association] :=
         ];
 
         (* 3. Готовим контент *)
-        content = Switch[currentData,
-          _Association,
-          UIInspectorTableLayout[
-            KeyValueMap[
-              Function[{k, v},
-                {Style[k, Bold], 
-                 Switch[v,
-                   _Association, 
-                   Button[UIInspectorFolderTemplate["\[RightGuillemet] Association (" <> ToString[Length[v]] <> ")"], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
-                   
-                   _List /; Length[Flatten[v]] > 10, 
-                   Button[UIInspectorFolderTemplate["\[RightGuillemet] Array " <> ToString[Dimensions[v]]], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
-                   
-                   _String /; StringStartsQ[v, "<"], Style[v, Gray, Italic],
-                   _, Pane[v, Alignment -> {Left, Top}]
-                 ]}
-              ],
-              currentData
-            ]
+(* 3. Готовим контент (теперь с независимым скроллом) *)
+        content = Pane[
+          Switch[currentData,
+            _Association,
+            UIInspectorTableLayout[
+              KeyValueMap[
+                Function[{k, v},
+                  {Style[k, Bold], 
+                   Switch[v,
+                     _Association, Button[UIInspectorFolderTemplate["\[RightGuillemet] Association (" <> ToString[Length[v]] <> ")"], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
+                     _List /; Length[Flatten[v]] > 10, Button[UIInspectorFolderTemplate["\[RightGuillemet] Array " <> ToString[Dimensions[v]]], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
+                     _String /; StringStartsQ[v, "<"], Style[v, Gray, Italic],
+                     _, Pane[v, Alignment -> {Left, Top}] (* Локальное выравнивание коротких текстов *)
+                   ]}
+                ],
+                currentData
+              ]
+            ],
+            
+            _List, MatrixForm[currentData],
+            _, currentData
           ],
           
-          _List, Pane[MatrixForm[currentData], {650, 350}, Scrollbars -> True],
-          _, Pane[currentData]
+          (* Жесткие размеры ТОЛЬКО для блока данных. Оставляем место для крошек сверху *)
+          ImageSize -> {680, 390}, 
+          Scrollbars -> True,
+          AppearanceElements -> None,
+          Alignment -> {Left, Top}
         ];
 
         (* Собираем всё вместе *)
@@ -142,13 +147,8 @@ RegisterPlot["ModelState", "Model State Inspector", "Light",
         {0, Infinity}
       ];
 
-      (* 3. Оборачиваем в инспектор *)
-      Pane[
-        CreateDrillDownInspector[displayModel],
-        ImageSize -> {700, 450}, 
-        Scrollbars -> True,
-        AppearanceElements -> None
-      ]
+      (* 3. Вызываем инспектор *)
+      CreateDrillDownInspector[displayModel]
     ]
   ]
 ];
