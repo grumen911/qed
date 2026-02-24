@@ -12,125 +12,110 @@ Begin["`Private`"];
 (* Change the value below to your custom path, e.g., "C:\\Users\\Me\\Thesis\\Figures" *)
 $DefaultExportPath = "C:\\Users\\rudia\\git\\2026-bic-bridge\\figures";
 
+
 (* ================================================================= *)
-(* UI COMPONENT: DRILL-DOWN INSPECTOR                                *)
-(* Интерактивный инспектор для глубоких ассоциаций (замена Dataset)  *)
+(* UI COMPONENT: DRILL-DOWN INSPECTOR (WITH STERILIZATION)           *)
 (* ================================================================= *)
+
+(* Шаблон для хлебных крошек *)
+UIInspectorCrumbTemplate[label_, isHome_: False] := Framed[
+  Style[label, If[isHome, Bold, Plain], 11, RGBColor[0.2, 0.4, 0.7]],
+  Background -> RGBColor[0.92, 0.95, 0.99], FrameStyle -> RGBColor[0.8, 0.85, 0.95],
+  RoundingRadius -> 3, FrameMargins -> {{8, 8}, {3, 3}}
+];
+
+(* Шаблон для кнопок входа в Ассоциацию или Массив *)
+UIInspectorFolderTemplate[label_] := Framed[
+  Style[label, 11, Darker[Gray]], 
+  Background -> RGBColor[0.95, 0.95, 0.97], FrameStyle -> RGBColor[0.85, 0.85, 0.9], 
+  RoundingRadius -> 3, FrameMargins -> {{12, 12}, {5, 5}}
+];
+
+(* 1. Основной контейнер всего инспектора *)
+UIInspectorMainWrapper[content_] := Framed[
+  content,
+  FrameStyle -> LightGray, RoundingRadius -> 5, Background -> White,
+  ImageSize -> {700, 450}, Alignment -> {Left, Top}, ImageMargins -> 5
+];
+
+(* 2. Макет таблицы для текущего уровня *)
+UIInspectorTableLayout[rows_List] := Grid[
+  rows,
+  Alignment -> {Left, Top},
+  Dividers -> {None, Center -> LightGray},
+  Spacings -> {2, 1.2}
+];
+
+(* 3. Обёртка для навигационной панели *)
+UIInspectorNavigationRow[crumbs_] := Column[{
+  Row[crumbs],
+  Spacer[10]
+}, Alignment -> Left];
+
 ClearAll[CreateDrillDownInspector];
 
-CreateDrillDownInspector[fullData_Association] := DynamicModule[{path = {}},
-  Module[{makeBreadcrumb, makeButton, currentData},
-    
-    (* --- 1. Вспомогательные функции (видят path через замыкание) --- *)
-    makeBreadcrumb[label_, targetPath_, isHome_: False] := Button[
-      Framed[
-        Style[label, If[isHome, Bold, Plain], 11, RGBColor[0.2, 0.4, 0.7]],
-        Background -> RGBColor[0.92, 0.95, 0.99],
-        FrameStyle -> RGBColor[0.8, 0.85, 0.95],
-        RoundingRadius -> 3,
-        FrameMargins -> {{8, 8}, {3, 3}}, 
-        Alignment -> Center
-      ],
-      path = targetPath, (* Прямое атомарное присваивание *)
-      Appearance -> "Frameless",
-      Cursor -> "LinkHand"
-    ];
-    
-    makeButton[label_, targetKey_] := With[{k = targetKey},
-      Button[
-        Framed[
-          Style[label, 11, Darker[Gray]], 
-          Background -> RGBColor[0.95, 0.95, 0.97], 
-          FrameStyle -> RGBColor[0.85, 0.85, 0.9], 
-          RoundingRadius -> 3, 
-          FrameMargins -> {{12, 12}, {5, 5}}, 
-          Alignment -> Center
-        ], 
-        path = Append[path, k], (* Прямое атомарное погружение *)
-        Appearance -> "Frameless", 
-        Cursor -> "LinkHand"
-      ]
-    ];
+SetAttributes[CreateDrillDownInspector, HoldFirst];
+CreateDrillDownInspector[id_] :=
+  DynamicModule[{path = {}},
+    UIInspectorMainWrapper[ (* <--- Вынесли обертку *)
+      Dynamic[
+        Module[{currentData, displayLevel, navigation, content},
+          
+          (* Находим данные по текущему пути *)
+          rawCurrentData = Fold[Lookup, GlobalRegistry[id], path];
 
-    (* --- 2. Сборка интерфейса --- *)
-    Framed[
-      Column[{
-        
-        (* Зона навигации (Хлебные крошки) *)
-        Dynamic[
-          Row[
+          (* Стерилизуем ТОЛЬКО тот кусок, который получили (ленивая очистка) *)
+          currentData = rawCurrentData /. {
+              _CompiledFunction -> "<CompiledFunction>",
+              _InterpolatingFunction -> "<InterpolatingFunction>",
+              _Dispatch -> "<DispatchTable>",
+              _Graphics | _Image -> "<GraphicData>"
+          };
+          
+          (* Готовим навигацию (Хлебные крошки) *)
+          navigation = UIInspectorNavigationRow[
             Flatten @ Prepend[
-              Table[
-                With[{i = i}, {
-                  Style[" \[RightAngleBracket] ", Gray], 
-                  makeBreadcrumb[path[[i]], Take[path, i]]
-                }],
-                {i, 1, Length[path]}
-              ],
-              makeBreadcrumb["Home", {}, True]
-            ]
-          ],
-          TrackedSymbols :> {path}
-        ],
-        
-        Spacer[10],
-        
-        (* Зона контента (Текущий уровень) *)
-        Dynamic[
-          (* Защита пути: спускаемся по дереву *)
-          currentData = fullData;
-          Catch[
-            Scan[
-              Function[key,
-                If[AssociationQ[currentData] && KeyExistsQ[currentData, key],
-                  currentData = currentData[key],
-                  path = {}; currentData = fullData; Throw["Reset"]
-                ]
-              ],
-              path
+              Table[With[{i = i}, {
+                Style[" > ", Gray], 
+                Button[UIInspectorCrumbTemplate[path[[i]]], path = Take[path, i], Appearance -> "Frameless", Cursor -> "LinkHand"]
+              }], {i, 1, Length[path]}],
+              Button[UIInspectorCrumbTemplate["Home", True], path = {}, Appearance -> "Frameless", Cursor -> "LinkHand"]
             ]
           ];
-          
-          (* Отрисовка *)
-          Switch[currentData,
+
+          (* Готовим контент в зависимости от типа данных *)
+          content = Switch[currentData,
             _Association,
-            Grid[
+            UIInspectorTableLayout[ (* <--- Вынесли верстку таблицы *)
               KeyValueMap[
                 Function[{k, v},
                   {Style[k, Bold], 
                    Switch[v,
-                     _Association, makeButton["\[RightGuillemet]  Association (" <> ToString[Length[v]] <> " keys)", k],
-                     _List /; Length[Flatten[v]] > 10, makeButton["\[RightGuillemet]  Array " <> ToString[Dimensions[v]], k],
-                     _CompiledFunction | _InterpolatingFunction | _Dispatch, 
-                        Style["[System Object: " <> ToString[Head[v]] <> "]", Gray, Italic],
-
-                     _, Pane[v, ImageSize -> {Automatic, Automatic}, Scrollbars -> False, Alignment -> {Left, Top}]
+                     _Association, 
+                     Button[UIInspectorFolderTemplate["\[RightGuillemet] Association (" <> ToString[Length[v]] <> ")"], path = Append[path, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
+                     
+                     _List /; Length[Flatten[v]] > 10, 
+                     Button[UIInspectorFolderTemplate["\[RightGuillemet] Array " <> ToString[Dimensions[v]]], path = Append[path, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
+                     
+                     _String /; StringStartsQ[v, "<"], Style[v, Gray, Italic],
+                     _, Pane[v, Alignment -> {Left, Top}]
                    ]}
                 ],
                 currentData
-              ],
-              Alignment -> {Left, Top}, Dividers -> {None, Center -> LightGray}, Spacings -> {2, 1.5}
+              ]
             ],
             
-            _List,
-            Pane[MatrixForm[currentData], {650, 350}, Scrollbars -> True, Alignment -> {Left, Top}],
-            
-            _CompiledFunction | _InterpolatingFunction | _Dispatch, 
-            BoxForm`SummaryBox[currentData],
+            _List, Pane[MatrixForm[currentData], {650, 350}, Scrollbars -> True],
+            _, Pane[currentData]
+          ];
 
-            _,
-            Pane[currentData, Alignment -> {Left, Top}]
-          ],
-          TrackedSymbols :> {path}
-        ]
-        
-      }, Alignment -> {Left, Top}],
-      
-      FrameStyle -> LightGray, RoundingRadius -> 5, Background -> White,
-      ImageMargins -> 5, ImageSize -> {700, 450}, Alignment -> {Left, Top}
+          (* Собираем всё вместе *)
+          Column[{navigation, content}, Alignment -> {Left, Top}]
+        ],
+        TrackedSymbols :> {path}
+      ]
     ]
-  ]
-];
+  ];
 
 (* ═══════════════════════════════════════════════════════════════ *)
 (* 1. BACKEND: PLOT REGISTRY & COMPUTE SYSTEM *)
