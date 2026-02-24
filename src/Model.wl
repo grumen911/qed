@@ -154,6 +154,9 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
 
     (* Автоматически регистрируем для работы кэша *)
     $ModelRegistry[id] = model;
+    GetNumericalQuantity[model, "CompiledEngines"];
+
+    model = $ModelRegistry[id];
     
     model
   ];
