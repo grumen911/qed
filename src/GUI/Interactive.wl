@@ -502,7 +502,7 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
   DynamicModule[{selectedPreset = Null, getModelKey, hamburgerIcon},
     
     getModelKey[id_] := Lookup[QED`Model`GetModel[id]["Topology"], "Name", "DefaultCircuit"];
-
+    
     hamburgerIcon = Graphics[
       {GrayLevel[0.4], CapForm["Round"], Thickness[0.15], 
        Line[{{0, 0.25}, {1, 0.25}}], Line[{{0, 0.5}, {1, 0.5}}], Line[{{0, 0.75}, {1, 0.75}}]}, 
@@ -516,7 +516,7 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
         Dynamic[
           PopupMenu[
             Dynamic[selectedPreset],
-            QED`Model`GetPresetNames[QED`Model`GetModel[modelIdSymbol]], 
+            QED`Model`GetPresetNames[modelIdSymbol], 
             "Select...",
             ImageSize -> {90, Automatic}
           ]
@@ -526,10 +526,8 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
         Button[
           Tooltip[Style["Load", 10], "Load selected preset"],
           If[StringQ[selectedPreset],
-             Module[{updated},
-               updated = QED`Model`LoadPreset[QED`Model`GetModel[modelIdSymbol], selectedPreset];
-               onModelUpdate[updated];
-             ]
+             QED`Model`LoadPreset[modelIdSymbol, selectedPreset];
+             onModelUpdate[];
           ],
           Enabled -> Dynamic[StringQ[selectedPreset]],
           ImageSize -> {40, 20}
@@ -547,11 +545,9 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
                 }]
              ];
              If[StringQ[name] && StringLength[name] > 0,
-                Module[{updated},
-                   updated = QED`Model`SavePreset[QED`Model`GetModel[modelIdSymbol], name];
-                   onModelUpdate[updated];
-                   selectedPreset = name; 
-                ]
+                QED`Model`SavePreset[modelIdSymbol, name];
+                selectedPreset = name;
+                onModelUpdate[];
              ]
           ],
           Method -> "Queued",
@@ -562,11 +558,9 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
         Button[
            Tooltip[Style["X", 10, Red], "Delete selected preset"],
            If[StringQ[selectedPreset],
-              Module[{updated},
-                 updated = QED`Model`DeletePreset[QED`Model`GetModel[modelIdSymbol], selectedPreset];
-                 onModelUpdate[updated];
-                 selectedPreset = Null;
-              ]
+              QED`Model`DeletePreset[modelIdSymbol, selectedPreset];
+              selectedPreset = Null;
+              onModelUpdate[];
            ],
            Enabled -> Dynamic[StringQ[selectedPreset]],
            ImageSize -> {20, 20}
@@ -583,16 +577,16 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
                      "Overwrite preset metadata in this notebook?\nExisting presets for this model in the file metadata will be replaced.",
                      {"Overwrite" -> True, "Cancel" -> False},
                      WindowTitle -> "Confirm Save to Notebook"
-                  ],
+                   ],
                    CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}] = QED`Model`GetModel[modelIdSymbol]["Presets"];
                 ]
              ],
-             "Merge from Notebook" :> Module[{key, saved, updated},
+             "Merge from Notebook" :> Module[{key, saved},
                 key = getModelKey[modelIdSymbol];
                 saved = CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}];
                 If[AssociationQ[saved],
-                   updated = QED`Model`MergePresets[QED`Model`GetModel[modelIdSymbol], saved];
-                   onModelUpdate[updated];
+                   QED`Model`MergePresets[modelIdSymbol, saved];
+                   onModelUpdate[];
                 ]
              ]
            },
@@ -658,10 +652,9 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
           ],
           Spacer[15],
           PresetControlPanel[currentModelId, 
-             Function[{updatedModelAssoc}, 
-               (* Хак: обновляем реестр вручную при работе с пресетами *)
-               Evaluate[Symbol["QED`Model`Private`$ModelRegistry"]][currentModelId] = updatedModelAssoc;
+             Function[{}, 
                performUpdate[];
+               uiTick++; (* Дергаем триггер, чтобы обновились ползунки на экране *)
              ]
           ],
           Spacer[10],

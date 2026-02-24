@@ -679,60 +679,46 @@ UpdateModelWithRules[model_Association, rules_List] := Module[
 ];
 
 (* ════════════════════════════════════════════════════════════════ *)
-(* PRESET MANAGEMENT SYSTEM                             *)
+(* PRESET MANAGEMENT SYSTEM (Handle-Based)                          *)
 (* ════════════════════════════════════════════════════════════════ *)
 
-SavePreset[model_Association, name_String] := 
-  Module[{updatedModel},
-    If[name === "", Return[model]]; (* Защита от пустого имени *)
-    
-    updatedModel = model;
-    (* Сохраняем полную копию Primary (значения, лимиты, символы) *)
-    updatedModel["Presets", name] = model["Primary"];
-    
-    updatedModel
-  ];
+SavePreset[id_String, name_String] := Module[{m},
+  m = GetModel[id];
+  If[!AssociationQ[m] || name === "", Return[$Failed]];
+  
+  m["Presets", name] = m["Primary"];
+  $ModelRegistry[id] = m;
+];
 
-LoadPreset[model_Association, name_String] := 
-  Module[{updatedModel, presetData},
-    (* Проверяем наличие пресета *)
-    If[!KeyExistsQ[model["Presets"], name],
-       Message[LoadPreset::nopreset, name];
-       Return[model]
-    ];
-    
-    presetData = model["Presets", name];
-    updatedModel = model;
-    
-    (* Восстанавливаем Primary *)
-    updatedModel["Primary"] = presetData;
-    
-    (* Критично: обновляем правила подстановки, так как Value изменились *)
-    (* Примечание: BuildSubstitutionRules зависит от текущей model, но мы передаем данные явно *)
-    (* В текущей архитектуре параметры подставляются через SubstitutionRules, 
-       которые ссылаются на Primary. Но лучше сбросить кэш. *)
-    
-    updatedModel
-  ];
+LoadPreset[id_String, name_String] := Module[{m},
+  m = GetModel[id];
+  If[!AssociationQ[m] || !KeyExistsQ[m["Presets"], name], Return[$Failed]];
+  
+  m["Primary"] = m["Presets", name];
+  $ModelRegistry[id] = m;
+];
 
-LoadPreset::nopreset = "Preset '`1`' not found in the model.";
+MergePresets[id_String, newPresets_Association] := Module[{m},
+  m = GetModel[id];
+  If[!AssociationQ[m], Return[$Failed]];
+  
+  m["Presets"] = Join[m["Presets"], newPresets];
+  $ModelRegistry[id] = m;
+];
 
-MergePresets[model_Association, newPresets_Association] := 
-  Module[{updated},
-    updated = model;
-    (* Join[old, new] - ключи из new перезаписывают ключи из old, если совпадают *)
-    updated["Presets"] = Join[model["Presets"], newPresets];
-    updated
-  ];
+DeletePreset[id_String, name_String] := Module[{m},
+  m = GetModel[id];
+  If[!AssociationQ[m], Return[$Failed]];
+  
+  m["Presets"] = KeyDrop[m["Presets"], name];
+  $ModelRegistry[id] = m;
+];
 
-DeletePreset[model_Association, name_String] := 
-  Module[{updatedModel},
-    updatedModel = model;
-    updatedModel["Presets"] = KeyDrop[model["Presets"], name];
-    updatedModel
-  ];
-
-GetPresetNames[model_Association] := Keys[model["Presets"]];
+GetPresetNames[id_String] := Module[{m},
+  m = GetModel[id];
+  If[!AssociationQ[m], Return[{}]];
+  Keys[m["Presets"]]
+];
 
 
 End[];
