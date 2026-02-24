@@ -52,68 +52,62 @@ UIInspectorNavigationRow[crumbs_] := Column[{
   Spacer[10]
 }, Alignment -> Left];
 
+(* Глобальная переменная для хранения пути инспектора *)
+$CurrentInspectorPath = {};
+
 ClearAll[CreateDrillDownInspector];
+(* Убрали HoldFirst, так как теперь передаем чистую Association *)
 
-SetAttributes[CreateDrillDownInspector, HoldFirst];
-CreateDrillDownInspector[id_] :=
-  DynamicModule[{path = {}},
-    UIInspectorMainWrapper[ (* <--- Вынесли обертку *)
-      Dynamic[
-        Module[{currentData, displayLevel, navigation, content},
-          
-          (* Находим данные по текущему пути *)
-          rawCurrentData = Fold[Lookup, GlobalRegistry[id], path];
+CreateDrillDownInspector[rawData_Association] := 
+  UIInspectorMainWrapper[
+    Dynamic[
+      Module[{currentData, navigation, content},
+        
+        (* 1. Находим данные по глобальному пути *)
+        currentData = Fold[Lookup, rawData, $CurrentInspectorPath];
+        
+        (* 2. Готовим навигацию (Хлебные крошки), обновляя глобальный путь *)
+        navigation = UIInspectorNavigationRow[
+          Flatten @ Prepend[
+            Table[With[{i = i}, {
+              Style[" > ", Gray], 
+              Button[UIInspectorCrumbTemplate[$CurrentInspectorPath[[i]]], $CurrentInspectorPath = Take[$CurrentInspectorPath, i], Appearance -> "Frameless", Cursor -> "LinkHand"]
+            }], {i, 1, Length[$CurrentInspectorPath]}],
+            Button[UIInspectorCrumbTemplate["Home", True], $CurrentInspectorPath = {}, Appearance -> "Frameless", Cursor -> "LinkHand"]
+          ]
+        ];
 
-          (* Стерилизуем ТОЛЬКО тот кусок, который получили (ленивая очистка) *)
-          currentData = rawCurrentData /. {
-              _CompiledFunction -> "<CompiledFunction>",
-              _InterpolatingFunction -> "<InterpolatingFunction>",
-              _Dispatch -> "<DispatchTable>",
-              _Graphics | _Image -> "<GraphicData>"
-          };
-          
-          (* Готовим навигацию (Хлебные крошки) *)
-          navigation = UIInspectorNavigationRow[
-            Flatten @ Prepend[
-              Table[With[{i = i}, {
-                Style[" > ", Gray], 
-                Button[UIInspectorCrumbTemplate[path[[i]]], path = Take[path, i], Appearance -> "Frameless", Cursor -> "LinkHand"]
-              }], {i, 1, Length[path]}],
-              Button[UIInspectorCrumbTemplate["Home", True], path = {}, Appearance -> "Frameless", Cursor -> "LinkHand"]
+        (* 3. Готовим контент *)
+        content = Switch[currentData,
+          _Association,
+          UIInspectorTableLayout[
+            KeyValueMap[
+              Function[{k, v},
+                {Style[k, Bold], 
+                 Switch[v,
+                   _Association, 
+                   Button[UIInspectorFolderTemplate["\[RightGuillemet] Association (" <> ToString[Length[v]] <> ")"], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
+                   
+                   _List /; Length[Flatten[v]] > 10, 
+                   Button[UIInspectorFolderTemplate["\[RightGuillemet] Array " <> ToString[Dimensions[v]]], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
+                   
+                   _String /; StringStartsQ[v, "<"], Style[v, Gray, Italic],
+                   _, Pane[v, Alignment -> {Left, Top}]
+                 ]}
+              ],
+              currentData
             ]
-          ];
+          ],
+          
+          _List, Pane[MatrixForm[currentData], {650, 350}, Scrollbars -> True],
+          _, Pane[currentData]
+        ];
 
-          (* Готовим контент в зависимости от типа данных *)
-          content = Switch[currentData,
-            _Association,
-            UIInspectorTableLayout[ (* <--- Вынесли верстку таблицы *)
-              KeyValueMap[
-                Function[{k, v},
-                  {Style[k, Bold], 
-                   Switch[v,
-                     _Association, 
-                     Button[UIInspectorFolderTemplate["\[RightGuillemet] Association (" <> ToString[Length[v]] <> ")"], path = Append[path, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
-                     
-                     _List /; Length[Flatten[v]] > 10, 
-                     Button[UIInspectorFolderTemplate["\[RightGuillemet] Array " <> ToString[Dimensions[v]]], path = Append[path, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
-                     
-                     _String /; StringStartsQ[v, "<"], Style[v, Gray, Italic],
-                     _, Pane[v, Alignment -> {Left, Top}]
-                   ]}
-                ],
-                currentData
-              ]
-            ],
-            
-            _List, Pane[MatrixForm[currentData], {650, 350}, Scrollbars -> True],
-            _, Pane[currentData]
-          ];
-
-          (* Собираем всё вместе *)
-          Column[{navigation, content}, Alignment -> {Left, Top}]
-        ],
-        TrackedSymbols :> {path}
-      ]
+        (* Собираем всё вместе *)
+        Column[{navigation, content}, Alignment -> {Left, Top}]
+      ],
+      (* Dynamic следит только за глобальным путем *)
+      TrackedSymbols :> {$CurrentInspectorPath}
     ]
   ];
 
@@ -130,26 +124,28 @@ RegisterPlot[id_String, label_String, type_String, computeFunc_] :=
     "Compute" -> computeFunc
   |>);
 
-(* ИНСПЕКТОР СОСТОЯНИЯ: Полный дамп модели через Dataset *)
-RegisterPlot["ModelState", "Model State Inspector (Dataset)", "Light",
+(* ИНСПЕКТОР СОСТОЯНИЯ: Полный дамп модели *)
+RegisterPlot["ModelState", "Model State Inspector", "Light",
   Function[{m},
     Module[{displayModel},
       
-      (* 1. Убираем картинку схемы, чтобы она не раздувала высоту строк в Dataset *)
+      (* 1. Убираем картинку схемы *)
       displayModel = KeyDrop[m, "Image"];
-      
-      (* 2. Хирургическая обрезка: ищем любые списки (векторы/матрицы) больше 50 элементов 
-            и заменяем их на легкую текстовую заглушку с размерами *)
+
+      (* 2. СТЕРИЛИЗАЦИЯ: убираем токсичные бинарные объекты Ядра перед отправкой в UI *)
       displayModel = Replace[displayModel,
-        val_List /; Length[Flatten[val]] > 50 :> 
-          Style["<Array: " <> ToString[Dimensions[val]] <> ">", Gray, Italic],
+        {
+          _CompiledFunction -> "<CompiledFunction>",
+          _InterpolatingFunction -> "<InterpolatingFunction>",
+          _Dispatch -> "<DispatchTable>"
+        },
         {0, Infinity}
       ];
-      
-      (* 3. Оборачиваем в Dataset и ограничиваем контейнер через Pane *)
+
+      (* 3. Оборачиваем в инспектор *)
       Pane[
         CreateDrillDownInspector[displayModel],
-        ImageSize -> {700, 450}, (* Жесткие рамки, чтобы интерфейс не разъезжался *)
+        ImageSize -> {700, 450}, 
         Scrollbars -> True,
         AppearanceElements -> None
       ]
@@ -747,10 +743,11 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       Panel[
         Column[{
           SelectModel[currentModelId, modelIds, 
-             Function[{}, 
-               plotCache = <||>;
-               If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
-             ]
+            Function[{}, 
+              plotCache = <||>;
+              $CurrentInspectorPath = {}; (* <--- СБРОС ПУТИ ПРИ СМЕНЕ КУБИТА *)
+              If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
+            ]
           ],
           Spacer[15],
           PresetControlPanel[currentModelId, 
