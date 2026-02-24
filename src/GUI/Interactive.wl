@@ -409,7 +409,7 @@ ExtractInteractiveParams[model_Association] :=
 
 (* Слайдер теперь принимает ID модели и отправляет изменения прямо в Ядро *)
 SetAttributes[MakeParameterControl, HoldFirst];
-MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
+MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_, isComputingSymbol_] := 
   Row[{
     Style[tag <> "." <> param <> ": ", 12],
     
@@ -422,7 +422,8 @@ MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpda
         ]
       ],
       {min, max, step},
-      ImageSize -> 120
+      ImageSize -> 120,
+      Enabled -> Dynamic[!TrueQ[isComputingSymbol]] (* Блокировка слайдера *)
     ],
     
     Spacer[5],
@@ -436,7 +437,8 @@ MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpda
         ]
       ],
       Number, 
-      FieldSize -> {6, 1}
+      FieldSize -> {6, 1},
+      Enabled -> Dynamic[!TrueQ[isComputingSymbol]] (* Блокировка поля ввода *)
     ]
   }];
 
@@ -474,24 +476,25 @@ SelectModel[currentModelIdSymbol_, modelIdsStack_List, onUpdate_] :=
   }];
 
 SetAttributes[PlotControlPanel, HoldFirst];
-PlotControlPanel[modelIdSymbol_, onUpdate_, onForceUpdate_, triggerSymbol_] := 
+PlotControlPanel[modelIdSymbol_, onUpdate_, onForceUpdate_, triggerSymbol_, isComputingSymbol_] := 
   Dynamic[
     Module[{m = QED`Model`GetModel[modelIdSymbol], params},
       If[!AssociationQ[m], Return[""]];
       params = ExtractInteractiveParams[m];
       Column[
         Join[
-          Map[MakeParameterControl[modelIdSymbol, #, onUpdate] &, params],
+          Map[MakeParameterControl[modelIdSymbol, #, onUpdate, isComputingSymbol] &, params],
           {Spacer[10],
            Button["Update Plot", 
              onForceUpdate[],
              Method -> "Queued",
-             ImageSize -> {140, 30}
+             ImageSize -> {140, 30},
+             Enabled -> Dynamic[!TrueQ[isComputingSymbol]] (* Блокировка кнопки *)
            ]}
         ]
       ]
     ],
-    TrackedSymbols :> {modelIdSymbol, triggerSymbol} (* Перерисовываем слайдеры при загрузке пресета *)
+    TrackedSymbols :> {modelIdSymbol, triggerSymbol} 
   ];
 
 SetAttributes[PresetControlPanel, HoldFirst];
@@ -609,26 +612,36 @@ ExtractGraphicOnly[expr_] := Replace[expr, Legended[g_, _] :> g];
 
 QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   {
-    (* Регистрируем схемы в Ядре и сохраняем только их ID! *)
     modelIds = QED`Model`RegisterModel /@ modelsStack,
     currentModelId,
-    
-    (* НАШ ТРИГГЕР ПЕРЕРИСОВКИ *)
     uiTick = 1,
-    
     selectedPlotId = "PlasmonSpectrum",
     plotCache = <||>,
     overlayBasket = <||>,
     showExportSettings = False,
     exportPreset = "Publication",
-    performUpdate
+    performUpdate,
+    
+    isComputing = False (* НОВЫЙ ФЛАГ СОСТОЯНИЯ *)
   },
   
   performUpdate = Function[{},
-    plotCache[selectedPlotId] = "Computing...";
-    FinishDynamic[];
-    (* Вызываем Compute с передачей строки-идентификатора *)
+    (* Если уже считаем - игнорируем новые запросы *)
+    If[isComputing, Return[]]; 
+    
+    isComputing = True;
+    
+    (* Показываем лоадер ТОЛЬКО для тяжелых графиков *)
+    If[$PlotRegistry[selectedPlotId]["Type"] === "Heavy",
+      plotCache[selectedPlotId] = "Computing...";
+      uiTick++;
+      FinishDynamic[]; (* Принудительно заставляем UI нарисовать заглушку *)
+    ];
+    
+    (* Вызываем Compute (для Light он выполнится за миллисекунды) *)
     plotCache[selectedPlotId] = ComputePlotData[selectedPlotId, currentModelId];
+    
+    isComputing = False;
     uiTick++;
   ];
 
@@ -661,7 +674,8 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
                uiTick++; (* Приказываем перерисовать график! *)
             ],
             Function[{}, performUpdate[]],
-            uiTick
+            uiTick,
+            isComputing
           ]
         }],
         Alignment -> Top
@@ -769,6 +783,10 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   Initialization :> (
     currentModelId = First[modelIds];
     If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
+  ),
+  Deinitialization :> (
+    (* ОСВОБОЖДЕНИЕ ПАМЯТИ: удаляем модели из реестра при закрытии окна *)
+    QED`Model`Private`$ModelRegistry = KeyDrop[QED`Model`Private`$ModelRegistry, modelIds];
   ),
   SynchronousInitialization -> False
 ];
