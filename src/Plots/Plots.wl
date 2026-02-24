@@ -172,12 +172,8 @@ $DebugPlotPlasmonSpectrum = False;
 $DebugPlotPotentialSlices3D = False;
 
 PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] := 
-  Module[{freqFunc, nModes, range, scale, modeFreq, 
-          t1, t2, t3, dataComputeTime, plotRenderTime},
+Module[{freqFunc, nModes, range, scale, modeFreq},
     
-    If[$DebugPlotPlasmonSpectrum === True, t1 = AbsoluteTime[];];
-    
-    (* 1. НОВЫЙ ДВИЖОК: Используем универсальный JIT-свипер *)
     freqFunc = QED`Numeric`GenerateSweepPipeline[model, "PlasmonFrequencies"];
     
     (* Защита от пустой модели *)
@@ -195,17 +191,9 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
     ];
 
     (* Определить численную функцию для каждой моды *)
-    Clear[modeFreq];
     modeFreq[i_Integer][phi_?NumericQ] := Re[freqFunc[phi][[i]]] / scale;
 
-    If[$DebugPlotPlasmonSpectrum === True,
-      t2 = AbsoluteTime[];
-      dataComputeTime = (t2 - t1) * 1000;
-    ];
-    
-    (* Построить график *)
-    Module[{plot},
-      plot = Plot[
+    Plot[
         Evaluate @ Table[modeFreq[i][phi], {i, nModes}],
         {phi, range[[1]], range[[2]]},
         
@@ -226,18 +214,6 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
           Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006]]    (* Оранжевый *)
         },
         FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black]
-      ];
-
-      If[$DebugPlotPlasmonSpectrum === True,
-        t3 = AbsoluteTime[];
-        plotRenderTime = (t3 - t2) * 1000;
-        Print["[PROFILE PlotPlasmonSpectrum]"];
-        Print["  JIT & Cache prep: ", Round[dataComputeTime, 0.1], " ms"];
-        Print["  Plot rendering: ", Round[plotRenderTime, 0.1], " ms"];
-        Print["  Total time: ", Round[(t3 - t1) * 1000, 0.1], " ms"];
-      ];
-      
-      plot
     ]
   ];
 
@@ -258,35 +234,49 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
   (* ════════════════════════════════════════════════════════════════ *)
   
   topology = model["Topology"];
-  hamiltonian = model["Analytical"]["Hamiltonian"];
   phi0 = QED`$Phi0Value;
   
   (* Независимые потоки *)
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ 
     Cases[topology["Nodes"], Except[topology["GroundNode"]]];
-  
+
   (* Проверка размерности *)
   If[Length[fluxVars] != 3,
     Message[PlotPotentialSlices3D::dimension, Length[fluxVars]];
     Return[$Failed]
   ];
-  
-  (* Потенциальная энергия U(φ) = H(q=0, φ) с подстановкой параметров *)
-  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
-  potential = potential /. model["SubstitutionRules"];
+
+  (* Достаем готовый символьный потенциал и применяем строгие правила текущей модели *)
+  potential = model["Analytical"]["Potential"] /. QED`Model`GetStaticRules[model];
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* 2. ПОЛУЧЕНИЕ РАВНОВЕСНЫХ ТОЧЕК  *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  equilibria = QED`Model`GetCacheEntry[
-    model["Numerical"]["Cache"]["EquilibriumPoints"],
-    model
-  ];
-  
-  If[equilibria === $Failed || Length[equilibria["Solutions"]] == 0,
-    Message[PlotPotentialSlices3D::noequilibria];
-    Return[$Failed]
+  Module[{rawFluxes, fluxList},
+    (* 1. Достаем чистые векторы из новой архитектуры *)
+    rawFluxes = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
+    
+    If[MissingQ[rawFluxes] || FailureQ[rawFluxes] || rawFluxes === {},
+      Message[PlotPotentialSlices3D::noequilibria];
+      Return[$Failed]
+    ];
+    
+    (* 2. Если вернулся один вектор (глобальный минимум), оборачиваем его в список *)
+    fluxList = If[VectorQ[rawFluxes, NumericQ], {rawFluxes}, rawFluxes];
+    
+    (* 3. Восстанавливаем структуру для графика, вычисляя энергию на лету *)
+    equilibria = <|
+      "Solutions" -> Map[
+        Function[pt,
+          <|
+            "Fluxes" -> Thread[fluxVars -> pt], 
+            "Energy" -> (potential /. Thread[fluxVars -> pt])
+          |>
+        ],
+        fluxList
+      ]
+    |>;
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
