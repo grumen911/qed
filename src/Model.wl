@@ -5,12 +5,13 @@ Needs["QED`Numeric`"];
 Needs["QED`Analytic`"];
 Needs["QED`Scattering`"];
 
-CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]"
-GetAnalyticalParams::usage = "GetAnalyticalParams[model]"
-GetNumericalQuantity::usage = "GetNumericalQuantity[model, key]"
-GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]"
-UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]"
-SetModelValue::usage = "SetModelValue[model, path, value] safely updates parameter";
+CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]";
+GetAnalyticalParams::usage = "GetAnalyticalParams[model]";
+GetNumericalQuantity::usage = "GetNumericalQuantity[model, key]";
+GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]";
+UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]";
+GetParameterRules::usage = "GetParameterRules[model] generates strict substitution rules for primary parameters on the fly.";
+GetStaticRules::usage = "GetStaticRules[model] returns a strict list of rules for primary parameters and physical constants.";
 
 RegisterModel::usage = "RegisterModel[model] stores the model in the global registry and returns its UUID.";
 GetModel::usage = "GetModel[id] retrieves a model from the global registry by its UUID.";
@@ -33,143 +34,50 @@ setting IsDirty->False. This allows skipping the expensive FindPotentialMinimum 
 GetParameterVector::usage = "GetParameterVector[model] returns a sorted PackedArray of Reals representing \
 the model's primary parameters for JIT compilation.";
 
-$CurrentModel::usage = "Global reference to the active circuit model for substitution rules";
-
 
 Begin["`Private`"];
 
 
-$CurrentModel = Null;
-
-
-(* ════════════════════════════════════════════════════════════════ *)
-(* 		ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ПРАВИЛ ПОДСТАНОВКИ              *)
-(* ════════════════════════════════════════════════════════════════ *)
-
-UpdateModelCache[id_String, m_Association] := (
-  $ModelRegistry[id] = m;
-);
-
-SetModelValue[model_Association, path_List, value_] := 
-  ($CurrentModel = ReplacePart[model, path -> value]);
-
+$ModelRegistry = <||>; (* Инициализируем реестр заранее *)
 
 (* Рекурсивный обход ассоциации для получения всех путей *)
 getAllPaths[assoc_Association, currentPath_List : {}] := 
-  Flatten[
-    KeyValueMap[
-      Function[{key, val}, 
-        If[AssociationQ[val], 
-          getAllPaths[val, Append[currentPath, key]], 
-          {Append[currentPath, key]}
-        ]
-      ], 
-      assoc
-    ], 
-    1
-  ];
+  Flatten[KeyValueMap[Function[{key, val}, If[AssociationQ[val], getAllPaths[val, Append[currentPath, key]], {Append[currentPath, key]}]], assoc], 1];
 
-(* Построение правил подстановки с отложенным вычислением *)
-BuildSubstitutionRules[primary_Association, topology_Association] := Module[
-  {valuePaths, primaryRules, constantRules, equilibriumRules, nodes, minSymbols},
+(* ════════════════════════════════════════════════════════════════ *)
+(* СТРОГИЕ ПРАВИЛА ПОДСТАНОВКИ (НА ЛЕТУ)                       *)
+(* ════════════════════════════════════════════════════════════════ *)
+
+GetParameterRules[modelAssoc_Association] := Module[
+  {primaryData, valuePaths, rules},
+  primaryData = modelAssoc["Primary"];
+  valuePaths = Select[getAllPaths[primaryData], Last[#] === "Value" &];
   
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* PRIMARY PARAMETERS (C, EJ, L, Φₑₓₜ)                              *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  (* Найти все пути, заканчивающиеся на "Value" *)
-  valuePaths = Select[getAllPaths[primary], Last[#] === "Value" &];
-  
-  (* Построить правила: Symbol :> model["Primary"][путь к Value] *)
-  primaryRules = Map[
+  rules = Map[
     Function[valuePath,
-      Module[{symbolPath, symbol},
+      Module[{symbolPath, symbol, val},
         symbolPath = ReplacePart[valuePath, -1 -> "Symbol"];
-        symbol = primary[[Sequence @@ symbolPath]];
-        
-        symbol :> (Part[$CurrentModel,"Primary", Sequence @@ valuePath] * 
-           If[symbol === QED`$PhiExt, QED`$Phi0Value, 1])			
+        symbol = Extract[primaryData, symbolPath];
+        val = Extract[primaryData, valuePath];
+        (* Используем -> (Rule) вместо :> (RuleDelayed) *)
+        symbol -> (val * If[symbol === QED`$PhiExt, QED`$Phi0Value, 1])
       ]
     ],
     valuePaths
   ];
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* PHYSICAL CONSTANTS (Φ₀, ℏ, e, kB, ...)                          *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  constantRules = {
-    QED`$Phi0 -> QED`$Phi0Value,
-    QED`$hbar -> QED`$hbarValue,
-    QED`$e -> QED`$eValue
-  };
-  
-  (* ════════════════════════════════════════════════════════════════ *)
-  (* EQUILIBRIUM FLUXES (φ_min)                                       *)
-  (* ════════════════════════════════════════════════════════════════ *)
-  
-  (* Получить узлы из переданной topology *)
-  nodes = Cases[
-    topology["Nodes"], 
-    Except[topology["GroundNode"]]
-  ];
-  
-  (* Создать символы φ_min *)
-  minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
-  
-  (* Отложенные правила: φ_min :> значение из кэша *)
-  equilibriumRules = Table[
-    With[{idx = i},
-      minSymbols[[idx]] :> Part[$CurrentModel, "Numerical", "Cache", "EquilibriumFluxes", "Value", idx, 2]
-    ],
-    {i, Length[minSymbols]}
-  ];
-  
-  Join[primaryRules, constantRules, equilibriumRules]
+  SortBy[rules, Function[r, ToString[r[[1]]]]]
 ];
 
-GetParameterVector[modelAssoc_] := Module[
-  {allRules, paramRules, evaluatedRules, sortedRules, valuesVector},
-  
-  (* Извлекаем базовые правила подстановки *)
-  allRules = modelAssoc["SubstitutionRules"];
-  
-  (* Фильтруем физические константы и потоки равновесия (min) *)
-  paramRules = Select[allRules, 
-    Function[ruleItem, 
-      Not[StringContainsQ[ToString[ruleItem[[1]]], "min"]] &&
-      Not[MemberQ[{QED`$Phi0, QED`$hbar, QED`$e}, ruleItem[[1]]]]
-    ]
-  ];
-  
-  (* Раскрываем RuleDelayed (:>) и принудительно переводим в числа *)
-  evaluatedRules = Map[
-    Function[ruleItem, ruleItem[[1]] -> N[ReleaseHold[ruleItem[[2]]]]], 
-    paramRules
-  ];
-  
-  (* Жесткая сортировка ключей по алфавиту *)
-  sortedRules = SortBy[evaluatedRules, Function[ruleItem, ToString[ruleItem[[1]]]]];
-  
-  (* Извлекаем только значения *)
-  valuesVector = Map[Last, sortedRules];
-  
-  (* Упаковываем в плоский вектор для CompiledFunction *)
-  Developer`ToPackedArray[valuesVector, Real]
+GetStaticRules[modelAssoc_Association] := Join[
+  GetParameterRules[modelAssoc],
+  {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue, QED`$e -> QED`$eValue}
 ];
 
-GetParameterSymbols[modelAssoc_] := Module[
-  {allRules, paramRules, sortedRules},
-  allRules = modelAssoc["SubstitutionRules"];
-  paramRules = Select[allRules, 
-    Function[ruleItem, 
-      Not[StringContainsQ[ToString[ruleItem[[1]]], "min"]] &&
-      Not[MemberQ[{QED`$Phi0, QED`$hbar, QED`$e}, ruleItem[[1]]]]
-    ]
-  ];
-  sortedRules = SortBy[paramRules, Function[ruleItem, ToString[ruleItem[[1]]]]];
-  Map[First, sortedRules]
-];
+GetParameterSymbols[modelAssoc_Association] := Map[First, GetParameterRules[modelAssoc]];
+
+GetParameterVector[modelAssoc_Association] := Developer`ToPackedArray[N[Map[Last, GetParameterRules[modelAssoc]]], Real];
+
+UpdateModelCache[id_String, m_Association] := ($ModelRegistry[id] = m;);
 
 (* ════════════════════════════════════════════════════════════════ *)
 (* 		ГЕНЕРАЦИЯ PLACEHOLDER ИЗОБРАЖЕНИЯ                           *)
@@ -213,64 +121,41 @@ Options[CreateCircuitModel] = {
   
 CreateCircuitModel[components_List, opts : OptionsPattern[]] := 
   Module[{analytical, defaultPrimary, topology, method, gNode, 
-  		  model,circuitImage},
+          model, circuitImage, id},
     
-    (*validated = ValidatePrimary[primaryParams, topology];
-    If[validated === $Failed, Return[$Failed]];*)
+    method = OptionValue[Method];
+    gNode = If[OptionValue[GroundNode] === Automatic, 
+       Max[Flatten[components[[All, {2, 3}]]]], OptionValue[GroundNode]];
     
-	method = OptionValue[Method];
-	gNode = If[OptionValue[GroundNode] === Automatic, 
-	   (* берем макс. индекс узла *)
-	   Max[Flatten[components[[All, {2, 3}]]]], 
-	   OptionValue[GroundNode]
-	];    
-    
-	(* Топология *)
-	topology = CreateTopology[components, gNode];    
-    
-    (**)
+    topology = CreateTopology[components, gNode];    
     defaultPrimary = GenerateDefaultParameters[topology];
-    
-    (* Построить аналитические параметры (один раз) *)
     analytical = ComputeAnalyticalParams[topology, defaultPrimary, method];
     
-    (* Изображение: либо пользовательское, либо placeholder *)
     circuitImage = If[OptionValue[CustomImage] === Automatic,
-      GenerateCircuitImage[topology],
-      OptionValue[CustomImage]
-    ];
+      GenerateCircuitImage[topology], OptionValue[CustomImage]];
     
-    (* Сборка *)
+    id = CreateUUID["model-"];
+
     model = <|
+      "ModelID" -> id,
       "ModelVersion" -> "1.1",
       "Topology" -> topology,
       "Primary" -> defaultPrimary,
       "Image" -> circuitImage,
-      "SubstitutionRules" -> {},
       "Analytical" -> analytical,
       "Presets" -> <||>,
       "Numerical" -> <|
         "Method" -> method,
-        
-        (* === НОВАЯ АРХИТЕКТУРА КЭША === *)
-        "VersionedCache" -> <|
-          "Values" -> <||> (* Здесь будут храниться результаты и их хеши *)
-        |>,
-        
-        (* IsDirty удален за ненадобностью *)
-        
+        "VersionedCache" -> <|"Values" -> <||>|>,
         "ComputationTime" -> Null,
         "ComputationStatus" -> <||>
       |>
     |>;
 
-    (* Строим правила подстановки *)
-    model["SubstitutionRules"] = BuildSubstitutionRules[defaultPrimary, topology];
-	
-	(* Автоматически устанавливаем как текущую модель *)
-    $CurrentModel = model;
-	
-	model
+    (* Автоматически регистрируем для работы кэша *)
+    $ModelRegistry[id] = model;
+    
+    model
   ];
 
 
@@ -508,7 +393,7 @@ $DependencyRegistry = <|
     "Compute" -> Function[{modelAssoc, depsData},
       QED`Numeric`Calculators`CalcStaticMatrices[
         modelAssoc["Analytical"], 
-        modelAssoc["SubstitutionRules"]
+        GetStaticRules[modelAssoc]
       ]
     ]
   |>,
@@ -574,7 +459,7 @@ $DependencyRegistry = <|
         analytical = modelAssoc["Analytical"];
         
         (* Извлекаем частоту и порты из правил (на будущее можно вынести в параметры GUI) *)
-        omega = ReplaceAll[analytical["Scattering"]["FrequencyVariable"], modelAssoc["SubstitutionRules"]];
+        omega = ReplaceAll[analytical["Scattering"]["FrequencyVariable"], GetStaticRules[modelAssoc]];
         
         (* Если omega не задана числом, возвращаем Failed *)
         If[!NumericQ[omega], Return[$Failed]];
@@ -593,21 +478,14 @@ $DependencyRegistry = <|
     "Dependencies" -> {"EquilibriumFluxes"},
     "RelevantHashes" -> {"Kinetic", "Potential", "External"},
     "Compute" -> Function[{modelAssoc, depsData},
-      Module[{nodes, minSymbols, phiMinRules, paramSymbols, paramVector, strictRules, cleanRules},
+      Module[{nodes, minSymbols, phiMinRules, strictRules, cleanRules},
         nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
         
         minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
         phiMinRules = Thread[minSymbols -> depsData["EquilibriumFluxes"]];
         
-        paramSymbols = GetParameterSymbols[modelAssoc];
-        paramVector = GetParameterVector[modelAssoc];
-        strictRules = Thread[paramSymbols -> paramVector];
-        
-        (* Вырезаем старые ссылки на кэш для phi_min *)
-        cleanRules = DeleteCases[modelAssoc["SubstitutionRules"], (Alternatives @@ minSymbols) :> _];
-        
-        (* Идеальный порядок: параметры -> равновесие -> константы *)
-        Lookup[modelAssoc["Analytical"], "CurrentOperator", 0] /. strictRules /. phiMinRules /. cleanRules
+        strictRules = GetStaticRules[modelAssoc];
+        Lookup[modelAssoc["Analytical"], "CurrentOperator", 0] /. strictRules /. phiMinRules
       ]
     ]
   |>,
@@ -616,19 +494,14 @@ $DependencyRegistry = <|
     "Dependencies" -> {"EquilibriumFluxes"},
     "RelevantHashes" -> {"Kinetic", "Potential", "External"},
     "Compute" -> Function[{modelAssoc, depsData},
-      Module[{nodes, minSymbols, phiMinRules, paramSymbols, paramVector, strictRules, cleanRules},
+      Module[{nodes, minSymbols, phiMinRules, strictRules, cleanRules},
         nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
         
         minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
         phiMinRules = Thread[minSymbols -> depsData["EquilibriumFluxes"]];
         
-        paramSymbols = GetParameterSymbols[modelAssoc];
-        paramVector = GetParameterVector[modelAssoc];
-        strictRules = Thread[paramSymbols -> paramVector];
-        
-        cleanRules = DeleteCases[modelAssoc["SubstitutionRules"], (Alternatives @@ minSymbols) :> _];
-        
-        Lookup[modelAssoc["Analytical"], "VoltageOperators", <||>] /. strictRules /. phiMinRules /. cleanRules
+        strictRules = GetStaticRules[modelAssoc];
+        Lookup[modelAssoc["Analytical"], "VoltageOperators", 0] /. strictRules /. phiMinRules
       ]
     ]
   |>
@@ -638,9 +511,16 @@ $DependencyRegistry = <|
 (* === GLOBAL MODEL REGISTRY === *)
 $ModelRegistry = <||>;
 
-RegisterModel[model_Association] := Module[{id},
+RegisterModel[model_Association] := Module[{id, m},
+  If[KeyExistsQ[model, "ModelID"],
+    id = model["ModelID"];
+    $ModelRegistry[id] = model;
+    Return[id];
+  ];
   id = CreateUUID["model-"];
-  $ModelRegistry[id] = model;
+  m = model;
+  m["ModelID"] = id;
+  $ModelRegistry[id] = m;
   id
 ];
 
@@ -650,55 +530,40 @@ UpdateModelParameter[id_String, tag_String, param_String, val_] := Module[{m},
   m = GetModel[id];
   If[AssociationQ[m],
     m["Primary", tag, param, "Value"] = val;
-    (* Кэш инвалидируется автоматически благодаря несовпадению хешей при следующем запросе *)
     $ModelRegistry[id] = m;
   ];
 ];
 
-(* Новый универсальный резолвер *)
 GetNumericalQuantity[modelAssoc_, keyString_String] := Module[
-  {registryNode, currentHashes, cachedValues, cachedEntry, isCacheValid, depsData, computedValue},
+  {registryNode, currentHashes, cachedValues, cachedEntry, isCacheValid, depsData, computedValue, id},
   
   registryNode = Lookup[$DependencyRegistry, keyString, $Failed];
   If[registryNode === $Failed, 
-    Message[GetNumericalQuantity::unknown, keyString]; 
-    Return[$Failed]
+    Message[GetNumericalQuantity::unknown, keyString]; Return[$Failed]
   ];
   
   currentHashes = GetSectoralHashes[modelAssoc];
-  
-  (* Инициализация структуры кэша, если её нет *)
-  If[!KeyExistsQ[modelAssoc["Numerical"], "VersionedCache"],
-    $CurrentModel["Numerical", "VersionedCache"] = <|"Values" -> <||>|>;
-  ];
-  
   cachedValues = Lookup[modelAssoc["Numerical", "VersionedCache"], "Values", <||>];
   cachedEntry = Lookup[cachedValues, keyString, <||>];
   
-  (* Проверяем актуальность доменных хешей *)
   isCacheValid = If[Length[cachedEntry] > 0,
     AllTrue[registryNode["RelevantHashes"], currentHashes[#] === cachedEntry["Hashes", #] &],
     False
   ];
   
-  If[isCacheValid,
-    Return[cachedEntry["Value"]]
-  ];
+  If[isCacheValid, Return[cachedEntry["Value"]]];
   
-  (* Рекурсивный сбор зависимостей *)
-  depsData = AssociationMap[
-    Function[depKey, GetNumericalQuantity[modelAssoc, depKey]], 
-    registryNode["Dependencies"]
-  ];
-  
-  (* JIT Вычисление *)
+  depsData = AssociationMap[Function[depKey, GetNumericalQuantity[modelAssoc, depKey]], registryNode["Dependencies"]];
   computedValue = registryNode["Compute"][modelAssoc, depsData];
   
-  (* Сохраняем результат и хеши в $CurrentModel *)
-  $CurrentModel["Numerical", "VersionedCache", "Values", keyString] = <|
-    "Value" -> computedValue,
-    "Hashes" -> KeyTake[currentHashes, registryNode["RelevantHashes"]]
-  |>;
+  (* Сохраняем результат в Глобальный Реестр вместо $CurrentModel *)
+  id = Lookup[modelAssoc, "ModelID", ""];
+  If[id != "" && KeyExistsQ[$ModelRegistry, id],
+    $ModelRegistry[id, "Numerical", "VersionedCache", "Values", keyString] = <|
+      "Value" -> computedValue,
+      "Hashes" -> KeyTake[currentHashes, registryNode["RelevantHashes"]]
+    |>
+  ];
   
   computedValue
 ];
