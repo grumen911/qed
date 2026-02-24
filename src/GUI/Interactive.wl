@@ -614,7 +614,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     (* НАШ ТРИГГЕР ПЕРЕРИСОВКИ *)
     uiTick = 1,
     
-    selectedPlotId = "ModelState",
+    selectedPlotId = "PlasmonSpectrum",
     plotCache = <||>,
     overlayBasket = <||>,
     showExportSettings = False,

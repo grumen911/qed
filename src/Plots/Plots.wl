@@ -175,16 +175,16 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
   Module[{freqFunc, nModes, range, scale, modeFreq, 
           t1, t2, t3, dataComputeTime, plotRenderTime},
     
-    (* ════════════════════════════════════════════════════════════════ *)
-    (* ПРОФИЛИРОВАНИЕ: Начало общего замера                             *)
-    (* ════════════════════════════════════════════════════════════════ *)
-    If[$DebugPlotPlasmonSpectrum === True,
-      t1 = AbsoluteTime[];
+    If[$DebugPlotPlasmonSpectrum === True, t1 = AbsoluteTime[];];
+    
+    (* 1. НОВЫЙ ДВИЖОК: Используем универсальный JIT-свипер *)
+    freqFunc = QED`Numeric`GenerateSweepPipeline[model, "PlasmonFrequencies"];
+    
+    (* Защита от пустой модели *)
+    If[freqFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: Sweep generation failed. Check model initialization.", {0,0}]}]]
     ];
-    
-    (* Получить функцию PlasmonFrequenciesVsFlux напрямую *)
-    freqFunc = QED`Numeric`PlasmonFrequenciesVsFlux[model];
-    
+
     (* Обработка опций *)
     nModes = OptionValue[NumModes];
     range = OptionValue[FluxRange];
@@ -193,19 +193,15 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
       "MHz", 2 Pi * 10^6,
       _, 1.
     ];
-    
+
     (* Определить численную функцию для каждой моды *)
     Clear[modeFreq];
     modeFreq[i_Integer][phi_?NumericQ] := Re[freqFunc[phi][[i]]] / scale;
-    
+
     If[$DebugPlotPlasmonSpectrum === True,
       t2 = AbsoluteTime[];
       dataComputeTime = (t2 - t1) * 1000;
     ];
-    
-    (* ════════════════════════════════════════════════════════════════ *)
-    (* ПРОФИЛИРОВАНИЕ: Рендеринг графика                                *)
-    (* ════════════════════════════════════════════════════════════════ *)
     
     (* Построить график *)
     Module[{plot},
@@ -216,8 +212,8 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
         PlotLegends -> Table[Subscript["\[Omega]", i], {i, nModes}],
         Frame -> True,
         FrameLabel -> {
-          "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)",
-          "Frequency (GHz)"
+          Style[Subscript["\[CapitalPhi]", "ext"] / Subscript["\[CapitalPhi]", "0"], 16],
+          Style["Frequency (GHz)", 16]
         },
         PlotRange -> All,
         PlotPoints -> 25,
@@ -229,31 +225,18 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
           Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.006]],  (* Синий *)
           Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006]]    (* Оранжевый *)
         },
-        Frame -> True,
-        FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-        FrameLabel -> {
-          Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], 16],
-          Style["Frequency (GHz)", 16]
-        }
-        
-        (* ,opts *)
+        FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black]
       ];
 
       If[$DebugPlotPlasmonSpectrum === True,
         t3 = AbsoluteTime[];
         plotRenderTime = (t3 - t2) * 1000;
-      ];
-      
-      (* ════════════════════════════════════════════════════════════════ *)
-      (* ПРОФИЛИРОВАНИЕ: Вывод результатов                                *)
-      (* ════════════════════════════════════════════════════════════════ *)
-      If[$DebugPlotPlasmonSpectrum === True,
         Print["[PROFILE PlotPlasmonSpectrum]"];
-        Print["  Data preparation: ", Round[dataComputeTime, 0.1], " ms"];
+        Print["  JIT & Cache prep: ", Round[dataComputeTime, 0.1], " ms"];
         Print["  Plot rendering: ", Round[plotRenderTime, 0.1], " ms"];
         Print["  Total time: ", Round[(t3 - t1) * 1000, 0.1], " ms"];
-        Print["  NOTE: Actual computation happens during Plot evaluation"];
       ];
+      
       plot
     ]
   ];
