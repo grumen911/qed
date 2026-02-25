@@ -1,126 +1,45 @@
 BeginPackage["QED`Interactive`", {"QED`Model`", "QED`Numeric`"}];
 
-QubitDashboard::usage = "QubitDashboard[{models..}] - interactive dashboard for model list.";
+QubitDashboard::usage = "QubitDashboard[{model1, model2, ...}] launches the main interactive \
+UI dashboard for exploring and visualizing superconducting circuit models.
+
+Arguments:
+  models: A list of initialized model Associations (typically created via CreateCircuitModel).
+
+Key Features:
+  * Real-Time Tuning: Adjust physical parameters via sliders with instant JIT-compiled plot updates.
+  * Model Management: Seamlessly switch between multiple circuits and manage parameter presets.
+  * Overlay & Export: Stack multiple plots in the overlay basket and export high-quality PDFs.
+  * Drill-Down Inspector: Deep-dive into the raw, sterilized state of any model matrix or tensor.
+
+Lifecycle:
+  The dashboard automatically registers the provided models into the global $ModelRegistry \
+upon initialization. When the interface is deleted or closed, it safely performs memory \
+cleanup by deregistering the associated IDs.";
+
 RegisterPlot::usage = "RegisterPlot[id, label, type, computeFunc] registers a new plot type.";
 
 $DefaultExportPath::usage = "$DefaultExportPath specifies the default directory for saving plots. 
 If the path is invalid or the directory does not exist, the system default (or last used directory) is used.";
 
+
 Begin["`Private`"];
 
-(* === USER CONFIGURATION === *)
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                  1. КОНФИГУРАЦИЯ И РЕЕСТРЫ                     ║ *)
+(* ║         (Базовые настройки, пути экспорта, словари)            ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
+
 (* Change the value below to your custom path, e.g., "C:\\Users\\Me\\Thesis\\Figures" *)
 $DefaultExportPath = "C:\\Users\\rudia\\git\\2026-bic-bridge\\figures";
-
-
-(* ================================================================= *)
-(* UI COMPONENT: DRILL-DOWN INSPECTOR (WITH STERILIZATION)           *)
-(* ================================================================= *)
-
-(* Шаблон для хлебных крошек *)
-UIInspectorCrumbTemplate[label_, isHome_: False] := Framed[
-  Style[label, If[isHome, Bold, Plain], 11, RGBColor[0.2, 0.4, 0.7]],
-  Background -> RGBColor[0.92, 0.95, 0.99], FrameStyle -> RGBColor[0.8, 0.85, 0.95],
-  RoundingRadius -> 3, FrameMargins -> {{8, 8}, {3, 3}}
-];
-
-(* Шаблон для кнопок входа в Ассоциацию или Массив *)
-UIInspectorFolderTemplate[label_] := Framed[
-  Style[label, 11, Darker[Gray]], 
-  Background -> RGBColor[0.95, 0.95, 0.97], FrameStyle -> RGBColor[0.85, 0.85, 0.9], 
-  RoundingRadius -> 3, FrameMargins -> {{12, 12}, {5, 5}}
-];
-
-(* 1. Основной контейнер всего инспектора *)
-UIInspectorMainWrapper[content_] := Framed[
-  content,
-  FrameStyle -> LightGray, RoundingRadius -> 5, Background -> White,
-  ImageSize -> {700, 450}, Alignment -> {Left, Top}, ImageMargins -> 5
-];
-
-(* 2. Макет таблицы для текущего уровня *)
-UIInspectorTableLayout[rows_List] := Grid[
-  rows,
-  Alignment -> {Left, Top},
-  Dividers -> {None, Center -> LightGray},
-  Spacings -> {2, 1.2}
-];
-
-(* 3. Обёртка для навигационной панели *)
-UIInspectorNavigationRow[crumbs_] := Column[{
-  Row[crumbs],
-  Spacer[10]
-}, Alignment -> Left];
-
-(* Глобальная переменная для хранения пути инспектора *)
-$CurrentInspectorPath = {};
-
-ClearAll[CreateDrillDownInspector];
-(* Убрали HoldFirst, так как теперь передаем чистую Association *)
-
-CreateDrillDownInspector[rawData_Association] := 
-  UIInspectorMainWrapper[
-    Dynamic[
-      Module[{currentData, navigation, content},
-        
-        (* 1. Находим данные по глобальному пути *)
-        currentData = Fold[Lookup, rawData, $CurrentInspectorPath];
-        
-        (* 2. Готовим навигацию (Хлебные крошки), обновляя глобальный путь *)
-        navigation = UIInspectorNavigationRow[
-          Flatten @ Prepend[
-            Table[With[{i = i}, {
-              Style[" > ", Gray], 
-              Button[UIInspectorCrumbTemplate[$CurrentInspectorPath[[i]]], $CurrentInspectorPath = Take[$CurrentInspectorPath, i], Appearance -> "Frameless", Cursor -> "LinkHand"]
-            }], {i, 1, Length[$CurrentInspectorPath]}],
-            Button[UIInspectorCrumbTemplate["Home", True], $CurrentInspectorPath = {}, Appearance -> "Frameless", Cursor -> "LinkHand"]
-          ]
-        ];
-
-        (* 3. Готовим контент *)
-(* 3. Готовим контент (теперь с независимым скроллом) *)
-        content = Pane[
-          Switch[currentData,
-            _Association,
-            UIInspectorTableLayout[
-              KeyValueMap[
-                Function[{k, v},
-                  {Style[k, Bold], 
-                   Switch[v,
-                     _Association, Button[UIInspectorFolderTemplate["\[RightGuillemet] Association (" <> ToString[Length[v]] <> ")"], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
-                     _List /; Length[Flatten[v]] > 10, Button[UIInspectorFolderTemplate["\[RightGuillemet] Array " <> ToString[Dimensions[v]]], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
-                     _String /; StringStartsQ[v, "<"], Style[v, Gray, Italic],
-                     _, Pane[v, Alignment -> {Left, Top}] (* Локальное выравнивание коротких текстов *)
-                   ]}
-                ],
-                currentData
-              ]
-            ],
-            
-            _List, MatrixForm[currentData],
-            _, currentData
-          ],
-          
-          (* Жесткие размеры ТОЛЬКО для блока данных. Оставляем место для крошек сверху *)
-          ImageSize -> {680, 390}, 
-          Scrollbars -> True,
-          AppearanceElements -> None,
-          Alignment -> {Left, Top}
-        ];
-
-        (* Собираем всё вместе *)
-        Column[{navigation, content}, Alignment -> {Left, Top}]
-      ],
-      (* Dynamic следит только за глобальным путем *)
-      TrackedSymbols :> {$CurrentInspectorPath}
-    ]
-  ];
-
-(* ═══════════════════════════════════════════════════════════════ *)
-(* 1. BACKEND: PLOT REGISTRY & COMPUTE SYSTEM *)
-(* ═══════════════════════════════════════════════════════════════ *)
-
 $PlotRegistry = <||>;
+$CurrentInspectorPath = {}; (* Глобальный путь для инспектора ModelState*)
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                   2. РЕГИСТРАЦИЯ ГРАФИКОВ                      ║ *)
+(* ║        (База знаний интерфейса, типы визуализаций)             ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
 
 RegisterPlot[id_String, label_String, type_String, computeFunc_] := 
   ($PlotRegistry[id] = <|
@@ -162,7 +81,7 @@ RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy",
   Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
 ];
 
-(* NEW: Schrödinger Equation Verification Tool *)
+(* Schrödinger Equation Verification Tool *)
 RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
   Function[{m},
     Module[{states, report, grid, nDOF},
@@ -270,7 +189,6 @@ RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic Wave Function", "Light",
   ]
 ];
 
-(* Spectroscopy Scanner (Real-time) *)
 RegisterPlot["SpectroscopyScanner", "Spectroscopy Scanner", "Light",
   Function[{m}, QED`Plots`PlotSpectroscopyScanner[m]]
 ];
@@ -307,31 +225,19 @@ RegisterPlot["SmatrixHeatmap", "Scattering Parameters Heatmap", "Heavy",
   Function[{m}, QED`Plots`PlotSParameterMap[m]]
 ];
 
-(* 
-   COMPUTE WORKER (FUNCTIONAL STYLE)
-   Input: plotId, model (Value)
-   Output: {Graphics, UpdatedModel (Value)}
-*)
-(* COMPUTE WORKER (HANDLE-BASED) *)
-(* Теперь принимает не ассоциацию, а строковый ID модели *)
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                   3. ВЫЧИСЛИТЕЛЬНЫЙ МОСТ                       ║ *)
+(* ║     (Compute Worker, связь UI и математического ядра)          ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
+
 ComputePlotData[plotId_String, modelId_String] := 
   Module[{info, func, graphic, localModel},
     
-    (* 1. Достаем базовую модель из реестра *)
+    (* Достаем базовую модель из реестра *)
     localModel = QED`Model`GetModel[modelId];
     If[!AssociationQ[localModel], Return[Graphics[{Red, Text["Invalid Model ID"]}]]];
 
-    (* 2. Прогрев кэша (JIT теперь сам безопасно обновляет $ModelRegistry по ModelID) *)
-    QED`Model`GetNumericalQuantity[localModel, "PlasmonFrequencies"];
-    
-    (* Примечание: в новом реестре ключ называется EquilibriumFluxes *)
-    If[plotId === "Potential3D", QED`Model`GetNumericalQuantity[localModel, "EquilibriumFluxes"]];
-    If[plotId === "DiagonalizationCheck", QED`Model`GetNumericalQuantity[localModel, "HarmonicDiagonalization"]];
-
-    (* 3. Забираем СВЕЖУЮ модель из реестра (уже с прогретым кэшем) *)
-    localModel = QED`Model`GetModel[modelId];
-
-    (* 4. Вызов функции отрисовки (передаем чистую локальную копию!) *)
+    (* Вызов функции отрисовки (передаем чистую локальную копию!) *)
     info = $PlotRegistry[plotId];
     graphic = If[MissingQ[info], 
        Graphics[{Red, Text["Unknown Plot ID"]}],
@@ -342,9 +248,105 @@ ComputePlotData[plotId_String, modelId_String] :=
     graphic
   ];
 
-(* ═══════════════════════════════════════════════════════════════ *)
-(* 2. VIEW COMPONENTS: SLIDERS & CONTROLS *)
-(* ═══════════════════════════════════════════════════════════════ *)
+ExtractGraphicOnly[expr_] := Replace[expr, Legended[g_, _] :> g];
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                 4. UI КОМПОНЕНТЫ И ВИДЖЕТЫ                     ║ *)
+(* ║    (Слайдеры, инспектор, пресеты, строительные блоки)          ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
+
+(* Шаблон для хлебных крошек *)
+UIInspectorCrumbTemplate[label_, isHome_: False] := Framed[
+  Style[label, If[isHome, Bold, Plain], 11, RGBColor[0.2, 0.4, 0.7]],
+  Background -> RGBColor[0.92, 0.95, 0.99], FrameStyle -> RGBColor[0.8, 0.85, 0.95],
+  RoundingRadius -> 3, FrameMargins -> {{8, 8}, {3, 3}}
+];
+
+(* Шаблон для кнопок входа в Ассоциацию или Массив *)
+UIInspectorFolderTemplate[label_] := Framed[
+  Style[label, 11, Darker[Gray]], 
+  Background -> RGBColor[0.95, 0.95, 0.97], FrameStyle -> RGBColor[0.85, 0.85, 0.9], 
+  RoundingRadius -> 3, FrameMargins -> {{12, 12}, {5, 5}}
+];
+
+(* Основной контейнер всего инспектора *)
+UIInspectorMainWrapper[content_] := Framed[
+  content,
+  FrameStyle -> LightGray, RoundingRadius -> 5, Background -> White,
+  ImageSize -> {700, 450}, Alignment -> {Left, Top}, ImageMargins -> 5
+];
+
+(* Макет таблицы для текущего уровня *)
+UIInspectorTableLayout[rows_List] := Grid[
+  rows,
+  Alignment -> {Left, Top},
+  Dividers -> {None, Center -> LightGray},
+  Spacings -> {2, 1.2}
+];
+
+(* Обёртка для навигационной панели *)
+UIInspectorNavigationRow[crumbs_] := Column[{
+  Row[crumbs],
+  Spacer[10]
+}, Alignment -> Left];
+
+ClearAll[CreateDrillDownInspector];
+CreateDrillDownInspector[rawData_Association] := 
+  UIInspectorMainWrapper[
+    Dynamic[
+      Module[{currentData, navigation, content},
+        
+        (* 1. Находим данные по глобальному пути *)
+        currentData = Fold[Lookup, rawData, $CurrentInspectorPath];
+        
+        (* 2. Готовим навигацию (Хлебные крошки), обновляя глобальный путь *)
+        navigation = UIInspectorNavigationRow[
+          Flatten @ Prepend[
+            Table[With[{i = i}, {
+              Style[" > ", Gray], 
+              Button[UIInspectorCrumbTemplate[$CurrentInspectorPath[[i]]], $CurrentInspectorPath = Take[$CurrentInspectorPath, i], Appearance -> "Frameless", Cursor -> "LinkHand"]
+            }], {i, 1, Length[$CurrentInspectorPath]}],
+            Button[UIInspectorCrumbTemplate["Home", True], $CurrentInspectorPath = {}, Appearance -> "Frameless", Cursor -> "LinkHand"]
+          ]
+        ];
+
+        (* 3. Готовим контент *)
+        content = Pane[
+          Switch[currentData,
+            _Association,
+            UIInspectorTableLayout[
+              KeyValueMap[
+                Function[{k, v},
+                  {Style[k, Bold], 
+                   Switch[v,
+                     _Association, Button[UIInspectorFolderTemplate["\[RightGuillemet] Association (" <> ToString[Length[v]] <> ")"], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
+                     _List /; Length[Flatten[v]] > 10, Button[UIInspectorFolderTemplate["\[RightGuillemet] Array " <> ToString[Dimensions[v]]], $CurrentInspectorPath = Append[$CurrentInspectorPath, k], Appearance -> "Frameless", Cursor -> "LinkHand"],
+                     _String /; StringStartsQ[v, "<"], Style[v, Gray, Italic],
+                     _, Pane[v, Alignment -> {Left, Top}] (* Локальное выравнивание коротких текстов *)
+                   ]}
+                ],
+                currentData
+              ]
+            ],
+            
+            _List, MatrixForm[currentData],
+            _, currentData
+          ],
+          
+          (* Жесткие размеры ТОЛЬКО для блока данных. Оставляем место для крошек сверху *)
+          ImageSize -> {680, 390}, 
+          Scrollbars -> True,
+          AppearanceElements -> None,
+          Alignment -> {Left, Top}
+        ];
+
+        (* Собираем всё вместе *)
+        Column[{navigation, content}, Alignment -> {Left, Top}]
+      ],
+      (* Dynamic следит только за глобальным путем *)
+      TrackedSymbols :> {$CurrentInspectorPath}
+    ]
+  ];
 
 ExtractInteractiveParams[model_Association] :=
   Flatten[
@@ -360,7 +362,7 @@ ExtractInteractiveParams[model_Association] :=
     1
   ];
 
-(* Слайдер теперь принимает ID модели и отправляет изменения прямо в Ядро *)
+(* Слайдер принимает ID модели и отправляет изменения прямо в Ядро *)
 SetAttributes[MakeParameterControl, HoldFirst];
 MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_, isComputingSymbol_] := 
   Row[{
@@ -551,11 +553,11 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
   ];
 
 makeGearIcon[color_] := Graphics[{color, Disk[{0, 0}, 0.7], Table[Rotate[{EdgeForm[None], Rectangle[{-0.15, 0.6}, {0.15, 0.95}]}, ang, {0, 0}], {ang, 0, 2 Pi - 0.1, Pi/4}], White, Disk[{0, 0}, 0.3]}, ImageSize -> 18, PlotRange -> {{-1, 1}, {-1, 1}}, BaselinePosition -> Center];
-ExtractGraphicOnly[expr_] := Replace[expr, Legended[g_, _] :> g];
 
-(* ═══════════════════════════════════════════════════════════════ *)
-(* 3. CORE: QUBIT DASHBOARD (TRIGGER-BASED) *)
-(* ═══════════════════════════════════════════════════════════════ *)
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                     5. ГЛАВНЫЙ ДАШБОРД                         ║ *)
+(* ║      (QubitDashboard, управление состоянием и рендеринг)       ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
 
 QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   {
@@ -569,12 +571,11 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     exportPreset = "Publication",
     performUpdate,
     
-    isComputing = False (* НОВЫЙ ФЛАГ СОСТОЯНИЯ *)
+    isComputing = False
   },
   
   performUpdate = Function[{},
-    (* Если уже считаем - игнорируем новые запросы *)
-    If[isComputing, Return[]]; 
+    If[isComputing, Return[]]; (* Если уже считаем - игнорируем новые запросы *)
     
     isComputing = True;
     
@@ -585,10 +586,10 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       FinishDynamic[]; (* Принудительно заставляем UI нарисовать заглушку *)
     ];
     
-(* Вызываем Compute (для Light он выполнится за миллисекунды) *)
+(* Вызываем Compute *)
     Module[{newData},
       newData = ComputePlotData[selectedPlotId, currentModelId];
-      (* Создаем АБСОЛЮТНО НОВУЮ ассоциацию в памяти *)
+      (* Создаем НОВУЮ ассоциацию в памяти *)
       plotCache = Association[plotCache, selectedPlotId -> newData];
     ];
     
@@ -604,7 +605,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
           SelectModel[currentModelId, modelIds, 
             Function[{}, 
               plotCache = <||>;
-              $CurrentInspectorPath = {}; (* <--- СБРОС ПУТИ ПРИ СМЕНЕ КУБИТА *)
+              $CurrentInspectorPath = {}; (* сброс пути при смене модели *)
               If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
             ]
           ],
@@ -682,7 +683,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
            
            Spacer[30], 
            
-           (* C. SAVE & EXPORT CONTROLS (без изменений) *)
+           (* C. SAVE & EXPORT CONTROLS *)
            Button[
               Row[{Style["Save PDF...", Bold], Spacer[5], Style["\[DownArrow]", Gray]}],
               Module[{targetFile, gToSave, finalG, savedOverlays, initialPath, safePath},
@@ -729,7 +730,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
               _, If[Length[saved] > 0 && (MatchQ[curr, _Graphics] || MatchQ[curr, _Legended]), Show[Join[saved, {curr}], PlotRange -> All], curr]
             ];
             
-            (* ГЕНИАЛЬНЫЙ ХАК: Привязываем значение uiTick прямо к объекту, 
+            (* Привязываем значение uiTick прямо к объекту, 
                чтобы 100% заставить FrontEnd перерисовать пиксели *)
             Style[finalDisplay, "RenderTrigger" -> uiTick]
           ]
@@ -742,10 +743,25 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
   
   Initialization :> (
     currentModelId = First[modelIds];
+
+    (* Автоматический мердж пресетов из блокнота для всех загруженных моделей *)
+    Scan[
+      Function[id,
+        Module[{key, saved},
+          key = Lookup[QED`Model`GetModel[id]["Topology"], "Name", "DefaultCircuit"];
+          saved = CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}];
+          If[AssociationQ[saved],
+            QED`Model`MergePresets[id, saved];
+          ];
+        ]
+      ],
+      modelIds
+    ];
+
     If[$PlotRegistry[selectedPlotId]["Type"] === "Light", performUpdate[]];
   ),
   Deinitialization :> (
-    (* ОСВОБОЖДЕНИЕ ПАМЯТИ: удаляем модели из реестра при закрытии окна *)
+    (* Удаляем модели из реестра при закрытии окна *)
     QED`Model`Private`$ModelRegistry = KeyDrop[QED`Model`Private`$ModelRegistry, modelIds];
   ),
   SynchronousInitialization -> False
