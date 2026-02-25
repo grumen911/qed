@@ -300,11 +300,11 @@ RegisterPlot["DephasingTime", "Pure Dephasing Time (T_phi)", "Heavy",
 ];
 
 RegisterPlot["Smatrix", "Scattering Parameters (S-matrix)", "Light", 
-  Function[{m}, QED`Plots`PlotFrequencyResponse[m, {0.1, 20.}]]
+  Function[{m}, QED`Plots`PlotFrequencyResponse[m]]
 ];
 
 RegisterPlot["SmatrixHeatmap", "Scattering Parameters Heatmap", "Heavy", 
-  Function[{m}, QED`Plots`PlotSParameterMap[m, {0.1, 20.}]]
+  Function[{m}, QED`Plots`PlotSParameterMap[m]]
 ];
 
 (* 

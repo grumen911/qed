@@ -122,8 +122,10 @@ PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceCon
 
 Begin["`Private`"];
 
+
 Options[PlotSParameterMap] = {
-  FluxRange -> {0., 0.5},
+  "FrequencyRange" -> {10., 15.},
+  "FluxRange" -> {0., 0.5},
   "Measurement" -> "S21",
   PlotPoints -> 50,
   ColorFunction -> "SunsetColors",
@@ -134,7 +136,10 @@ Options[PlotSParameterMap] = {
 };
 
 Options[PlotFrequencyResponse] = {
-    "Measurement" -> "S21" (* "S11" or "S21" *)
+  "FrequencyRange" -> {0., 20.}, 
+  "FluxRange" -> {0., 0.5}, 
+  "Measurement" -> "S21", (* "S11" or "S21" *) 
+  PlotPoints -> 50
 };
 
 Options[PlotPlasmonSpectrum] = {
@@ -1085,10 +1090,12 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
     ]
 ];
 
-PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] := 
- Module[{measure, sIndex, color, label, phiExt, sMatrixAtPhi, plotFunc},
+PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] := 
+ Module[{measure, sIndex, color, label, phiExt, sMatrixAtPhi, plotFunc, plotPoints, fMin, fMax},
   
+  {fMin, fMax} = OptionValue["FrequencyRange"];
   measure = OptionValue["Measurement"];
+  plotPoints = OptionValue[PlotPoints];
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
 
   (* 1. Получаем текущий внешний поток *)
@@ -1117,18 +1124,18 @@ PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] 
      PlotStyle -> Directive[color, Thickness[0.006]],
      GridLines -> Automatic, AspectRatio -> 0.6, ImageSize -> 600,
      PlotLabel -> Style[label, 14, FontFamily -> "Times"],
-     MaxRecursion -> 4, PlotPoints -> 200
+     MaxRecursion -> 4, PlotPoints -> plotPoints
   ]
  ];
 
-PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, opts:OptionsPattern[]] := 
+PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   Module[{
     fMin, fMax, fluxRange, measure, plotPoints, colFunc,
     sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend
   },
   
-  {fMin, fMax} = range;
-  fluxRange = OptionValue[FluxRange];
+  {fMin, fMax} = OptionValue["FrequencyRange"];
+  fluxRange = OptionValue["FluxRange"];
   measure = OptionValue["Measurement"];
   plotPoints = OptionValue[PlotPoints];
   colFunc = OptionValue[ColorFunction];
@@ -1163,7 +1170,7 @@ PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, o
       PlotLabel -> Style[label, 16, FontFamily -> "Times"],
       PlotLegends -> None, 
       ImageSize -> 600,
-      MaxRecursion -> 1
+      MaxRecursion -> 4
   ];
 
   (* 4. Исправленная легенда без несуществующих опций *)
