@@ -1044,8 +1044,13 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
   ];
 
 PlotDephasingTime[model_Association, opts:OptionsPattern[]] := 
-  Module[{tPhiFunc, nModes, range, logRange, timeRange, modeTphi},
+  Module[{
+    nModes, range, logRange, timeRange, modeTphi,
+    A, logFac, h,
+    sweepFunc, computeTPhi, lastPhi = "Init", lastTimes = {}, getTPhi
+  },
     
+    (* 1. Опции графика *)
     nModes = OptionValue[NumModes];
     range = OptionValue[FluxRange];
     logRange = OptionValue["LogTimeRange"];
@@ -1054,42 +1059,62 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
         {10.^logRange[[1]], 10.^logRange[[2]]},
         All
     ];
-
+    
     If[!IntegerQ[nModes], nModes = 1]; 
     If[!ListQ[range], range = {-0.5, 0.5}];
 
-    (* Генератор свипа *)
-    tPhiFunc = QED`Numeric`GenerateFluxSweep[model, 
-        Function[{m}, 
-            Module[{res},
-                res = QED`Numeric`CalculateDephasingRates[m, 
-                    FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]]
-                ];
-                (* Возвращаем список времен (числа или Infinity) *)
-                If[FailureQ[res], ConstantArray[Infinity, nModes], res["DephasingTime"]]
-            ]
-        ]
+    (* 2. Извлекаем параметры шума из дефолтных опций CalculateDephasingRates *)
+    A = OptionValue[QED`Numeric`CalculateDephasingRates, FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]], "FluxNoiseAmplitude"];
+    logFac = OptionValue[QED`Numeric`CalculateDephasingRates, FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]], "PinkNoiseLogFactor"];
+    h = OptionValue[QED`Numeric`CalculateDephasingRates, FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]], "FluxStep"];
+
+    (* 3. Создаем ОДИН JIT-конвейер для частот *)
+    sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "PlasmonFrequencies"];
+
+    If[sweepFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: JIT Sweep generation failed.", {0,0}]}]]
     ];
 
-    If[tPhiFunc === $Failed,
-      Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
+    (* 4. Внутренняя функция: берет частоты из JIT и сама считает производные *)
+    computeTPhi[phi_] := Module[
+      {w0, wPlus, wMinus, d1, d2, gamma1, gamma2, gTot},
+      
+      (* Запрашиваем 3 точки. JIT отработает их мгновенно благодаря внутреннему pathHistory *)
+      w0 = sweepFunc[phi];
+      wPlus = sweepFunc[phi + h];
+      wMinus = sweepFunc[phi - h];
+      
+      If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], Return[ConstantArray[Null, nModes]]];
+      
+      Table[
+         If[TrueQ[w0[[k]] == 0], 
+            Null,
+            d1 = (wPlus[[k]] - wMinus[[k]]) / (2 * h);
+            d2 = (wPlus[[k]] - 2*w0[[k]] + wMinus[[k]]) / (h^2);
+            
+            gamma1 = A * logFac * Abs[d1];
+            gamma2 = (A^2) * logFac * Abs[d2];
+            gTot = Sqrt[gamma1^2 + gamma2^2];
+            
+            (* Null для бесконечностей, чтобы Plot не ломался на логарифмической шкале *)
+            If[gTot < 1.0*^-20 || !NumericQ[gTot], Null, 1.0 / gTot]
+         ],
+         {k, nModes}
+      ]
     ];
 
-    (* Обертка для Plot *)
-    modeTphi[i_Integer][phi_?NumericQ] := 
-      Module[{valVec, val},
-        valVec = tPhiFunc[phi];
-        If[i > Length[valVec], Return[Null]];
-        
-        val = valVec[[i]];
-        
-        (* Infinity превращаем в Null (разрыв линии) *)
-        If[!NumericQ[val] || val <= 0 || val === Infinity, Null, val]
-      ];
+    (* 5. Умный локальный кэш, чтобы не считать точки дважды для многомодовых графиков *)
+    getTPhi[i_Integer, phi_?NumericQ] := (
+       If[phi =!= lastPhi,
+          lastPhi = phi;
+          lastTimes = computeTPhi[phi];
+       ];
+       If[i <= Length[lastTimes], lastTimes[[i]], Null]
+    );
 
-    (* График *)
+    (* 6. График *)
     Plot[
-        Evaluate @ Table[modeTphi[i][phi], {i, nModes}],
+        Evaluate @ Table[getTPhi[i, phi], {i, nModes}],
         {phi, range[[1]], range[[2]]},
         
         ScalingFunctions -> "Log10",
@@ -1097,24 +1122,19 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
         
         Axes -> True,
         Frame -> False,
-        
         AxesLabel -> {
             Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
-            Style[Subscript["T", "\[Phi]"], FontFamily -> "Times New Roman", Large],
-            FormatType -> TraditionalForm
+            Style[Subscript["T", "\[Phi]"], FontFamily -> "Times New Roman", Large]
         }, 
         AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        MeshFunctions -> Function[{x, y}, y],
         ImageSize -> 600, 
         
         PlotLegends -> Placed[
             Table[
                 Row[{
                    Subscript["T", "\[Phi]"],
-                   " (", 
-                   Subscript[Style["|1\[RightAngleBracket]", Italic], i],
-                   " \[Rule] ", 
-                   Style["|0\[RightAngleBracket]", Italic], 
-                   ")"
+                   " (", Subscript[Style["|1\[RightAngleBracket]", Italic], i], " \[Rule] ", Style["|0\[RightAngleBracket]", Italic], ")"
                 }], 
                 {i, nModes}
             ],
@@ -1125,8 +1145,9 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
             Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
             Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
         },
-        MaxRecursion -> ControlActive[2, 6], 
-        PlotPoints -> ControlActive[20, 80]
+        
+        MaxRecursion -> 2, 
+        PlotPoints -> 50
     ]
 ];
 
