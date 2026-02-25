@@ -1174,7 +1174,7 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       {phi, fluxRange[[1]], fluxRange[[2]]}, 
       {f, fMin, fMax},
       
-      PlotPoints -> {400, 1500},
+      PlotPoints -> {100, 400}, (* {400, 1500} *)
       Exclusions -> None,
       PerformanceGoal -> "Quality",
 
@@ -1186,7 +1186,7 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       PlotLabel -> Style[label, 16, FontFamily -> "Times"],
       PlotLegends -> None, 
       ImageSize -> 600,
-      MaxRecursion -> 0
+      MaxRecursion -> 2
   ];
 
   (* 4. Исправленная легенда без несуществующих опций *)
