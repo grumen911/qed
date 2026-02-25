@@ -27,9 +27,6 @@ MergePresets::usage = "MergePresets[model, newPresets] merges an association of 
 
 GetWaveFunction::usage = "GetWaveFunction[model, quantumNumbers] returns the analytical wavefunction \
 Psi[phi1, phi2, ...] for the specified state {n1, n2, ...} in physical flux coordinates.";
-UpdateModelWithRules::usage = "UpdateModelWithRules[model, rules] updates the model's SubstitutionRules \
-(at root) and manually populates the numerical cache with matrices and diagonalization data, \
-setting IsDirty->False. This allows skipping the expensive FindPotentialMinimum step during sweeps.";
 
 GetParameterVector::usage = "GetParameterVector[model] returns a sorted PackedArray of Reals representing \
 the model's primary parameters for JIT compilation.";
@@ -605,78 +602,6 @@ GetWaveFunction[model_Association, quantumNumbers_List] :=
   (* Используем subRules, которые содержат правила для minSymbols *)
   psiSymbolic //. subRules
  ];
-
-UpdateModelWithRules[model_Association, rules_List] := Module[
-    {
-        analytical, capNum, indNum, invCap, invInd, diag, 
-        newCache, existingCache, newModel, currentOpNum,
-        voltageOpsNum
-    },
-
-    analytical = model["Analytical"];
-    existingCache = model["Numerical"]["Cache"];
-
-    (* 1. Вычисляем матрицы (быстрая подстановка) *)
-    capNum = analytical["CapacitanceMatrix"] /. rules;
-    indNum = analytical["InductanceMatrix"] /. rules; (* Это L^-1 ! *)
-    currentOpNum = Lookup[analytical, "CurrentOperator", 0] /. rules;
-    voltageOpsNum = Lookup[analytical, "VoltageOperators", <||>] /. rules;
-
-    (* 2. Обращаем матрицы *)
-    (* invCap = C^-1 *)
-    invCap = If[Det[capNum] != 0, Inverse[capNum], $Failed];
-    (* invInd = L (прямая индуктивность) - нужна для кэша, но не для диагонализации *)
-    invInd = If[Det[indNum] != 0, Inverse[indNum], $Failed];
-    
-    (* 3. Диагонализация *)
-    (* ИСПРАВЛЕНИЕ: Передаем (C^-1, L^-1), то есть (invCap, indNum) *)
-    diag = If[MatrixQ[invCap] && MatrixQ[indNum],
-        DiagonalizeHarmonicHamiltonian[invCap, indNum],
-        $Failed
-    ];
-
-    effRules = QED`Scattering`GetEffectiveInductances[model, rules];
-
-    (* Рассчитываем численную S-матрицу (numbers + s) *)
-    sMatrixNum = If[effRules =!= $Failed,
-        analytical["Scattering"]["SMatrixRaw"] /. Join[rules, effRules],
-        $Failed
-    ];
-
-    (* 4. Формируем обновления для кэша *)
-    newCache = <|
-        "CapacitanceMatrixNumerical"       -> <|"State" -> "Ready", "Value" -> capNum|>,
-        "InductanceMatrixInverseNumerical" -> <|"State" -> "Ready", "Value" -> indNum|>, (* L^-1 *)
-        "InverseCapacitanceMatrix"         -> <|"State" -> "Ready", "Value" -> invCap|>, (* C^-1 *)
-        "InductanceMatrixNumerical"        -> <|"State" -> "Ready", "Value" -> invInd|>, (* L *)
-        "CurrentOperatorNumerical"         -> <|"State" -> "Ready", "Value" -> currentOpNum|>,
-        "VoltageOperatorsNumerical"        -> <|"State" -> "Ready", "Value" -> voltageOpsNum|>,
-        "HarmonicDiagonalization"          -> <|"State" -> "Ready", "Value" -> diag|>,
-
-        "EffectiveInductances"             -> <|"State" -> "Ready", "Value" -> effRules|>,
-        "SMatrixNumerical"                 -> <|
-                                                "State" -> "Ready", 
-                                                "Value" -> sMatrixNum,
-                                                "FrequencyVariable" -> analytical["Scattering"]["FrequencyVariable"]
-                                              |>,
-
-        "PlasmonFrequencies" -> <|
-            "State" -> "Ready", 
-            "Value" -> Sort[If[diag === $Failed, $Failed, diag["NormalModeFrequencies"]]]
-        |>,
-        "EquilibriumFluxes" -> <|
-            "State" -> "Ready",
-            "Value" -> FilterRules[rules, Subscript[QED`$FluxSymbol, "min", _]]
-        |>
-    |>;
-
-    (* 5. Собираем новую модель *)
-    newModel = model;
-    newModel["SubstitutionRules"] = rules;
-    newModel["Numerical"]["Cache"] = Join[existingCache, newCache];
-
-    newModel
-];
 
 (* ════════════════════════════════════════════════════════════════ *)
 (* PRESET MANAGEMENT SYSTEM (Handle-Based)                          *)
