@@ -124,7 +124,7 @@ Begin["`Private`"];
 
 
 Options[PlotSParameterMap] = {
-  "FrequencyRange" -> {10., 15.},
+  "FrequencyRange" -> {4., 12.},
   "FluxRange" -> {0., 0.5},
   "Measurement" -> "S21",
   PlotPoints -> 50,
@@ -194,8 +194,10 @@ Module[{freqFunc, nModes, range, scale, modeFreq},
       _, 1.
     ];
 
-    (* Определить численную функцию для каждой моды *)
-    modeFreq[i_Integer][phi_?NumericQ] := Re[freqFunc[phi][[i]]] / scale;
+    (* Сортируем частоты по возрастанию и берем i-ю моду *)
+    modeFreq[i_Integer][phi_?NumericQ] := Module[{w = Re[freqFunc[phi]]},
+        Sort[w][[i]] / scale
+    ];
 
     Plot[
         Evaluate @ Table[modeFreq[i][phi], {i, nModes}],
@@ -725,20 +727,21 @@ PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     Style["Total \!\(\*SubscriptBox[\(T\), \(1\)]\)\n(\[Mu]s)", Bold]
   };
 
-  rows = Table[
-    {
-      (* Теперь в первом столбце и индекс, и частота в ГГц *)
-      Row[{
-        Style["#" <> ToString[m], Bold], 
-        " (", 
-        N[freqs[[m]] / (2 Pi * 10^9), 3], 
-        " GHz)"
-      }],
-      formatTime[indGamma[[m]]],
-      formatTime[capGamma[[m]]],
-      formatTotalTime[totalT1[[m]]]
-    },
-    {m, modes}
+  Module[{ord = Ordering[freqs]},
+    rows = Table[
+      Module[{k = ord[[m]]},
+        {
+          Row[{
+            Style["#" <> ToString[m], Bold], 
+            " (", N[freqs[[k]] / (2 Pi * 10^9), 3], " GHz)"
+          }],
+          formatTime[indGamma[[k]]],
+          formatTime[capGamma[[k]]],
+          formatTotalTime[totalT1[[k]]]
+        }
+      ],
+      {m, 1, Min[Length[modes], Length[freqs]]}
+    ]
   ];
 
   Column[{
@@ -810,17 +813,21 @@ PlotDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
     Style["Total \!\(\*SubscriptBox[\(T\), \(\[Phi]\)]\)\n(s)", Bold]
   };
   
-  rows = Table[
-    {
-      Row[{
-        Style["#" <> ToString[m], Bold], 
-        " (", N[freqs[[m]] / (2 Pi * 10^9), 3], " GHz)"
-      }],
-      formatTime[gamma1[[m]]],
-      formatTime[gamma2[[m]]],
-      Style[formatTime[Sqrt[gamma1[[m]]^2 + gamma2[[m]]^2]], Bold] 
-    },
-    {m, nModes}
+  Module[{ord = Ordering[freqs]},
+    rows = Table[
+      Module[{k = ord[[m]]},
+        {
+          Row[{
+            Style["#" <> ToString[m], Bold], 
+            " (", N[freqs[[k]] / (2 Pi * 10^9), 3], " GHz)"
+          }],
+          formatTime[gamma1[[k]]],
+          formatTime[gamma2[[k]]],
+          Style[formatTime[Sqrt[gamma1[[k]]^2 + gamma2[[k]]^2]], Bold] 
+        }
+      ],
+      {m, 1, Min[nModes, Length[freqs]]}
+    ]
   ];
   
   Column[{
@@ -894,7 +901,7 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
 
     (* 4. Внутренняя функция расчета T1 по свежим матрицам *)
     computeT1[phi_] := Module[
-      {diag, freqs, caps, Nmat, Mmat, rates, w, fZPF, cZPF, iElem, vElem, gInd, gCap, gTot, targetRate},
+      {diag, freqs, caps, Nmat, Mmat, rates, w, fZPF, cZPF, iElem, vElem, gInd, gCap, gTot, targetRate, ord, k},
       
       diag = sweepFunc[phi];
       If[FailureQ[diag], Return[ConstantArray[Null, nModes]]];
@@ -904,8 +911,13 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
       Nmat = diag["FluxTransform"];
       Mmat = diag["ChargeTransform"];
       
+      (* ПОЛУЧАЕМ ИНДЕКСЫ ПО ВОЗРАСТАНИЮ ЧАСТОТЫ *)
+      ord = Ordering[freqs];
+      
       rates = Table[
+        k = ord[[idx]]; (* Берем физически правильную моду *)
         w = freqs[[k]];
+        
         If[TrueQ[w == 0], 
            Null,
            fZPF = Sqrt[hbar / (2.0 * caps[[k]] * w)];
@@ -927,7 +939,7 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
            
            If[targetRate < 1.0*^-20, Null, 1.0 / targetRate]
         ],
-        {k, nModes}
+        {idx, 1, nModes}
       ];
       rates
     ];
@@ -1016,16 +1028,18 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
 
     (* 4. Внутренняя функция: берет частоты из JIT и сама считает производные *)
     computeTPhi[phi_] := Module[
-      {w0, wPlus, wMinus, d1, d2, gamma1, gamma2, gTot},
+      {w0, wPlus, wMinus, d1, d2, gamma1, gamma2, gTot, ord, k},
       
-      (* Запрашиваем 3 точки. JIT отработает их мгновенно благодаря внутреннему pathHistory *)
       w0 = sweepFunc[phi];
       wPlus = sweepFunc[phi + h];
       wMinus = sweepFunc[phi - h];
       
       If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], Return[ConstantArray[Null, nModes]]];
       
+      ord = Ordering[w0];
+      
       Table[
+         k = ord[[idx]]; (* Берем правильный индекс *)
          If[TrueQ[w0[[k]] == 0], 
             Null,
             d1 = (wPlus[[k]] - wMinus[[k]]) / (2 * h);
@@ -1035,10 +1049,9 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
             gamma2 = (A^2) * logFac * Abs[d2];
             gTot = Sqrt[gamma1^2 + gamma2^2];
             
-            (* Null для бесконечностей, чтобы Plot не ломался на логарифмической шкале *)
             If[gTot < 1.0*^-20 || !NumericQ[gTot], Null, 1.0 / gTot]
          ],
-         {k, nModes}
+         {idx, 1, nModes}
       ]
     ];
 
@@ -1124,7 +1137,7 @@ PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] :=
      PlotStyle -> Directive[color, Thickness[0.006]],
      GridLines -> Automatic, AspectRatio -> 0.6, ImageSize -> 600,
      PlotLabel -> Style[label, 14, FontFamily -> "Times"],
-     MaxRecursion -> 4, PlotPoints -> plotPoints
+     MaxRecursion -> 10, PlotPoints -> plotPoints
   ]
  ];
 
@@ -1161,7 +1174,10 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       {phi, fluxRange[[1]], fluxRange[[2]]}, 
       {f, fMin, fMax},
       
-      PlotPoints -> plotPoints,
+      PlotPoints -> {400, 1500},
+      Exclusions -> None,
+      PerformanceGoal -> "Quality",
+
       PlotRange -> {0, 1.05}, 
       ColorFunction -> colFunc,
       Frame -> True,
@@ -1170,7 +1186,7 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       PlotLabel -> Style[label, 16, FontFamily -> "Times"],
       PlotLegends -> None, 
       ImageSize -> 600,
-      MaxRecursion -> 4
+      MaxRecursion -> 0
   ];
 
   (* 4. Исправленная легенда без несуществующих опций *)
