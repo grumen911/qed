@@ -158,10 +158,6 @@ RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light",
   Function[{m}, QED`Plots`PlotPlasmonSpectrum[m]]
 ];
 
-RegisterPlot["PlasmonSpectrum (Generic)", "Plasmon Spectrum (Generic)", "Light", 
-  Function[{m}, QED`Plots`PlotGenericFluxSweep[m]]
-];
-
 RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy", 
   Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
 ];
@@ -270,57 +266,6 @@ RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic Wave Function", "Light",
         Scrollbars -> True,
         BaseStyle -> {LineBreakWithin -> False}
       ]
-    ]
-  ]
-];
-
-(* DEBUG PLOT: Инспектор кэша (Read-only) *)
-RegisterPlot["DebugCache", "Debug Cache Inspector", "Light",
-  Function[{m},
-    Module[{cache, eqPoints, freqs, isDirty},
-      cache = m["Numerical", "Cache"];
-      isDirty = m["Numerical", "IsDirty"];
-      eqPoints = Lookup[cache, "EquilibriumPoints", "Missing"];
-      freqs = Lookup[cache, "PlasmonFrequencies", "Missing"];
-      
-      Column[{
-        Style["Numerical Cache Inspector", Bold, 16], 
-        Spacer[10],
-        
-        Style["Model Status:", Bold],
-        Row[{"IsDirty: ", If[TrueQ[isDirty], Style["True", Red], Style["False", Green]]}],
-        Spacer[10],
-        
-        Style["Cache Keys:", Bold],
-        If[AssociationQ[cache], Keys[cache], "Not an Association"],
-        Spacer[10],
-        
-        Style["EquilibriumPoints Entry:", Bold],
-        If[AssociationQ[eqPoints], 
-           Column[{
-             "State: " <> ToString[eqPoints["State"]],
-             "Solutions Count: " <> If[KeyExistsQ[eqPoints, "Value"], 
-                 ToString[Length[eqPoints["Value"]["Solutions"]]], 
-                 "No Value"
-             ]
-           }], 
-           eqPoints
-        ],
-        Spacer[10],
-        
-        Style["PlasmonFrequencies Entry:", Bold],
-        If[AssociationQ[freqs], 
-           Column[{
-             "State: " <> ToString[freqs["State"]],
-             "Value: " <> ToString[Short[freqs["Value"]]]
-           }], 
-           freqs
-        ],
-        
-        Spacer[20],
-        Style["Raw Cache Dump:", Bold],
-        Pane[Short[cache, 20], {400, 300}, Scrollbars -> True]
-      }]
     ]
   ]
 ];
