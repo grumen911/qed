@@ -1,5 +1,8 @@
 BeginPackage["QED`Plots`"];
 
+PlotSpectroscopyScanner::usage = "PlotSpectroscopyScanner[model] displays a real-time table \
+of the lowest energy levels (spectroscopy), including their frequencies and photon number assignments.";
+
 PlotPlasmonSpectrum::usage = 
   "PlotPlasmonSpectrum[model] строит график зависимости плазмонных частот \
 от внешнего магнитного потока Φext.
@@ -78,10 +81,6 @@ PlotLabMatrixElements::usage =
 PlotFermiRates::usage = "PlotFermiRates[model] displays a table of relaxation times (T1) \
 calculated via Fermi's Golden Rule, separated by noise channel.";
 
-PlotGenericFluxSweep::usage = "PlotGenericFluxSweep[model] plots eigenfrequencies using \
-the generic GenerateFluxSweep method. \
-Used for verification of the generic sweep architecture.";
-
 PlotRelaxationTime::usage = "PlotRelaxationTime[model] plots the relaxation time T1 \
 dependence on external flux using generic sweep and CalculateFermiRates.
 Options: Same as PlotPlasmonSpectrum (NumModes, FluxRange).";
@@ -123,8 +122,10 @@ PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceCon
 
 Begin["`Private`"];
 
+
 Options[PlotSParameterMap] = {
-  FluxRange -> {0., 0.5},
+  "FrequencyRange" -> {4., 12.},
+  "FluxRange" -> {0., 0.5},
   "Measurement" -> "S21",
   PlotPoints -> 50,
   ColorFunction -> "SunsetColors",
@@ -135,7 +136,10 @@ Options[PlotSParameterMap] = {
 };
 
 Options[PlotFrequencyResponse] = {
-    "Measurement" -> "S21" (* "S11" or "S21" *)
+  "FrequencyRange" -> {0., 20.}, 
+  "FluxRange" -> {0., 0.5}, 
+  "Measurement" -> "S21", (* "S11" or "S21" *) 
+  PlotPoints -> 50
 };
 
 Options[PlotPlasmonSpectrum] = {
@@ -172,19 +176,15 @@ $DebugPlotPlasmonSpectrum = False;
 $DebugPlotPotentialSlices3D = False;
 
 PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] := 
-  Module[{freqFunc, nModes, range, scale, modeFreq, 
-          t1, t2, t3, dataComputeTime, plotRenderTime},
+Module[{freqFunc, nModes, range, scale, modeFreq},
     
-    (* ════════════════════════════════════════════════════════════════ *)
-    (* ПРОФИЛИРОВАНИЕ: Начало общего замера                             *)
-    (* ════════════════════════════════════════════════════════════════ *)
-    If[$DebugPlotPlasmonSpectrum === True,
-      t1 = AbsoluteTime[];
+    freqFunc = QED`Numeric`GenerateSweepPipeline[model, "PlasmonFrequencies"];
+    
+    (* Защита от пустой модели *)
+    If[freqFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: Sweep generation failed. Check model initialization.", {0,0}]}]]
     ];
-    
-    (* Получить функцию PlasmonFrequenciesVsFlux напрямую *)
-    freqFunc = QED`Numeric`PlasmonFrequenciesVsFlux[model];
-    
+
     (* Обработка опций *)
     nModes = OptionValue[NumModes];
     range = OptionValue[FluxRange];
@@ -193,31 +193,21 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
       "MHz", 2 Pi * 10^6,
       _, 1.
     ];
-    
-    (* Определить численную функцию для каждой моды *)
-    Clear[modeFreq];
-    modeFreq[i_Integer][phi_?NumericQ] := Re[freqFunc[phi][[i]]] / scale;
-    
-    If[$DebugPlotPlasmonSpectrum === True,
-      t2 = AbsoluteTime[];
-      dataComputeTime = (t2 - t1) * 1000;
+
+    (* Сортируем частоты по возрастанию и берем i-ю моду *)
+    modeFreq[i_Integer][phi_?NumericQ] := Module[{w = Re[freqFunc[phi]]},
+        Sort[w][[i]] / scale
     ];
-    
-    (* ════════════════════════════════════════════════════════════════ *)
-    (* ПРОФИЛИРОВАНИЕ: Рендеринг графика                                *)
-    (* ════════════════════════════════════════════════════════════════ *)
-    
-    (* Построить график *)
-    Module[{plot},
-      plot = Plot[
+
+    Plot[
         Evaluate @ Table[modeFreq[i][phi], {i, nModes}],
         {phi, range[[1]], range[[2]]},
         
         PlotLegends -> Table[Subscript["\[Omega]", i], {i, nModes}],
         Frame -> True,
         FrameLabel -> {
-          "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)",
-          "Frequency (GHz)"
+          Style[Subscript["\[CapitalPhi]", "ext"] / Subscript["\[CapitalPhi]", "0"], 16],
+          Style["Frequency (GHz)", 16]
         },
         PlotRange -> All,
         PlotPoints -> 25,
@@ -229,32 +219,7 @@ PlotPlasmonSpectrum[model_Association, opts:OptionsPattern[]] :=
           Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.006]],  (* Синий *)
           Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006]]    (* Оранжевый *)
         },
-        Frame -> True,
-        FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-        FrameLabel -> {
-          Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], 16],
-          Style["Frequency (GHz)", 16]
-        }
-        
-        (* ,opts *)
-      ];
-
-      If[$DebugPlotPlasmonSpectrum === True,
-        t3 = AbsoluteTime[];
-        plotRenderTime = (t3 - t2) * 1000;
-      ];
-      
-      (* ════════════════════════════════════════════════════════════════ *)
-      (* ПРОФИЛИРОВАНИЕ: Вывод результатов                                *)
-      (* ════════════════════════════════════════════════════════════════ *)
-      If[$DebugPlotPlasmonSpectrum === True,
-        Print["[PROFILE PlotPlasmonSpectrum]"];
-        Print["  Data preparation: ", Round[dataComputeTime, 0.1], " ms"];
-        Print["  Plot rendering: ", Round[plotRenderTime, 0.1], " ms"];
-        Print["  Total time: ", Round[(t3 - t1) * 1000, 0.1], " ms"];
-        Print["  NOTE: Actual computation happens during Plot evaluation"];
-      ];
-      plot
+        FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black]
     ]
   ];
 
@@ -275,35 +240,49 @@ PlotPotentialSlices3D[model_Association, opts:OptionsPattern[]] :=
   (* ════════════════════════════════════════════════════════════════ *)
   
   topology = model["Topology"];
-  hamiltonian = model["Analytical"]["Hamiltonian"];
   phi0 = QED`$Phi0Value;
   
   (* Независимые потоки *)
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ 
     Cases[topology["Nodes"], Except[topology["GroundNode"]]];
-  
+
   (* Проверка размерности *)
   If[Length[fluxVars] != 3,
     Message[PlotPotentialSlices3D::dimension, Length[fluxVars]];
     Return[$Failed]
   ];
-  
-  (* Потенциальная энергия U(φ) = H(q=0, φ) с подстановкой параметров *)
-  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
-  potential = potential /. model["SubstitutionRules"];
+
+  (* Достаем готовый символьный потенциал и применяем строгие правила текущей модели *)
+  potential = model["Analytical"]["Potential"] /. QED`Model`GetStaticRules[model];
   
   (* ════════════════════════════════════════════════════════════════ *)
   (* 2. ПОЛУЧЕНИЕ РАВНОВЕСНЫХ ТОЧЕК  *)
   (* ════════════════════════════════════════════════════════════════ *)
   
-  equilibria = QED`Model`GetCacheEntry[
-    model["Numerical"]["Cache"]["EquilibriumPoints"],
-    model
-  ];
-  
-  If[equilibria === $Failed || Length[equilibria["Solutions"]] == 0,
-    Message[PlotPotentialSlices3D::noequilibria];
-    Return[$Failed]
+  Module[{rawFluxes, fluxList},
+    (* 1. Достаем чистые векторы из новой архитектуры *)
+    rawFluxes = QED`Model`GetNumericalQuantity[model, "EquilibriumFluxes"];
+    
+    If[MissingQ[rawFluxes] || FailureQ[rawFluxes] || rawFluxes === {},
+      Message[PlotPotentialSlices3D::noequilibria];
+      Return[$Failed]
+    ];
+    
+    (* 2. Если вернулся один вектор (глобальный минимум), оборачиваем его в список *)
+    fluxList = If[VectorQ[rawFluxes, NumericQ], {rawFluxes}, rawFluxes];
+    
+    (* 3. Восстанавливаем структуру для графика, вычисляя энергию на лету *)
+    equilibria = <|
+      "Solutions" -> Map[
+        Function[pt,
+          <|
+            "Fluxes" -> Thread[fluxVars -> pt], 
+            "Energy" -> (potential /. Thread[fluxVars -> pt])
+          |>
+        ],
+        fluxList
+      ]
+    |>;
   ];
   
   (* ════════════════════════════════════════════════════════════════ *)
@@ -748,20 +727,21 @@ PlotFermiRates[model_Association, opts:OptionsPattern[]] := Module[
     Style["Total \!\(\*SubscriptBox[\(T\), \(1\)]\)\n(\[Mu]s)", Bold]
   };
 
-  rows = Table[
-    {
-      (* Теперь в первом столбце и индекс, и частота в ГГц *)
-      Row[{
-        Style["#" <> ToString[m], Bold], 
-        " (", 
-        N[freqs[[m]] / (2 Pi * 10^9), 3], 
-        " GHz)"
-      }],
-      formatTime[indGamma[[m]]],
-      formatTime[capGamma[[m]]],
-      formatTotalTime[totalT1[[m]]]
-    },
-    {m, modes}
+  Module[{ord = Ordering[freqs]},
+    rows = Table[
+      Module[{k = ord[[m]]},
+        {
+          Row[{
+            Style["#" <> ToString[m], Bold], 
+            " (", N[freqs[[k]] / (2 Pi * 10^9), 3], " GHz)"
+          }],
+          formatTime[indGamma[[k]]],
+          formatTime[capGamma[[k]]],
+          formatTotalTime[totalT1[[k]]]
+        }
+      ],
+      {m, 1, Min[Length[modes], Length[freqs]]}
+    ]
   ];
 
   Column[{
@@ -833,17 +813,21 @@ PlotDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
     Style["Total \!\(\*SubscriptBox[\(T\), \(\[Phi]\)]\)\n(s)", Bold]
   };
   
-  rows = Table[
-    {
-      Row[{
-        Style["#" <> ToString[m], Bold], 
-        " (", N[freqs[[m]] / (2 Pi * 10^9), 3], " GHz)"
-      }],
-      formatTime[gamma1[[m]]],
-      formatTime[gamma2[[m]]],
-      Style[formatTime[Sqrt[gamma1[[m]]^2 + gamma2[[m]]^2]], Bold] 
-    },
-    {m, nModes}
+  Module[{ord = Ordering[freqs]},
+    rows = Table[
+      Module[{k = ord[[m]]},
+        {
+          Row[{
+            Style["#" <> ToString[m], Bold], 
+            " (", N[freqs[[k]] / (2 Pi * 10^9), 3], " GHz)"
+          }],
+          formatTime[gamma1[[k]]],
+          formatTime[gamma2[[k]]],
+          Style[formatTime[Sqrt[gamma1[[k]]^2 + gamma2[[k]]^2]], Bold] 
+        }
+      ],
+      {m, 1, Min[nModes, Length[freqs]]}
+    ]
   ];
   
   Column[{
@@ -862,185 +846,17 @@ PlotDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
   }, Alignment -> Center]
 ];
 
-(* Копия PlotPlasmonSpectrum с заменой движка на GenerateFluxSweep *)
-PlotGenericFluxSweep[model_Association, opts:OptionsPattern[]] := 
-  Module[{freqFunc, nModes, range, scale, modeFreq, plot},
-    
-    (* 1. ИЗМЕНЕНИЕ: Используем GenerateFluxSweep вместо PlasmonFrequenciesVsFlux *)
-    (* Анализатор: просто достаем частоты из "прогретой" модели *)
-    freqFunc = QED`Numeric`GenerateFluxSweep[model, 
-        Function[{m}, QED`Model`GetNumericalQuantity[m, "PlasmonFrequencies"]]
-    ];
-
-    (* Проверка на ошибки инициализации *)
-    If[freqFunc === $Failed,
-      Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
-    ];
-
-    (* 2. ОПЦИИ: Берем те же, что у оригинала *)
-    nModes = OptionValue[PlotPlasmonSpectrum, {opts}, NumModes];
-    range = OptionValue[PlotPlasmonSpectrum, {opts}, FluxRange];
-    scale = Switch[OptionValue[PlotPlasmonSpectrum, {opts}, FrequencyUnit],
-      "GHz", 2 Pi * 10^9,
-      "MHz", 2 Pi * 10^6,
-      _, 1.
-    ];
-
-    (* 3. ОБРАБОТКА ДАННЫХ: Точно так же оборачиваем в modeFreq *)
-    Clear[modeFreq];
-    modeFreq[i_Integer][phi_?NumericQ] := Re[freqFunc[phi][[i]]] / scale;
-
-    (* 4. ГРАФИК: Полная копия стилей PlotPlasmonSpectrum *)
-    Plot[
-        Evaluate @ Table[modeFreq[i][phi], {i, nModes}],
-        {phi, range[[1]], range[[2]]},
-        
-        (* Легенда чуть отличается, чтобы понимать где что *)
-        PlotLegends -> Table[Row[{"Gen. Sweep ", Subscript["\[Omega]", i]}], {i, nModes}],
-        
-        (* Все визуальные настройки 1-в-1 как в оригинале *)
-        Frame -> True,
-        FrameLabel -> {
-          "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)",
-          "Frequency (GHz)"
-        },
-        PlotRange -> All,
-        PlotPoints -> 25,
-        MaxRecursion -> 1,
-        AspectRatio -> 0.6,
-        ImageSize -> 600,
-        TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
-        
-        (* СТИЛЬ: Те же цвета и толщина, но добавили Dashed для отличия *)
-        PlotStyle -> {
-          Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.006], Dashed],  (* Синий пунктир *)
-          Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006], Dashed]    (* Оранжевый пунктир *)
-        },
-        
-        FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-        FrameLabel -> {
-          Style[Subscript["Φ", "ext"] / Subscript["Φ", "0"], 16],
-          Style["Frequency (GHz)", 16]
-        }
-        
-        (* ,opts *)
-    ]
-  ];
-
 PlotRelaxationTime[model_Association, opts:OptionsPattern[]] := 
-  Module[{t1DataFunc, nModes, range, channel, modeT1, labelSub, isRate},
+  Module[{
+    nModes, range, logRange, timeRange, channel, labelSub, 
+    nodes, numNodes, fluxVars, chargeVars, hbar,
+    currentOpNum, currentGradient, voltageOpsNum, voltageOp, voltageGradient, portNode,
+    mInd, rInd, cCap, rCap,
+    sweepFunc, computeT1, lastPhi = "Init", lastRates = {}, getRate
+  },
     
-    (* 1. Получаем настройки *)
+    (* 1. Опции графика *)
     channel = OptionValue["RelaxationChannel"];
-    nModes = OptionValue[NumModes];
-    range = OptionValue[FluxRange];
-    logRange = OptionValue["LogTimeRange"];
-
-    (* Преобразуем степени в реальные значения для PlotRange *)
-    timeRange = If[ListQ[logRange] && Length[logRange] == 2,
-        {10.^logRange[[1]], 10.^logRange[[2]]},
-        All (* Fallback, если формат нарушен *)
-    ];
-
-    (* Определяем, нужно ли инвертировать (Rate -> Time) *)
-    isRate = StringContainsQ[channel, "Rate", IgnoreCase -> True];
-    
-    If[!IntegerQ[nModes], nModes = 1]; 
-    If[!ListQ[range], range = {-0.5, 0.5}];
-
-    (* 2. Подготовка функции свипа *)
-    t1DataFunc = QED`Numeric`GenerateFluxSweep[model, 
-        Function[{m}, 
-            Module[{rates, rawData},
-                (* Вызов функции расчета *)
-                rates = QED`Numeric`CalculateFermiRates[m];
-                
-                (* Извлечение данных по ключу *)
-                rawData = rates[channel];
-                
-                (* Если это Rate (Гц), а мы хотим T1 (с), нужно инвертировать.
-                   Если это уже Time (TotalT1), оставляем как есть. *)
-                If[isRate,
-                    Map[If[TrueQ[# > 10^-20], 1.0/#, Infinity] &, rawData],
-                    rawData
-                ]
-            ]
-        ]
-    ];
-
-    If[t1DataFunc === $Failed,
-      Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
-    ];
-
-    (* 3. Обертка данных *)
-    modeT1[i_Integer][phi_?NumericQ] := 
-      Module[{val},
-        val = t1DataFunc[phi][[i]];
-        (* Фильтр для LogPlot: убираем бесконечности и нули *)
-        If[!NumericQ[val] || val <= 0 || val === Infinity, Null, val]
-      ];
-
-    (* 4. Подготовка подписи *)
-    labelSub = Switch[channel,
-        "InductiveRelaxationRate", "ind",
-        "CapacitiveRelaxationRate", "cap",
-        "TotalT1", "tot",
-        _, "x"
-    ];
-
-    (* 5. ГРАФИК *)
-    Plot[
-        Evaluate @ Table[modeT1[i][phi], {i, nModes}],
-        {phi, range[[1]], range[[2]]},
-        
-        ScalingFunctions -> "Log10",
-        
-        (* Диапазон под T1 (секунды) *)
-        PlotRange -> {Automatic, {10^(-8), 10^(2)}}, 
-        
-        Axes -> True,
-        Frame -> False,
-        
-        AxesLabel -> {
-            Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
-            Style[Subscript["T", "1"], FontFamily -> "Times New Roman", Large],
-            FormatType -> TraditionalForm
-        }, 
-        AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
-        MeshFunctions -> Function[{x, y}, y],
-        
-        ImageSize -> 600, 
-        
-        PlotLegends -> Placed[
-            Table[
-                Row[{
-                   Subscript["T", "1"]^labelSub,
-                   " (", 
-                   Subscript[Style["|1\[RightAngleBracket]", Italic], i],
-                   " \[Rule] ", 
-                   Style["|0\[RightAngleBracket]", Italic], 
-                   ")"
-                }], 
-                {i, nModes}
-            ],
-            Right
-        ],
-        
-        PlotStyle -> {
-            Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
-            Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
-        },
-        
-        MaxRecursion -> ControlActive[2, 6], 
-        PlotPoints -> ControlActive[20, 80]
-
-        (* ,opts *)
-    ]
-  ];
-
-PlotDephasingTime[model_Association, opts:OptionsPattern[]] := 
-  Module[{tPhiFunc, nModes, range, logRange, timeRange, modeTphi},
-    
     nModes = OptionValue[NumModes];
     range = OptionValue[FluxRange];
     logRange = OptionValue["LogTimeRange"];
@@ -1049,42 +865,99 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
         {10.^logRange[[1]], 10.^logRange[[2]]},
         All
     ];
-
+    
     If[!IntegerQ[nModes], nModes = 1]; 
     If[!ListQ[range], range = {-0.5, 0.5}];
 
-    (* Генератор свипа *)
-    tPhiFunc = QED`Numeric`GenerateFluxSweep[model, 
-        Function[{m}, 
-            Module[{res},
-                res = QED`Numeric`CalculateDephasingRates[m, 
-                    FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]]
-                ];
-                (* Возвращаем список времен (числа или Infinity) *)
-                If[FailureQ[res], ConstantArray[Infinity, nModes], res["DephasingTime"]]
-            ]
-        ]
+    (* 2. Извлекаем статические параметры и градиенты операторов (1 раз до цикла) *)
+    nodes = Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]];
+    numNodes = Length[nodes];
+    fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+    chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+    hbar = QED`$hbarValue;
+    
+    (* Параметры шума (берем дефолты из CalculateFermiRates) *)
+    mInd = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "MutualInductance"];
+    rInd = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "InductiveLineResistance"];
+    cCap = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "CouplingCapacitance"];
+    rCap = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "CapacitiveLineResistance"];
+    portNode = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "PortNode"];
+
+    (* Операторы *)
+    currentOpNum = QED`Model`GetNumericalQuantity[model, "CurrentOperatorNumerical"];
+    If[FailureQ[currentOpNum], currentOpNum = 0];
+    currentGradient = D[currentOpNum, {fluxVars}]; 
+    
+    voltageOpsNum = QED`Model`GetNumericalQuantity[model, "VoltageOperatorsNumerical"];
+    If[FailureQ[voltageOpsNum], voltageOpsNum = <||>];
+    voltageOp = If[KeyExistsQ[voltageOpsNum, portNode], voltageOpsNum[portNode], 0];
+    voltageGradient = D[voltageOp, {chargeVars}];
+
+    (* 3. Создаем новый JIT-конвейер для диагонализации *)
+    sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "HarmonicDiagonalization"];
+    If[sweepFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: JIT Sweep generation failed.", {0,0}]}]]
     ];
 
-    If[tPhiFunc === $Failed,
-      Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
-    ];
-
-    (* Обертка для Plot *)
-    modeTphi[i_Integer][phi_?NumericQ] := 
-      Module[{valVec, val},
-        valVec = tPhiFunc[phi];
-        If[i > Length[valVec], Return[Null]];
+    (* 4. Внутренняя функция расчета T1 по свежим матрицам *)
+    computeT1[phi_] := Module[
+      {diag, freqs, caps, Nmat, Mmat, rates, w, fZPF, cZPF, iElem, vElem, gInd, gCap, gTot, targetRate, ord, k},
+      
+      diag = sweepFunc[phi];
+      If[FailureQ[diag], Return[ConstantArray[Null, nModes]]];
+      
+      freqs = diag["NormalModeFrequencies"];
+      caps = diag["EffectiveCapacitances"];
+      Nmat = diag["FluxTransform"];
+      Mmat = diag["ChargeTransform"];
+      
+      (* ПОЛУЧАЕМ ИНДЕКСЫ ПО ВОЗРАСТАНИЮ ЧАСТОТЫ *)
+      ord = Ordering[freqs];
+      
+      rates = Table[
+        k = ord[[idx]]; (* Берем физически правильную моду *)
+        w = freqs[[k]];
         
-        val = valVec[[i]];
-        
-        (* Infinity превращаем в Null (разрыв линии) *)
-        If[!NumericQ[val] || val <= 0 || val === Infinity, Null, val]
+        If[TrueQ[w == 0], 
+           Null,
+           fZPF = Sqrt[hbar / (2.0 * caps[[k]] * w)];
+           cZPF = Sqrt[(hbar * caps[[k]] * w) / 2.0];
+           
+           iElem = Sum[currentGradient[[n]] * Nmat[[n, k]] * fZPF, {n, 1, numNodes}];
+           vElem = Sum[voltageGradient[[n]] * (-I * Mmat[[n, k]] * cZPF), {n, 1, numNodes}];
+           
+           gInd = (2.0 * w * mInd^2 * Abs[iElem]^2) / (hbar * rInd);
+           gCap = (2.0 * rCap * cCap^2 * w * Abs[vElem]^2) / hbar;
+           gTot = gInd + gCap;
+           
+           targetRate = Switch[channel,
+               "InductiveRelaxationRate", gInd,
+               "CapacitiveRelaxationRate", gCap,
+               "TotalT1", gTot,
+               _, gTot
+           ];
+           
+           If[targetRate < 1.0*^-20, Null, 1.0 / targetRate]
+        ],
+        {idx, 1, nModes}
       ];
+      rates
+    ];
 
-    (* График *)
+    (* 5. Умный кэш для Plot (чтобы не диагонализовать 2 раза для одной точки X) *)
+    getRate[i_Integer, phi_?NumericQ] := (
+       If[phi =!= lastPhi,
+          lastPhi = phi;
+          lastRates = computeT1[phi];
+       ];
+       If[i <= Length[lastRates], lastRates[[i]], Null]
+    );
+
+    labelSub = Switch[channel, "InductiveRelaxationRate", "ind", "CapacitiveRelaxationRate", "cap", "TotalT1", "tot", _, "x"];
+
+    (* 6. График *)
     Plot[
-        Evaluate @ Table[modeTphi[i][phi], {i, nModes}],
+        Evaluate @ Table[getRate[i, phi], {i, nModes}],
         {phi, range[[1]], range[[2]]},
         
         ScalingFunctions -> "Log10",
@@ -1092,24 +965,19 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
         
         Axes -> True,
         Frame -> False,
-        
         AxesLabel -> {
             Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
-            Style[Subscript["T", "\[Phi]"], FontFamily -> "Times New Roman", Large],
-            FormatType -> TraditionalForm
+            Style[Subscript["T", "1"], FontFamily -> "Times New Roman", Large]
         }, 
         AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        MeshFunctions -> Function[{x, y}, y],
         ImageSize -> 600, 
         
         PlotLegends -> Placed[
             Table[
                 Row[{
-                   Subscript["T", "\[Phi]"],
-                   " (", 
-                   Subscript[Style["|1\[RightAngleBracket]", Italic], i],
-                   " \[Rule] ", 
-                   Style["|0\[RightAngleBracket]", Italic], 
-                   ")"
+                   Subscript["T", "1"]^labelSub,
+                   " (", Subscript[Style["|1\[RightAngleBracket]", Italic], i], " \[Rule] ", Style["|0\[RightAngleBracket]", Italic], ")"
                 }], 
                 {i, nModes}
             ],
@@ -1120,81 +988,167 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
             Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
             Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
         },
-        MaxRecursion -> ControlActive[2, 6], 
-        PlotPoints -> ControlActive[20, 80]
+        
+        MaxRecursion -> 2, 
+        PlotPoints -> 50
+    ]
+  ];
+
+PlotDephasingTime[model_Association, opts:OptionsPattern[]] := 
+  Module[{
+    nModes, range, logRange, timeRange, modeTphi,
+    A, logFac, h,
+    sweepFunc, computeTPhi, lastPhi = "Init", lastTimes = {}, getTPhi
+  },
+    
+    (* 1. Опции графика *)
+    nModes = OptionValue[NumModes];
+    range = OptionValue[FluxRange];
+    logRange = OptionValue["LogTimeRange"];
+    
+    timeRange = If[ListQ[logRange] && Length[logRange] == 2,
+        {10.^logRange[[1]], 10.^logRange[[2]]},
+        All
+    ];
+    
+    If[!IntegerQ[nModes], nModes = 1]; 
+    If[!ListQ[range], range = {-0.5, 0.5}];
+
+    (* 2. Извлекаем параметры шума из дефолтных опций CalculateDephasingRates *)
+    A = OptionValue[QED`Numeric`CalculateDephasingRates, FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]], "FluxNoiseAmplitude"];
+    logFac = OptionValue[QED`Numeric`CalculateDephasingRates, FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]], "PinkNoiseLogFactor"];
+    h = OptionValue[QED`Numeric`CalculateDephasingRates, FilterRules[{opts}, Options[QED`Numeric`CalculateDephasingRates]], "FluxStep"];
+
+    (* 3. Создаем ОДИН JIT-конвейер для частот *)
+    sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "PlasmonFrequencies"];
+
+    If[sweepFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: JIT Sweep generation failed.", {0,0}]}]]
+    ];
+
+    (* 4. Внутренняя функция: берет частоты из JIT и сама считает производные *)
+    computeTPhi[phi_] := Module[
+      {w0, wPlus, wMinus, d1, d2, gamma1, gamma2, gTot, ord, k},
+      
+      w0 = sweepFunc[phi];
+      wPlus = sweepFunc[phi + h];
+      wMinus = sweepFunc[phi - h];
+      
+      If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], Return[ConstantArray[Null, nModes]]];
+      
+      ord = Ordering[w0];
+      
+      Table[
+         k = ord[[idx]]; (* Берем правильный индекс *)
+         If[TrueQ[w0[[k]] == 0], 
+            Null,
+            d1 = (wPlus[[k]] - wMinus[[k]]) / (2 * h);
+            d2 = (wPlus[[k]] - 2*w0[[k]] + wMinus[[k]]) / (h^2);
+            
+            gamma1 = A * logFac * Abs[d1];
+            gamma2 = (A^2) * logFac * Abs[d2];
+            gTot = Sqrt[gamma1^2 + gamma2^2];
+            
+            If[gTot < 1.0*^-20 || !NumericQ[gTot], Null, 1.0 / gTot]
+         ],
+         {idx, 1, nModes}
+      ]
+    ];
+
+    (* 5. Умный локальный кэш, чтобы не считать точки дважды для многомодовых графиков *)
+    getTPhi[i_Integer, phi_?NumericQ] := (
+       If[phi =!= lastPhi,
+          lastPhi = phi;
+          lastTimes = computeTPhi[phi];
+       ];
+       If[i <= Length[lastTimes], lastTimes[[i]], Null]
+    );
+
+    (* 6. График *)
+    Plot[
+        Evaluate @ Table[getTPhi[i, phi], {i, nModes}],
+        {phi, range[[1]], range[[2]]},
+        
+        ScalingFunctions -> "Log10",
+        PlotRange -> {Automatic, timeRange}, 
+        
+        Axes -> True,
+        Frame -> False,
+        AxesLabel -> {
+            Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
+            Style[Subscript["T", "\[Phi]"], FontFamily -> "Times New Roman", Large]
+        }, 
+        AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        MeshFunctions -> Function[{x, y}, y],
+        ImageSize -> 600, 
+        
+        PlotLegends -> Placed[
+            Table[
+                Row[{
+                   Subscript["T", "\[Phi]"],
+                   " (", Subscript[Style["|1\[RightAngleBracket]", Italic], i], " \[Rule] ", Style["|0\[RightAngleBracket]", Italic], ")"
+                }], 
+                {i, nModes}
+            ],
+            Right
+        ],
+        
+        PlotStyle -> {
+            Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
+            Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
+        },
+        
+        MaxRecursion -> 2, 
+        PlotPoints -> 50
     ]
 ];
 
-PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] := 
- Module[{cacheEntry, sNumExpr, sVar, plotFunc, measure, color, label},
+PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] := 
+ Module[{measure, sIndex, color, label, phiExt, sMatrixAtPhi, plotFunc, plotPoints, fMin, fMax},
   
+  {fMin, fMax} = OptionValue["FrequencyRange"];
   measure = OptionValue["Measurement"];
+  plotPoints = OptionValue[PlotPoints];
+  sIndex = If[measure === "S11", {1, 1}, {2, 1}];
+
+  (* 1. Получаем текущий внешний поток *)
+  phiExt = (QED`$PhiExt /. QED`Model`GetStaticRules[model]) / QED`$Phi0Value;
   
-  (* 1. Достаем закэшированную функцию (Полусимвольную) *)
-  cacheEntry = model["Numerical"]["Cache"]["SMatrixNumerical"];
-
-  If[MissingQ[cacheEntry] || Lookup[cacheEntry, "State"] =!= "Ready",
-     Return[Graphics[{
-        Red, 
-        Text[Style["S-Matrix not ready.\nRun Analysis first.", 14], {0,0}]
-     }, ImageSize -> 400, Frame -> True]]
-  ];
-
-  sNumExpr = cacheEntry["Value"];         (* Матрица {{S11, S12}, {S21, S22}} *)
-  sVar = cacheEntry["FrequencyVariable"]; (* Символ 's' *)
-
-  (* 2. Формируем функцию для Plot *)
-  (* S11 = [[1,1]], S21 = [[2,1]] *)
-  (* Подставляем s -> I * 2Pi * f * 10^9. Plot будет вызывать это адаптивно. *)
-  plotFunc = Switch[measure,
-     "S11", Function[fGHz, Abs[ sNumExpr[[1, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]],
-     "S21", Function[fGHz, Abs[ sNumExpr[[2, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]],
-     _, Return[$Failed]
-  ];
-
-  (* 3. Настройка стилей (как в PlotPlasmonSpectrum) *)
-  color = Switch[measure, 
-     "S11", RGBColor[0.12, 0.47, 0.71], (* Синий *)
-     _, RGBColor[1.0, 0.50, 0.05]       (* Оранжевый *)
-  ];
+  (* 2. Используем JIT-конвейер *)
+  sMatrixAtPhi = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"][phiExt];
   
+  If[sMatrixAtPhi === $Failed,
+     Return[Graphics[{Red, Text[Style["S-Matrix engine failed.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+
+  (* 3. Защищенная функция (принимает только числа) *)
+  plotFunc[fGHz_?NumericQ] := Abs[ sMatrixAtPhi[fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+
+  color = Switch[measure, "S11", RGBColor[0.12, 0.47, 0.71], _, RGBColor[1.0, 0.50, 0.05]];
   label = Switch[measure, "S11", "|S11| (Reflection)", _, "|S21| (Transmission)"];
 
-  (* 4. Рисуем красивый Plot *)
+  (* 4. Отрисовка *)
   Plot[plotFunc[f], {f, fMin, fMax},
-     
-     (* Оформление 1-в-1 как у других графиков *)
      Frame -> True,
-     FrameLabel -> {
-         Style["Frequency (GHz)", 16], 
-         Style["Magnitude |S|", 16]
-     },
+     FrameLabel -> {Style["Frequency (GHz)", 16], Style["Magnitude |S|", 16]},
      FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
      TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
-     
-     PlotRange -> {0, 1.02}, (* Линейная шкала 0..1 с небольшим запасом *)
+     PlotRange -> {0, 1.02}, 
      PlotStyle -> Directive[color, Thickness[0.006]],
-     
-     GridLines -> Automatic,
-     AspectRatio -> 0.6,
-     ImageSize -> 600,
+     GridLines -> Automatic, AspectRatio -> 0.6, ImageSize -> 600,
      PlotLabel -> Style[label, 14, FontFamily -> "Times"],
-     
-     (* Качество *)
-     MaxRecursion -> 4,
-     PlotPoints -> 500
+     MaxRecursion -> 10, PlotPoints -> plotPoints
   ]
  ];
 
-PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, opts:OptionsPattern[]] := 
+PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   Module[{
     fMin, fMax, fluxRange, measure, plotPoints, colFunc,
-    sIndex, label, legendLabel, analyzerFunc, sweepFunc,
-    plot, legend
+    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend
   },
   
-  {fMin, fMax} = range;
-  fluxRange = OptionValue[FluxRange];
+  {fMin, fMax} = OptionValue["FrequencyRange"];
+  fluxRange = OptionValue["FluxRange"];
   measure = OptionValue["Measurement"];
   plotPoints = OptionValue[PlotPoints];
   colFunc = OptionValue[ColorFunction];
@@ -1203,50 +1157,140 @@ PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, o
   label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
   legendLabel = If[measure === "S11", "|S11|", "|S21|"];
 
-  analyzerFunc = Function[{tempModel},
-      Function[{fGHz}, Abs[QED`Scattering`CalculateSParameter[tempModel, fGHz * 10^9, sIndex]]]
-  ];
-  sweepFunc = QED`Numeric`GenerateFluxSweep[model, analyzerFunc];
+  (* 1. Используем JIT-конвейер *)
+  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"];
 
   If[sweepFunc === $Failed,
       Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
   ];
 
-  (* 1. Чистый график *)
+  (* 2. Защищенная функция (принимает только числа) *)
+  plotFunc[phiVal_?NumericQ, fGHz_?NumericQ] := 
+    Abs[ sweepFunc[phiVal][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+
+  (* 3. Чистый вызов DensityPlot без хэш-оберток *)
   plot = DensityPlot[
-     sweepFunc[phi][f], 
-     {phi, fluxRange[[1]], fluxRange[[2]]}, 
-     {f, fMin, fMax},
-     
-     PlotPoints -> plotPoints,
-     PlotRange -> {0, 1.05}, 
-     ColorFunction -> colFunc,
-     Frame -> True,
-     FrameLabel -> OptionValue[FrameLabel],
-     FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-     PlotLabel -> Style[label, 16, FontFamily -> "Times"],
-     PlotLegends -> None, 
-     ImageSize -> 600,
-     MaxRecursion -> 1
+      plotFunc[phi, f], 
+      {phi, fluxRange[[1]], fluxRange[[2]]}, 
+      {f, fMin, fMax},
+      
+      PlotPoints -> {100, 400}, (* {400, 1500} *)
+      Exclusions -> None,
+      PerformanceGoal -> "Quality",
+
+      PlotRange -> {0, 1.05}, 
+      ColorFunction -> colFunc,
+      Frame -> True,
+      FrameLabel -> OptionValue[FrameLabel],
+      FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+      PlotLabel -> Style[label, 16, FontFamily -> "Times"],
+      PlotLegends -> None, 
+      ImageSize -> 600,
+      MaxRecursion -> 2
   ];
 
-  (* 2. Чистая векторная легенда *)
+  (* 4. Исправленная легенда без несуществующих опций *)
   legend = BarLegend[
       {colFunc, {0, 1.05}},
       LegendLabel -> Style[legendLabel, FontSize -> 16, FontFamily -> "Times"],
       LabelStyle -> Directive[Black, 14, FontFamily -> "Times"],
-      LegendMarkerSize -> {20, 300},
-      
-      (* Эти опции нужны для корректного отображения в блокноте *)
-      Frame -> False,
-      Axes -> False,
-      LegendFunction -> None
+      LegendMarkerSize -> {20, 300}
   ];
 
-  (* 3. Возвращаем семантический объект *)
+  (* Сборка графика и легенды *)
   Legended[plot, Placed[legend, Right]]
 ];
 
+PlotSpectroscopyScanner[model_Association, opts:OptionsPattern[]] := 
+  Module[{
+      truncationDim = 5, (* Оптимизация для UI: 5 уровней на моду *)
+      numLevels = 8,     (* Показываем первые 8 собственных чисел *)
+      basis, fluxOps, hTotal, 
+      evals, evecs, energies, states,
+      numModes, nOps, groundEnergy, hbar,
+      rows, freqStr, assignStr, nVals, rowStyle,
+      diagData
+  },
+    
+    (* 1. ПОЛУЧЕНИЕ ДАННЫХ МОДЕЛИ *)
+    diagData = QED`Model`GetNumericalQuantity[model, "HarmonicDiagonalization"];
+    If[MissingQ[diagData] || FailureQ[diagData], 
+       Return[Panel[Style["Model analysis failed. Check parameters.", Red], ImageSize -> {300, 50}]]
+    ];
+    
+    numModes = Length[diagData["NormalModeFrequencies"]];
+    If[numModes == 0, Return[Panel["No modes found."]]];
+
+    (* 2. ВЫЧИСЛЕНИЕ ГАМИЛЬТОНИАНА *)
+    Quiet[
+        basis = QED`Numeric`GetBasisOperators[ConstantArray[truncationDim, numModes]];
+        fluxOps = QED`Numeric`ConstructFluxOperators[model, basis];
+        hTotal = QED`Numeric`BuildNumericalHamiltonian[model, basis, fluxOps];
+    ];
+
+    (* Защита от комплексных значений *)
+    If[!FreeQ[hTotal, Complex], 
+       Return[Panel[Style["Error: Hamiltonian is Complex!", Red, Bold]]]
+    ];
+
+    (* 3. ДИАГОНАЛИЗАЦИЯ *)
+    {evals, evecs} = Eigensystem[hTotal, -numLevels];
+    
+    (* Сортировка по возрастанию энергии *)
+    With[{ord = Ordering[evals]},
+        energies = evals[[ord]];
+        states = evecs[[ord]];
+    ];
+
+    groundEnergy = energies[[1]];
+    
+    (* Операторы числа фотонов для анализа состава состояний *)
+    nOps = Table[basis["ad"][[k]] . basis["a"][[k]], {k, numModes}];
+    hbar = QED`$hbarValue;
+
+    (* 4. ФОРМАТИРОВАНИЕ ТАБЛИЦЫ *)
+    rows = {{
+        Style["Idx", Bold], 
+        Style["Freq (GHz)", Bold], 
+        Sequence @@ Table[Style["<n" <> ToString[k] <> ">", Bold], {k, numModes}],
+        Style["State", Bold]
+    }};
+    
+    Do[
+        (* Вычисляем средние числа заполнения <n> для каждой моды *)
+        nVals = Table[Re[states[[i]] . nOps[[k]] . states[[i]]], {k, numModes}];
+        
+        (* Частота перехода 0 -> i в ГГц *)
+        freqStr = NumberForm[(energies[[i]] - groundEnergy) / hbar / 2. / Pi / 10^9, {5, 3}];
+        
+        (* Строковое представление состояния, например |0,1,0> *)
+        assignStr = "|" <> StringRiffle[Round[nVals], ","] <> ">";
+        
+        (* Логика валидации: Если основное состояние (Idx=1) содержит фотоны -> ОШИБКА *)
+        rowStyle = If[i == 1 && Total[nVals] > 0.15, Red, Black];
+        
+        AppendTo[rows, {
+            Style[i, rowStyle],
+            Style[freqStr, rowStyle],
+            Sequence @@ (Style[NumberForm[#, {3, 2}], rowStyle] & /@ nVals),
+            Style[assignStr, rowStyle]
+        }];
+    , {i, Length[energies]}];
+
+    (* Возврат Grid *)
+    Column[{
+       Text[Style["Spectroscopy Scanner", 16, FontFamily -> "Helvetica"]],
+       Text[Style["(Real-time update)", Gray, 10]],
+       Spacer[5],
+       Grid[rows, 
+            Frame -> All, 
+            Background -> {None, {1 -> LightGray}}, 
+            ItemStyle -> {Automatic, Automatic},
+            Alignment -> {Center, Center},
+            Spacings -> {1.2, 0.8}
+       ]
+    }, Alignment -> Center]
+  ];
 
 End[];
 EndPackage[];

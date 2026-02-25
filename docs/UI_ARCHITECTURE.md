@@ -1,86 +1,215 @@
-# QED Package: GUI Architecture & QubitDashboard
+# QED Interactive UI Architecture (`Interactive.wl`)
 
-This document describes the internal architecture of the `QubitDashboard` and the `Interactive` module. It focuses on the event-driven update model designed to handle computationally intensive tasks (like $T_1$ relaxation or 3D potential landscapes) without freezing the user interface or triggering `$Aborted` timeouts.
+Этот документ описывает архитектуру и внутреннее устройство пользовательского интерфейса (UI) модуля QED. Интерфейс построен на парадигме **Handle-based State Management** (управление состоянием через идентификаторы) и использует строгую синхронизацию потоков для предотвращения зависаний графического интерфейса Mathematica (FrontEnd).
 
-## 1. Core Philosophy: Event-Driven vs. Reactive
+## 1. Концепция управления состоянием (Handle-based Architecture)
 
-Standard Wolfram Language `Manipulate` or `Dynamic` interfaces are **reactive**: any change in a variable immediately triggers a re-evaluation. While simple, this approach fails for heavy computations because `Dynamic` evaluations run on the **Preemptive Link**, which has a strict time limit (typically 5-6 seconds).
+Исторически UI зависел от глобальной переменной `$CurrentModel`. Это приводило к рассинхронизации данных, багам кэширования и утечкам памяти. 
+В новой архитектуре интерфейс **вообще не хранит в себе полные данные моделей**.
 
-The **QED Dashboard** uses an **Event-Driven** architecture with explicit state management.
-
-### Key Concepts
-1.  **View (Dynamic)**: Purely passive. It only renders the current state stored in `plotCache`. It never initiates computation.
-2.  **Controller (Button/Sliders)**: Initiates computation explicitly.
-3.  **State (Cache)**: Acts as a buffer between calculation and rendering.
+Вместо этого используется подход, аналогичный указателям (handles) в C++:
+1. При запуске `QubitDashboard` все переданные модели регистрируются в защищенном глобальном словаре Ядра (`QED`Model`Private`$ModelRegistry`).
+2. Дашборд получает и сохраняет только массив строковых идентификаторов (UUID), например: `{"model-5a45...", "model-b712..."}`.
+3. Все элементы UI (кнопки, ползунки, пресеты) общаются с Ядром **только передавая этот UUID**. Они просят Ядро: *"Обнови параметр X у модели с ID Y"* или *"Посчитай график Z для модели Y"*.
+4. **Безопасность памяти:** При удалении ячейки или закрытии окна дашборда срабатывает встроенный триггер `Deinitialization`, который гарантированно удаляет эти UUID из реестра, предотвращая утечку оперативной памяти (Memory Leak).
 
 ---
 
-## 2. Thread Management: Solving `$Aborted`
+## 2. Реестр графиков (`$PlotRegistry`)
 
-To prevent timeouts during heavy calculations (e.g., finding equilibrium in a complex flux landscape), we utilize the **Main Link** via `Method -> "Queued"`.
+Все графики, метрики и инспекторы, доступные в дашборде, не зашиты жестко в код интерфейса. Они регистрируются динамически через функцию `RegisterPlot`.
 
-### The Update Mechanism (`performUpdate`)
+### Структура $PlotRegistry
+Каждый график описывается ассоциацией со следующими полями:
+* `"Label"` — удобочитаемое имя для выпадающего списка.
+* `"Type"` — категория нагрузки (`"Light"` или `"Heavy"`). Это критически важный параметр для UX (см. раздел "Отрисовка и Синхронизация").
+* `"Compute"` — чистая (pure) функция, которая принимает локальную копию модели (`m`) и возвращает объект `Graphics`, `Grid` или `Pane`.
 
-The update logic is encapsulated in a local function `performUpdate`:
+### Категории нагрузки (Light vs Heavy)
+Разделение на типы введено для защиты канала связи (WSTP) между Ядром и FrontEnd-ом от переполнения:
+* **`"Light"` (Легкие):** Графики, которые Ядро может вычислить быстрее чем за 50-100 мс (например, спектр плазмонов с JIT-компиляцией). Для таких графиков UI **не показывает** индикатор загрузки ("Computing..."), чтобы избежать неприятного визуального мерцания (flickering) и спама в очередь пакетов.
+* **`"Heavy"` (Тяжелые):** Графики, требующие секунд или минут на вычисление (например, 3D-потенциал или S-матрица). Для них интерфейс физически блокируется (становится серым), показывает спиннер загрузки и запускает расчет в асинхронном режиме (`Method -> "Queued"`), чтобы избежать 5-секундного таймаута (Preemptive Evaluation Timeout).
 
-```wolfram
-performUpdate = Function[{},
-    (* 1. Immediate Feedback *)
-    plotCache[selectedPlotId] = "Computing...";
-    FinishDynamic[]; (* FORCE UI update before computation starts *)
-    
-    (* 2. Heavy Computation *)
-    Module[{res, updatedModel},
-       {res, updatedModel} = ComputePlotData[...];
-       plotCache[selectedPlotId] = res; (* Update State *)
-    ]
-];
+---
+
+## 3. Worker вычислений (`ComputePlotData`)
+
+Функция `ComputePlotData[plotId_String, modelId_String]` является единственным мостом между математическим Ядром и UI. Её задача — безопасно подготовить данные и отрендерить кадр.
+
+**Жизненный цикл одного вызова:**
+1. **Извлечение:** Получает сырую ассоциацию модели из `$ModelRegistry` по `modelId`.
+2. **Прогрев JIT (Cache Warmup):** Делает холостой вызов `GetNumericalQuantity`, заставляя Ядро рассчитать и закэшировать тяжелые тензоры (например, равновесные точки). *Важно: Ядро само атомарно обновляет кэш внутри `$ModelRegistry`, UI в этом не участвует.*
+3. **Обновление:** Забирает *свежую* копию модели из реестра, которая теперь содержит заполненный бинарный кэш.
+4. **Рендер:** Передает свежую модель в функцию `"Compute"` из реестра графиков и возвращает готовую картинку фронтенду.
+
+## 4. Главный цикл рендера (QubitDashboard)
+
+Функция `QubitDashboard` — это контейнер `DynamicModule`, который хранит локальное состояние (State) конкретного окна интерфейса. Важно понимать, что переменные внутри `DynamicModule` управляют **только отображением**, но не физикой модели.
+
+**Ключевые локальные переменные:**
+* `modelIds` — список зарегистрированных UUID моделей, переданных при запуске.
+* `currentModelId` — ID модели, выбранной в данный момент в левом меню (SetterBar).
+* `plotCache` — ассоциация-словарь, где хранятся уже вычисленные графики (или текстовые заглушки), чтобы не пересчитывать их при простом изменении размеров окна.
+* `isComputing` — логический флаг (мьютекс), блокирующий интерфейс во время расчетов.
+* `uiTick` — целочисленный счетчик (триггер), изменение которого принудительно обновляет экран.
+
+---
+
+## 5. Синхронизация потоков и защита от Race Conditions
+
+Поскольку математическое Ядро (Kernel) и графический интерфейс (FrontEnd) в Mathematica работают асинхронно через сетевой сокет (протокол WSTP), интерфейс подвержен состояниям гонки (Race Conditions). 
+
+### Мьютекс isComputing (Защита от спама)
+Главная функция обновления экрана — `performUpdate[]`. В её начале стоит жесткий замок:
+```mathematica
+If[isComputing, Return[]]; 
+isComputing = True;
+(* ... расчеты ... *)
+isComputing = False;
 ```
+Этот паттерн решает классический **"Баг двойного клика"**: если пользователь быстро нажмет кнопку *Update* 10 раз или будет агрессивно дергать ползунок, интерфейс проигнорирует все клики, кроме первого. Это спасает очередь WSTP от переполнения и предотвращает зависание фронтенда.
 
-* **`FinishDynamic[]`**: This is critical. It forces the FrontEnd to draw the "Computing..." spinner *before* the kernel gets busy. Without this, the UI would freeze showing the old plot.
-* **Blocking Behavior**: While `performUpdate` runs, the UI is effectively "frozen" (watch cursor). In this scientific context, this is a **feature**, ensuring atomicity (the user cannot change parameters while the model is inconsistent).
+### Режим Queued vs Preemptive
+* **Preemptive (Приоритетный):** Используется ползунками и выпадающими списками. Имеет жесткий лимит времени (около 5 секунд). Если Ядро думает дольше, FrontEnd обрывает вычисление (Abort), ломая интерфейс.
+* **Queued (Очередь):** Используется кнопкой *Update Plot*. Не имеет лимита времени.
+
+Именно поэтому тяжелые графики нельзя считать при движении ползунка (они вызовут Preemptive Timeout). Вместо этого ползунок лишь помечает кэш как `Missing["Stale"]`, а реальный расчет запускается безопасной кнопкой *Update*.
 
 ---
 
-## 3. Sliders & Controls Logic
+## 6. Механизм триггеров (uiTick)
 
-The dashboard implements a "Lazy Update" pattern to distinguish between "Light" (fast) and "Heavy" (slow) plots.
+В Mathematica функция `Dynamic` обновляется только тогда, когда изменяются отслеживаемые ею переменные (`TrackedSymbols`). Чтобы не заставлять FrontEnd следить за огромными структурами данных, мы используем паттерн "Tick-Trigger".
 
-### Plot Classification
-Plots are registered via `RegisterPlot` with a type:
-* **"Light"**: Instant calculation (e.g., Plasmon Spectrum).
-* **"Heavy"**: Requires numerical optimization or matrix integration (e.g., Relaxation Time, Wavefunctions).
+Единственная переменная, за которой следит главная область отрисовки графика — это целочисленный `uiTick`.
+Когда `performUpdate[]` хочет изменить картинку на экране, он делает две вещи:
+1. Кладет новые данные в кэш: `plotCache[selectedPlotId] = ...`
+2. Дергает триггер: `uiTick++`
 
-### Control Behavior
+FrontEnd замечает изменение числа `uiTick`, просыпается, читает кэш и перерисовывает экран.
 
-| Interaction | "Light" Plot (e.g., Spectrum) | "Heavy" Plot (e.g., T1) |
-| :--- | :--- | :--- |
-| **Slider Move** | **Immediate Update.** The slider calls `performUpdate` directly. The UI remains responsive because the calculation is sub-second. | **Mark as Stale.** The slider does *not* compute. It sets `plotCache[...] = Missing["Stale"]`. The View displays "Parameters changed. Press Update". |
-| **"Update" Button** | Forces a re-calculation (redundant but safe). | **Queued Execution.** Calls `performUpdate` on the Main Link. No timeout limit. |
+---
 
-### Implementation Detail
-```wolfram
-(* Inside Slider callback *)
-Function[{}, 
-   If[isLightPlot,
-      performUpdate[],                 (* Fast path *)
-      plotCache[id] = Missing["Stale"] (* Lazy path *)
-   ]
-]
+## 7. Проблема "Мерцающего Лоадера" (Flickering Spinner)
+
+При запуске расчета функция `performUpdate` должна показать пользователю заглушку `"Computing..."` с крутящимся индикатором. 
+
+Для этого используется команда `FinishDynamic[]`, которая принудительно блокирует потоки и заставляет FrontEnd нарисовать промежуточный кадр (лоадер) до того, как Ядро уйдет в тяжелые вычисления.
+
+**Раздельная логика лоадеров:**
+Показ лоадера и синхронизация потоков занимают около 50-100 миллисекунд. Если график вычисляется Ядром быстрее этого времени (графики типа `"Light"`), показ лоадера вызывает спам по сокету WSTP и визуальное "мерцание".
+Поэтому в `Interactive.wl` реализовано умное разделение:
+* Для `"Heavy"` графиков: ставим в кэш `"Computing..."`, делаем `FinishDynamic[]`, ждем Ядро.
+* Для `"Light"` графиков: **не показываем** лоадер. Ядро просто "в фоне" считает график за 20 мс и мгновенно заменяет старую картинку на новую, обеспечивая шелковый, бесшовный UX.
+
+## 8. Элементы управления и Блокировка (UI Controls & Locks)
+
+Панель параметров (`PlotControlPanel`) генерирует ползунки (`Slider`) и поля ввода (`InputField`) динамически, на основе структуры `"Primary"` параметров модели.
+
+### Связывание данных (Data Binding)
+Ползунки не имеют собственных локальных переменных для хранения значений. Они напрямую привязаны к глобальному реестру через геттеры и сеттеры:
+* Чтение: `QED`Model`GetModel[modelId]["Primary", tag, param, "Value"]`
+* Запись: `QED`Model`UpdateModelParameter[...]`
+
+После записи нового значения ползунок вызывает функцию `onUpdate[]`, которая (в зависимости от типа графика) либо просит перерисовать заглушку (для тяжелых графиков), либо инициирует быстрый пересчет (для легких графиков).
+
+### Защита от рассинхронизации (Desync Protection)
+Все элементы управления принимают флаг `isComputingSymbol`. В их опциях прописано:
+```mathematica
+Enabled -> Dynamic[!TrueQ[isComputingSymbol]]
 ```
+Это критически важный элемент UX. Если Ядро уходит в долгий расчет (например, 3D потенциала), ползунки становятся серыми и некликабельными. 
+Если бы этой блокировки не было, пользователь мог бы сдвинуть ползунок *во время* расчета. Это привело бы к тому, что на экране появился бы график для старого значения, а ползунок показывал бы новое. Интерфейс бы "врал". Блокировка гарантирует строгую консистентность визуального состояния и математической модели.
 
 ---
 
-## 4. State Management (Caching)
+## 9. Подсистема пресетов (Preset Management)
 
-The dashboard maintains two levels of state:
+Система пресетов (`PresetControlPanel`) позволяет сохранять, загружать и удалять конфигурации параметров схемы (раздел `"Primary"`).
 
-1.  **`currentModel`**: The source of truth. Contains the `IsDirty` flag.
-    * When a slider moves, `IsDirty` becomes `True`.
-    * `ComputePlotData` handles the "Warm Up" (re-calculating equilibrium if needed).
+### Handle-based мутации
+Как и всё остальное в новой архитектуре, функции управления пресетами (`SavePreset`, `LoadPreset`, `MergePresets`) принимают только строковый `modelId`.
+Они самостоятельно извлекают модель из реестра, модифицируют её словарь `"Presets"` и **атомарно перезаписывают** её обратно в `$ModelRegistry`. 
 
-2.  **`plotCache`**: A transient Association storing the last rendered Graphics.
-    * `Keys`: Plot IDs (e.g., "PlasmonSpectrum").
-    * `Values`: `Graphics` object, `"Computing..."` string, or `Missing[...]`.
+Интерфейсу не нужно вручную обновлять реестр или заниматься сбросом кэша — система секторальных хешей (Sectoral Hashes) в Ядре сама поймет, что параметры изменились, и инвалидирует нужные матрицы при следующем обращении.
 
-This separation ensures that `Dynamic` (the View) never attempts to call `ComputePlotData` directly, avoiding the "Preemptive Link" timeout trap.
+### Хранение пресетов в Блокноте (Notebook Storage)
+По умолчанию пресеты живут только в оперативной памяти (в реестре). Чтобы сохранить их навсегда, в меню-бургере (три полоски) реализована интеграция с метаданными текущего блокнота.
+* **Save to Notebook:** Сохраняет текущий словарь пресетов модели прямо в файл `.nb` с использованием `CurrentValue[EvaluationNotebook[], {TaggingRules, "QED_Presets", key}]`.
+* **Merge from Notebook:** Загружает пресеты из файла `.nb` и объединяет их с теми, что сейчас есть в оперативной памяти (с перезаписью при совпадении имен).
+Ключом для сохранения выступает название топологии (например, `"Transmon"` или `"Fluxonium"`), чтобы пресеты разных схем не перемешивались.
+
+## 10. Архитектурные фичи и продвинутый UX (Core Features & UX)
+
+Помимо строгого управления состоянием, `Interactive.wl` реализует ряд продвинутых паттернов проектирования интерфейсов, превращающих его из простой "рисовалки" в полноценную IDE для квантовых схем.
+
+### 10.1. Data-Driven UI (Автогенерация интерфейса)
+Интерфейс не содержит жестко зашитых элементов управления для конкретных физических величин (таких как $E_J$, $E_C$ или $E_L$). Вместо этого он строит сам себя динамически.
+Функция `ExtractInteractiveParams` рекурсивно сканирует дерево параметров модели (`"Primary"`) и ищет узлы, у которых установлен флаг `"Interactive" -> True`. 
+* **Преимущество:** Если в ядре добавляется новый экзотический компонент схемы, интерфейс вообще не нужно переписывать. Дашборд автоматически найдет новый параметр, прочитает его лимиты (`Min`, `Max`, `Step`) и сгенерирует для него ползунок и поле ввода.
+
+### 10.2. Мультимодельность (Multi-Model Support)
+Главная функция `QubitDashboard` принимает на вход не одну модель, а список (`modelsStack : {__Association}`). 
+Интерфейс работает по принципу "браузера вкладок":
+* В левой панели генерируется навигационный блок (`SelectModel`) с графическими миниатюрами топологий схем (рендеринг `m["Image"]`).
+* При переключении вкладки изменяется переменная `currentModelId`. Интерфейс мгновенно перестраивает все ползунки и графики под контекст выбранной схемы (Трансмон, Флаксониум и т.д.), полностью сохраняя независимые состояния, кэши и пресеты каждой из них.
+
+### 10.3. Система наложений (Overlay Basket)
+Для визуального сравнения данных реализована корзина слоев (`overlayBasket`).
+Пользователь может рассчитать график (например, спектр), нажать кнопку **"Add to Overlay"**, и текущий `Graphics` будет сохранен как статический слой. При последующем изменении параметров новый график отрисовывается поверх сохраненных слоев с помощью команды:
+`Show[Join[savedOverlays, {plotCache[selectedPlotId]}], PlotRange->All]`
+Это позволяет легко отслеживать эволюцию спектров или потенциалов при варьировании параметров.
+
+### 10.4. Развязка логики и стилизации (Export Engine)
+Интерфейс имеет встроенный менеджер экспорта ("Save PDF..."), который архитектурно отделен от математического рендера.
+Вместо того чтобы захламлять функции графиков (`PlotPlasmonSpectrum` и др.) опциями толщины линий и шрифтов для статей, UI использует пайплайн пресетов:
+* В настройках (иконка шестеренки) пользователь выбирает цель: `"Publication"` или `"Screen"`.
+* Перед сохранением в файл график пропускается через внешний движок стилизации: `QED`Style`ApplyExportPreset[gToSave, exportPreset]`.
+Это гарантирует, что на экране графики остаются легкими и интерактивными, а экспортированные PDF-файлы соответствуют строгим типографским стандартам (например, для Adobe Illustrator).
+
+### 10.5. Инспекторы и Анализаторы (Beyond Plots)
+Реестр графиков (`$PlotRegistry`) используется для вывода не только классических `Graphics`, но и сложных аналитических инструментов:
+* **`ModelState`:** Глубокий дамп словаря модели через `Dataset` с умным паттерн-матчингом, который на лету сворачивает гигантские матрицы в легковесные текстовые заглушки (`<Array: {15, 15}>`), чтобы UI не тормозил.
+* **Юнит-тесты UI (`WaveFunctionCheck`, `DiagonalizationCheck`):** Табличные инспекторы (`Grid`), которые проверяют консистентность физики (например, правильность коммутационных соотношений) и выводят статусы с цветовым кодированием (зеленый `OK` / красный `FAIL`).
+* **`SpectroscopyScanner`:** Анализатор реального времени, который при движении ползунка решает задачу на собственные значения и выводит таблицу уровней энергии с их квантовыми числами (числами заполнения фононов).
+
+## 11. Иммутабельное кэширование FrontEnd-а (Immutable Cache)
+
+Одной из самых сложных проблем при разработке интерактивного UI на базе `Dynamic` в Mathematica является агрессивная оптимизация рендеринга. Если вычислительное Ядро возвращает новый объект `Graphics`, который структурно похож на предыдущий, FrontEnd может принять решение не тратить ресурсы на перерисовку пикселей, из-за чего интерфейс "замерзает".
+
+Для обхода этой проблемы в `plotCache` реализован паттерн **Иммутабельности (Immutability)**.
+
+### 11.1. Отказ от In-Place мутаций
+Вместо изменения существующих значений по ключу (что игнорируется триггерами `Dynamic`), кэш графиков при каждом обновлении полностью пересоздается. 
+
+Антипаттерн (вызывает зависание UI):
+```mathematica
+plotCache[selectedPlotId] = newData;
+```
+Правильный иммутабельный подход:
+```mathematica
+plotCache = Association[plotCache, selectedPlotId -> newData];
+```
+Создание нового объекта Ассоциации в памяти дает жесткий сигнал движку FrontEnd о том, что переменная `plotCache` гарантированно изменилась, принудительно отключая оптимизацию и заставляя экран перерисовать кадр.
+
+### 11.2. Мгновенная инвалидация (Eager Invalidation)
+Чтобы избежать эффекта "призрачных" графиков (когда пользователь сдвинул ползунок, но на долю секунды видит старую картинку, пока Ядро считает новую), старое состояние физически уничтожается ДО начала новых вычислений:
+```mathematica
+plotCache = KeyDrop[plotCache, selectedPlotId];
+performUpdate[];
+```
+### 11.3. Безопасное чтение (Safe Lookup)
+Так как ключи теперь динамически удаляются из словаря, прямое обращение к кэшу в области отрисовки приведет к ошибкам. Для чтения данных `Dynamic`-блок использует безопасный геттер с резервными состояниями:
+```mathematica
+curr = Lookup[plotCache, selectedPlotId, Missing["Init"]];
+```
+Это позволяет интерфейсу элегантно обрабатывать промежуточные состояния (например, переключаться на заглушки или индикаторы загрузки), пока Ядро готовит новый иммутабельный слепок графики.
+
+### 11.4. Обход агрессивного кэширования FrontEnd (Render Trigger Hack)
+Даже при использовании иммутабельного словаря, графический движок Mathematica (FrontEnd) применяет жесткую оптимизацию: если новый объект `Graphics` структурно совпадает со старым (те же функции `Plot`, те же оси), FrontEnd может отказаться перерисовывать пиксели, полагая, что картинка визуально не изменилась. Функция `Refresh` в таких случаях часто игнорируется.
+
+Чтобы гарантированно «пробить» эту оптимизацию и заставить интерфейс отрисовать новые данные JIT-компилятора, применяется паттерн «Невидимого якоря» (Invisible Anchor). Финальный объект перед выводом на экран оборачивается в функцию `Style` с внедрением фиктивной опции, привязанной к счетчику тиков:
+```mathematica
+Style[finalDisplay, "RenderTrigger" -> uiTick]
+```
+Поскольку `uiTick` инкрементируется при каждом движении ползунка, FrontEnd на каждом кадре получает математически новое выражение (например, `Style[..., "RenderTrigger" -> 2]`, затем `Style[..., "RenderTrigger" -> 3]`). Движок видит, что структура объекта изменилась, отключает кэширование и честно рендерит свежий график, при этом сама опция `"RenderTrigger"` никак не влияет на визуальный стиль.
