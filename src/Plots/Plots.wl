@@ -1137,7 +1137,7 @@ PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] 
 PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, opts:OptionsPattern[]] := 
   Module[{
     fMin, fMax, fluxRange, measure, plotPoints, colFunc,
-    sIndex, label, legendLabel, sweepFunc, plotFunc, modelHash, plot, legend
+    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend
   },
   
   {fMin, fMax} = range;
@@ -1150,47 +1150,44 @@ PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, o
   label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
   legendLabel = If[measure === "S11", "|S11|", "|S21|"];
 
+  (* 1. Используем JIT-конвейер *)
   sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"];
 
   If[sweepFunc === $Failed,
       Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
   ];
 
-  (* Маркер изменений *)
-  modelHash = Hash[model];
-
-  (* Функция с фиктивным аргументом под хэш *)
-  plotFunc[phiVal_?NumericQ, fGHz_?NumericQ, _] := 
+  (* 2. Защищенная функция (принимает только числа) *)
+  plotFunc[phiVal_?NumericQ, fGHz_?NumericQ] := 
     Abs[ sweepFunc[phiVal][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
 
-  (* Инъекция хэша в DensityPlot *)
-  plot = With[{hash = modelHash},
-    DensityPlot[
-       plotFunc[phi, f, hash], 
-       {phi, fluxRange[[1]], fluxRange[[2]]}, 
-       {f, fMin, fMax},
-       
-       PlotPoints -> plotPoints,
-       PlotRange -> {0, 1.05}, 
-       ColorFunction -> colFunc,
-       Frame -> True,
-       FrameLabel -> OptionValue[FrameLabel],
-       FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-       PlotLabel -> Style[label, 16, FontFamily -> "Times"],
-       PlotLegends -> None, 
-       ImageSize -> 600,
-       MaxRecursion -> 1
-    ]
+  (* 3. Чистый вызов DensityPlot без хэш-оберток *)
+  plot = DensityPlot[
+      plotFunc[phi, f], 
+      {phi, fluxRange[[1]], fluxRange[[2]]}, 
+      {f, fMin, fMax},
+      
+      PlotPoints -> plotPoints,
+      PlotRange -> {0, 1.05}, 
+      ColorFunction -> colFunc,
+      Frame -> True,
+      FrameLabel -> OptionValue[FrameLabel],
+      FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+      PlotLabel -> Style[label, 16, FontFamily -> "Times"],
+      PlotLegends -> None, 
+      ImageSize -> 600,
+      MaxRecursion -> 1
   ];
 
+  (* 4. Исправленная легенда без несуществующих опций *)
   legend = BarLegend[
       {colFunc, {0, 1.05}},
       LegendLabel -> Style[legendLabel, FontSize -> 16, FontFamily -> "Times"],
       LabelStyle -> Directive[Black, 14, FontFamily -> "Times"],
-      LegendMarkerSize -> {20, 300},
-      Frame -> False, Axes -> False, LegendFunction -> None
+      LegendMarkerSize -> {20, 300}
   ];
 
+  (* Сборка графика и легенды *)
   Legended[plot, Placed[legend, Right]]
 ];
 
