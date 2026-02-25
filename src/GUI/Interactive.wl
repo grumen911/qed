@@ -730,8 +730,12 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       FinishDynamic[]; (* Принудительно заставляем UI нарисовать заглушку *)
     ];
     
-    (* Вызываем Compute (для Light он выполнится за миллисекунды) *)
-    plotCache[selectedPlotId] = ComputePlotData[selectedPlotId, currentModelId];
+(* Вызываем Compute (для Light он выполнится за миллисекунды) *)
+    Module[{newData},
+      newData = ComputePlotData[selectedPlotId, currentModelId];
+      (* Создаем АБСОЛЮТНО НОВУЮ ассоциацию в памяти *)
+      plotCache = Association[plotCache, selectedPlotId -> newData];
+    ];
     
     isComputing = False;
     uiTick++;
@@ -760,10 +764,14 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
           PlotControlPanel[currentModelId, 
             Function[{}, 
                If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
-                  performUpdate[], 
-                  plotCache[selectedPlotId] = Missing["Stale"] 
+                 (* Выбрасываем ключ из словаря ДО начала расчета *)
+                 plotCache = KeyDrop[plotCache, selectedPlotId];
+                 performUpdate[], 
+                 
+                 (* Записываем Stale через создание новой ассоциации *)
+                 plotCache = Association[plotCache, selectedPlotId -> Missing["Stale"]]
                ];
-               uiTick++; (* Приказываем перерисовать график! *)
+               uiTick++; 
             ],
             Function[{}, performUpdate[]],
             uiTick,
@@ -851,19 +859,24 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
         ],
         Spacer[10],
         
-        (* 3. DISPLAY AREA - ТЕПЕРЬ СТРОГО СЛЕДИТ ЗА ТРИГГЕРОМ *)
+        (* 3. DISPLAY AREA - ОБНОВЛЕННЫЙ *)
         Dynamic[
-          Refresh[
-            Module[{curr, saved},
-              curr = plotCache[selectedPlotId];
-              saved = Lookup[overlayBasket, selectedPlotId, {}];
-              Switch[curr,
-                "Computing...", Panel[Column[{Style["Computing...", Blue, Bold], ProgressIndicator[Appearance -> "Indeterminate"]}, Alignment->Center], ImageSize->{300,300}],
-                _Missing, If[curr === Missing["Stale"], Panel[Style["Parameters changed. Press Update.", Gray, 16], ImageSize->{400,300}], Panel[Style["Select plot or Press Update", Gray], ImageSize->{300,300}]],
-                _, If[Length[saved] > 0 && (MatchQ[curr, _Graphics] || MatchQ[curr, _Legended]), Show[Join[saved, {curr}], PlotRange -> All], curr]
-              ]
-            ],
-            TrackedSymbols :> {uiTick, selectedPlotId, currentModelId}
+          Module[{curr, saved, finalDisplay},
+            
+            (* Читаем напрямую из кэша. Dynamic сам отследит изменения plotCache *)
+            curr = Lookup[plotCache, selectedPlotId, Missing["Init"]];
+            saved = Lookup[overlayBasket, selectedPlotId, {}];
+            
+            (* Собираем то, что должно быть на экране *)
+            finalDisplay = Switch[curr,
+              "Computing...", Panel[Column[{Style["Computing...", Blue, Bold], ProgressIndicator[Appearance -> "Indeterminate"]}, Alignment->Center], ImageSize->{300,300}],
+              _Missing, If[curr === Missing["Stale"], Panel[Style["Parameters changed. Press Update.", Gray, 16], ImageSize->{400,300}], Panel[Style["Select plot or Press Update", Gray], ImageSize->{300,300}]],
+              _, If[Length[saved] > 0 && (MatchQ[curr, _Graphics] || MatchQ[curr, _Legended]), Show[Join[saved, {curr}], PlotRange -> All], curr]
+            ];
+            
+            (* ГЕНИАЛЬНЫЙ ХАК: Привязываем значение uiTick прямо к объекту, 
+               чтобы 100% заставить FrontEnd перерисовать пиксели *)
+            Style[finalDisplay, "RenderTrigger" -> uiTick]
           ]
         ]
       }, Alignment -> Top]
