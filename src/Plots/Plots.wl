@@ -901,98 +901,132 @@ PlotGenericFluxSweep[model_Association, opts:OptionsPattern[]] :=
   ];
 
 PlotRelaxationTime[model_Association, opts:OptionsPattern[]] := 
-  Module[{t1DataFunc, nModes, range, channel, modeT1, labelSub, isRate},
+  Module[{
+    nModes, range, logRange, timeRange, channel, labelSub, 
+    nodes, numNodes, fluxVars, chargeVars, hbar,
+    currentOpNum, currentGradient, voltageOpsNum, voltageOp, voltageGradient, portNode,
+    mInd, rInd, cCap, rCap,
+    sweepFunc, computeT1, lastPhi = "Init", lastRates = {}, getRate
+  },
     
-    (* 1. Получаем настройки *)
+    (* 1. Опции графика *)
     channel = OptionValue["RelaxationChannel"];
     nModes = OptionValue[NumModes];
     range = OptionValue[FluxRange];
     logRange = OptionValue["LogTimeRange"];
-
-    (* Преобразуем степени в реальные значения для PlotRange *)
+    
     timeRange = If[ListQ[logRange] && Length[logRange] == 2,
         {10.^logRange[[1]], 10.^logRange[[2]]},
-        All (* Fallback, если формат нарушен *)
+        All
     ];
-
-    (* Определяем, нужно ли инвертировать (Rate -> Time) *)
-    isRate = StringContainsQ[channel, "Rate", IgnoreCase -> True];
     
     If[!IntegerQ[nModes], nModes = 1]; 
     If[!ListQ[range], range = {-0.5, 0.5}];
 
-    (* 2. Подготовка функции свипа *)
-    t1DataFunc = QED`Numeric`GenerateFluxSweep[model, 
-        Function[{m}, 
-            Module[{rates, rawData},
-                (* Вызов функции расчета *)
-                rates = QED`Numeric`CalculateFermiRates[m];
-                
-                (* Извлечение данных по ключу *)
-                rawData = rates[channel];
-                
-                (* Если это Rate (Гц), а мы хотим T1 (с), нужно инвертировать.
-                   Если это уже Time (TotalT1), оставляем как есть. *)
-                If[isRate,
-                    Map[If[TrueQ[# > 10^-20], 1.0/#, Infinity] &, rawData],
-                    rawData
-                ]
-            ]
-        ]
+    (* 2. Извлекаем статические параметры и градиенты операторов (1 раз до цикла) *)
+    nodes = Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]];
+    numNodes = Length[nodes];
+    fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
+    chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+    hbar = QED`$hbarValue;
+    
+    (* Параметры шума (берем дефолты из CalculateFermiRates) *)
+    mInd = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "MutualInductance"];
+    rInd = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "InductiveLineResistance"];
+    cCap = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "CouplingCapacitance"];
+    rCap = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "CapacitiveLineResistance"];
+    portNode = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "PortNode"];
+
+    (* Операторы *)
+    currentOpNum = QED`Model`GetNumericalQuantity[model, "CurrentOperatorNumerical"];
+    If[FailureQ[currentOpNum], currentOpNum = 0];
+    currentGradient = D[currentOpNum, {fluxVars}]; 
+    
+    voltageOpsNum = QED`Model`GetNumericalQuantity[model, "VoltageOperatorsNumerical"];
+    If[FailureQ[voltageOpsNum], voltageOpsNum = <||>];
+    voltageOp = If[KeyExistsQ[voltageOpsNum, portNode], voltageOpsNum[portNode], 0];
+    voltageGradient = D[voltageOp, {chargeVars}];
+
+    (* 3. Создаем новый JIT-конвейер для диагонализации *)
+    sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "HarmonicDiagonalization"];
+    If[sweepFunc === $Failed,
+      Return[Graphics[{Red, Text["Error: JIT Sweep generation failed.", {0,0}]}]]
     ];
 
-    If[t1DataFunc === $Failed,
-      Return[Graphics[{Red, Text["Error: Initialize model first!", {0,0}]}]]
-    ];
-
-    (* 3. Обертка данных *)
-    modeT1[i_Integer][phi_?NumericQ] := 
-      Module[{val},
-        val = t1DataFunc[phi][[i]];
-        (* Фильтр для LogPlot: убираем бесконечности и нули *)
-        If[!NumericQ[val] || val <= 0 || val === Infinity, Null, val]
+    (* 4. Внутренняя функция расчета T1 по свежим матрицам *)
+    computeT1[phi_] := Module[
+      {diag, freqs, caps, Nmat, Mmat, rates, w, fZPF, cZPF, iElem, vElem, gInd, gCap, gTot, targetRate},
+      
+      diag = sweepFunc[phi];
+      If[FailureQ[diag], Return[ConstantArray[Null, nModes]]];
+      
+      freqs = diag["NormalModeFrequencies"];
+      caps = diag["EffectiveCapacitances"];
+      Nmat = diag["FluxTransform"];
+      Mmat = diag["ChargeTransform"];
+      
+      rates = Table[
+        w = freqs[[k]];
+        If[TrueQ[w == 0], 
+           Null,
+           fZPF = Sqrt[hbar / (2.0 * caps[[k]] * w)];
+           cZPF = Sqrt[(hbar * caps[[k]] * w) / 2.0];
+           
+           iElem = Sum[currentGradient[[n]] * Nmat[[n, k]] * fZPF, {n, 1, numNodes}];
+           vElem = Sum[voltageGradient[[n]] * (-I * Mmat[[n, k]] * cZPF), {n, 1, numNodes}];
+           
+           gInd = (2.0 * w * mInd^2 * Abs[iElem]^2) / (hbar * rInd);
+           gCap = (2.0 * rCap * cCap^2 * w * Abs[vElem]^2) / hbar;
+           gTot = gInd + gCap;
+           
+           targetRate = Switch[channel,
+               "InductiveRelaxationRate", gInd,
+               "CapacitiveRelaxationRate", gCap,
+               "TotalT1", gTot,
+               _, gTot
+           ];
+           
+           If[targetRate < 1.0*^-20, Null, 1.0 / targetRate]
+        ],
+        {k, nModes}
       ];
-
-    (* 4. Подготовка подписи *)
-    labelSub = Switch[channel,
-        "InductiveRelaxationRate", "ind",
-        "CapacitiveRelaxationRate", "cap",
-        "TotalT1", "tot",
-        _, "x"
+      rates
     ];
 
-    (* 5. ГРАФИК *)
+    (* 5. Умный кэш для Plot (чтобы не диагонализовать 2 раза для одной точки X) *)
+    getRate[i_Integer, phi_?NumericQ] := (
+       If[phi =!= lastPhi,
+          lastPhi = phi;
+          lastRates = computeT1[phi];
+       ];
+       If[i <= Length[lastRates], lastRates[[i]], Null]
+    );
+
+    labelSub = Switch[channel, "InductiveRelaxationRate", "ind", "CapacitiveRelaxationRate", "cap", "TotalT1", "tot", _, "x"];
+
+    (* 6. График *)
     Plot[
-        Evaluate @ Table[modeT1[i][phi], {i, nModes}],
+        Evaluate @ Table[getRate[i, phi], {i, nModes}],
         {phi, range[[1]], range[[2]]},
         
         ScalingFunctions -> "Log10",
-        
-        (* Диапазон под T1 (секунды) *)
-        PlotRange -> {Automatic, {10^(-8), 10^(2)}}, 
+        PlotRange -> {Automatic, timeRange}, 
         
         Axes -> True,
         Frame -> False,
-        
         AxesLabel -> {
             Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
-            Style[Subscript["T", "1"], FontFamily -> "Times New Roman", Large],
-            FormatType -> TraditionalForm
+            Style[Subscript["T", "1"], FontFamily -> "Times New Roman", Large]
         }, 
         AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
         MeshFunctions -> Function[{x, y}, y],
-        
         ImageSize -> 600, 
         
         PlotLegends -> Placed[
             Table[
                 Row[{
                    Subscript["T", "1"]^labelSub,
-                   " (", 
-                   Subscript[Style["|1\[RightAngleBracket]", Italic], i],
-                   " \[Rule] ", 
-                   Style["|0\[RightAngleBracket]", Italic], 
-                   ")"
+                   " (", Subscript[Style["|1\[RightAngleBracket]", Italic], i], " \[Rule] ", Style["|0\[RightAngleBracket]", Italic], ")"
                 }], 
                 {i, nModes}
             ],
@@ -1004,10 +1038,8 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
             Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
         },
         
-        MaxRecursion -> ControlActive[2, 6], 
-        PlotPoints -> ControlActive[20, 80]
-
-        (* ,opts *)
+        MaxRecursion -> 2, 
+        PlotPoints -> 50
     ]
   ];
 
