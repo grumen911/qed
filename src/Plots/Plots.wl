@@ -1099,71 +1099,45 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
 ];
 
 PlotFrequencyResponse[model_Association, {fMin_, fMax_}, opts:OptionsPattern[]] := 
- Module[{cacheEntry, sNumExpr, sVar, plotFunc, measure, color, label},
+ Module[{measure, sIndex, color, label, phiExt, sMatrixAtPhi, plotFunc},
   
   measure = OptionValue["Measurement"];
+  sIndex = If[measure === "S11", {1, 1}, {2, 1}];
+
+  (* 1. Получаем текущий внешний поток *)
+  phiExt = (QED`$PhiExt /. QED`Model`GetStaticRules[model]) / QED`$Phi0Value;
   
-  (* 1. Достаем закэшированную функцию (Полусимвольную) *)
-  cacheEntry = model["Numerical"]["Cache"]["SMatrixNumerical"];
-
-  If[MissingQ[cacheEntry] || Lookup[cacheEntry, "State"] =!= "Ready",
-     Return[Graphics[{
-        Red, 
-        Text[Style["S-Matrix not ready.\nRun Analysis first.", 14], {0,0}]
-     }, ImageSize -> 400, Frame -> True]]
-  ];
-
-  sNumExpr = cacheEntry["Value"];         (* Матрица {{S11, S12}, {S21, S22}} *)
-  sVar = cacheEntry["FrequencyVariable"]; (* Символ 's' *)
-
-  (* 2. Формируем функцию для Plot *)
-  (* S11 = [[1,1]], S21 = [[2,1]] *)
-  (* Подставляем s -> I * 2Pi * f * 10^9. Plot будет вызывать это адаптивно. *)
-  plotFunc = Switch[measure,
-     "S11", Function[fGHz, Abs[ sNumExpr[[1, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]],
-     "S21", Function[fGHz, Abs[ sNumExpr[[2, 1]] /. sVar -> (I * 2 * Pi * fGHz * 10^9) ]],
-     _, Return[$Failed]
-  ];
-
-  (* 3. Настройка стилей (как в PlotPlasmonSpectrum) *)
-  color = Switch[measure, 
-     "S11", RGBColor[0.12, 0.47, 0.71], (* Синий *)
-     _, RGBColor[1.0, 0.50, 0.05]       (* Оранжевый *)
-  ];
+  (* 2. Используем JIT-конвейер *)
+  sMatrixAtPhi = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"][phiExt];
   
+  If[sMatrixAtPhi === $Failed,
+     Return[Graphics[{Red, Text[Style["S-Matrix engine failed.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+
+  (* 3. Защищенная функция (принимает только числа) *)
+  plotFunc[fGHz_?NumericQ] := Abs[ sMatrixAtPhi[fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+
+  color = Switch[measure, "S11", RGBColor[0.12, 0.47, 0.71], _, RGBColor[1.0, 0.50, 0.05]];
   label = Switch[measure, "S11", "|S11| (Reflection)", _, "|S21| (Transmission)"];
 
-  (* 4. Рисуем красивый Plot *)
+  (* 4. Отрисовка *)
   Plot[plotFunc[f], {f, fMin, fMax},
-     
-     (* Оформление 1-в-1 как у других графиков *)
      Frame -> True,
-     FrameLabel -> {
-         Style["Frequency (GHz)", 16], 
-         Style["Magnitude |S|", 16]
-     },
+     FrameLabel -> {Style["Frequency (GHz)", 16], Style["Magnitude |S|", 16]},
      FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
      TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
-     
-     PlotRange -> {0, 1.02}, (* Линейная шкала 0..1 с небольшим запасом *)
+     PlotRange -> {0, 1.02}, 
      PlotStyle -> Directive[color, Thickness[0.006]],
-     
-     GridLines -> Automatic,
-     AspectRatio -> 0.6,
-     ImageSize -> 600,
+     GridLines -> Automatic, AspectRatio -> 0.6, ImageSize -> 600,
      PlotLabel -> Style[label, 14, FontFamily -> "Times"],
-     
-     (* Качество *)
-     MaxRecursion -> 4,
-     PlotPoints -> 500
+     MaxRecursion -> 4, PlotPoints -> 200
   ]
  ];
 
 PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, opts:OptionsPattern[]] := 
   Module[{
     fMin, fMax, fluxRange, measure, plotPoints, colFunc,
-    sIndex, label, legendLabel, analyzerFunc, sweepFunc,
-    plot, legend
+    sIndex, label, legendLabel, sweepFunc, plotFunc, modelHash, plot, legend
   },
   
   {fMin, fMax} = range;
@@ -1176,47 +1150,47 @@ PlotSParameterMap[model_Association, range:{_?NumericQ, _?NumericQ}:{0., 20.}, o
   label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
   legendLabel = If[measure === "S11", "|S11|", "|S21|"];
 
-  analyzerFunc = Function[{tempModel},
-      Function[{fGHz}, Abs[QED`Scattering`CalculateSParameter[tempModel, fGHz * 10^9, sIndex]]]
-  ];
-  sweepFunc = QED`Numeric`GenerateFluxSweep[model, analyzerFunc];
+  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"];
 
   If[sweepFunc === $Failed,
       Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
   ];
 
-  (* 1. Чистый график *)
-  plot = DensityPlot[
-     sweepFunc[phi][f], 
-     {phi, fluxRange[[1]], fluxRange[[2]]}, 
-     {f, fMin, fMax},
-     
-     PlotPoints -> plotPoints,
-     PlotRange -> {0, 1.05}, 
-     ColorFunction -> colFunc,
-     Frame -> True,
-     FrameLabel -> OptionValue[FrameLabel],
-     FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-     PlotLabel -> Style[label, 16, FontFamily -> "Times"],
-     PlotLegends -> None, 
-     ImageSize -> 600,
-     MaxRecursion -> 1
+  (* Маркер изменений *)
+  modelHash = Hash[model];
+
+  (* Функция с фиктивным аргументом под хэш *)
+  plotFunc[phiVal_?NumericQ, fGHz_?NumericQ, _] := 
+    Abs[ sweepFunc[phiVal][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+
+  (* Инъекция хэша в DensityPlot *)
+  plot = With[{hash = modelHash},
+    DensityPlot[
+       plotFunc[phi, f, hash], 
+       {phi, fluxRange[[1]], fluxRange[[2]]}, 
+       {f, fMin, fMax},
+       
+       PlotPoints -> plotPoints,
+       PlotRange -> {0, 1.05}, 
+       ColorFunction -> colFunc,
+       Frame -> True,
+       FrameLabel -> OptionValue[FrameLabel],
+       FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
+       PlotLabel -> Style[label, 16, FontFamily -> "Times"],
+       PlotLegends -> None, 
+       ImageSize -> 600,
+       MaxRecursion -> 1
+    ]
   ];
 
-  (* 2. Чистая векторная легенда *)
   legend = BarLegend[
       {colFunc, {0, 1.05}},
       LegendLabel -> Style[legendLabel, FontSize -> 16, FontFamily -> "Times"],
       LabelStyle -> Directive[Black, 14, FontFamily -> "Times"],
       LegendMarkerSize -> {20, 300},
-      
-      (* Эти опции нужны для корректного отображения в блокноте *)
-      Frame -> False,
-      Axes -> False,
-      LegendFunction -> None
+      Frame -> False, Axes -> False, LegendFunction -> None
   ];
 
-  (* 3. Возвращаем семантический объект *)
   Legended[plot, Placed[legend, Right]]
 ];
 
