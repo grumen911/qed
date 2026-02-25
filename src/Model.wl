@@ -5,12 +5,56 @@ Needs["QED`Numeric`"];
 Needs["QED`Analytic`"];
 Needs["QED`Scattering`"];
 
-CreateCircuitModel::usage = "CreateCircuitModel[topology, primaryParams, method]";
-GetAnalyticalParams::usage = "GetAnalyticalParams[model]";
-GetNumericalQuantity::usage = "GetNumericalQuantity[model, key]";
-GetCacheEntry::usage = "GetCacheEntry[cacheEntry, model]";
-UpdateAnaliticalParam::usage = "UpdateAnaliticalParam[model, path, value]";
-GetParameterRules::usage = "GetParameterRules[model] generates strict substitution rules for primary parameters on the fly.";
+CreateCircuitModel::usage = "CreateCircuitModel[components, Options] initializes a new \
+superconducting circuit model from a list of components.
+
+Arguments:
+  components: A list of circuit elements defining the graph, e.g., 
+              {{\"Capacitor\", 1, 2, \"C1\"}, {\"JosephsonJunction\", 2, 3, \"EJ1\"}, ...}.
+
+Options:
+  GroundNode  -> Automatic (Defaults to the highest node index in the list)
+  CustomImage -> Automatic (Generates a default placeholder diagram)
+
+Under the hood, this function performs the complete setup pipeline:
+  1. Parses the netlist to build the graph topology.
+  2. Generates default physical parameters (Primary) with dynamic UI bounds.
+  3. Computes symbolic Lagrangians, Hamiltonians, and static matrices (Analytical).
+  4. Assigns a unique UUID and safely registers the model in the global $ModelRegistry.
+  5. Triggers a cache warm-up for JIT-compiled engines to ensure instant UI responsiveness.
+
+Returns the fully initialized model Association.";
+
+
+GetNumericalQuantity::usage = "GetNumericalQuantity[model, \"key\"] retrieves \
+a computed numerical property from the model.
+
+If the requested \"key\" is already calculated and valid, it returns the value instantly (O(1)).
+If the value is marked as \"Lazy\" or the cache was invalidated (e.g., due to parameter updates), \
+this function automatically triggers the necessary background computations, atomically updates \
+the global $ModelRegistry, and returns the fresh result.
+
+Common keys include:
+  \"EquilibriumFluxes\"       - Minimum potential energy points (Weber)
+  \"StaticMatrices\"          - Fixed capacitance and inductance matrices
+  \"CompiledEngines\"         - JIT-compiled Hessian and gradient functions
+  \"HarmonicDiagonalization\" - Frequencies and transformation matrices (N, M)
+
+This function acts as the primary lazy-evaluation bridge between the UI and the mathematical kernel.";
+
+
+GetParameterRules::usage = "GetParameterRules[model] dynamically generates a sorted list of \
+strict substitution rules (Symbol -> Value) for all primary physical components (e.g., C, EJ, L) \
+based on their current UI values.
+
+Crucially, this function performs automatic unit scaling for the external magnetic flux: \
+the dimensionless slider value for Φ_ext is automatically multiplied by the magnetic flux \
+quantum (Φ_0) to return the parameter in absolute SI units (Webers).
+
+These rules are primarily used to inject real-time parameter states into analytical \
+Hamiltonians and static matrices.";
+
+
 GetStaticRules::usage = "GetStaticRules[model] returns a strict list of rules for primary parameters and physical constants.";
 
 RegisterModel::usage = "RegisterModel[model] stores the model in the global registry and returns its UUID.";
@@ -35,15 +79,26 @@ the model's primary parameters for JIT compilation.";
 Begin["`Private`"];
 
 
-$ModelRegistry = <||>; (* Инициализируем реестр заранее *)
+Options[CreateCircuitModel] = {
+  GroundNode -> Automatic,
+  CustomImage -> Automatic
+};
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                      1. СОСТОЯНИЕ (STATE)                      ║ *)
+(* ║     (Глобальный реестр моделей, защищенный от перезаписи)      ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
+
+$ModelRegistry = <||>;
+
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                   2. ВНУТРЕННИЕ УТИЛИТЫ                        ║ *)
+(* ║   (Вспомогательные функции, парсеры и генераторы правил)       ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
 
 (* Рекурсивный обход ассоциации для получения всех путей *)
 getAllPaths[assoc_Association, currentPath_List : {}] := 
   Flatten[KeyValueMap[Function[{key, val}, If[AssociationQ[val], getAllPaths[val, Append[currentPath, key]], {Append[currentPath, key]}]], assoc], 1];
-
-(* ════════════════════════════════════════════════════════════════ *)
-(* СТРОГИЕ ПРАВИЛА ПОДСТАНОВКИ (НА ЛЕТУ)                       *)
-(* ════════════════════════════════════════════════════════════════ *)
 
 GetParameterRules[modelAssoc_Association] := Module[
   {primaryData, valuePaths, rules},
@@ -74,12 +129,6 @@ GetParameterSymbols[modelAssoc_Association] := Map[First, GetParameterRules[mode
 
 GetParameterVector[modelAssoc_Association] := Developer`ToPackedArray[N[Map[Last, GetParameterRules[modelAssoc]]], Real];
 
-UpdateModelCache[id_String, m_Association] := ($ModelRegistry[id] = m;);
-
-(* ════════════════════════════════════════════════════════════════ *)
-(* 		ГЕНЕРАЦИЯ PLACEHOLDER ИЗОБРАЖЕНИЯ                           *)
-(* ════════════════════════════════════════════════════════════════ *)
-
 GenerateCircuitImage[topology_Association] := Module[
   {nComponents, nNodes},
   
@@ -101,32 +150,21 @@ GenerateCircuitImage[topology_Association] := Module[
   ]
 ];
 
-
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         			PRIMARY PARAMETERS                         	║ *)
-(* ║    (Электрические компоненты и топология схемы)              	║ *)
+(* ║                    3. ФАБРИКА МОДЕЛЕЙ                          ║ *)
+(* ║       (Инициализация графа, параметров и гамильтониана)        ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
-
-
-(* Объявление опций *)
-Options[CreateCircuitModel] = {
-  GroundNode -> Automatic,
-  Method -> "HarmonicPerturbation" (* или "Diagonalization" *),
-  CustomImage -> Automatic
-};
-
   
 CreateCircuitModel[components_List, opts : OptionsPattern[]] := 
-  Module[{analytical, defaultPrimary, topology, method, gNode, 
+  Module[{analytical, defaultPrimary, topology, gNode, 
           model, circuitImage, id},
     
-    method = OptionValue[Method];
     gNode = If[OptionValue[GroundNode] === Automatic, 
        Max[Flatten[components[[All, {2, 3}]]]], OptionValue[GroundNode]];
     
     topology = CreateTopology[components, gNode];    
     defaultPrimary = GenerateDefaultParameters[topology];
-    analytical = ComputeAnalyticalParams[topology, defaultPrimary, method];
+    analytical = ComputeAnalyticalParams[topology, defaultPrimary];
     
     circuitImage = If[OptionValue[CustomImage] === Automatic,
       GenerateCircuitImage[topology], OptionValue[CustomImage]];
@@ -142,7 +180,6 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
       "Analytical" -> analytical,
       "Presets" -> <||>,
       "Numerical" -> <|
-        "Method" -> method,
         "VersionedCache" -> <|"Values" -> <||>|>,
         "ComputationTime" -> Null,
         "ComputationStatus" -> <||>
@@ -157,7 +194,6 @@ CreateCircuitModel[components_List, opts : OptionsPattern[]] :=
     
     model
   ];
-
 
 (* Вспомогательная функция: Генерация дефолтных параметров *)
 GenerateDefaultParameters[topology_] := 
@@ -278,14 +314,7 @@ GenerateDefaultParameters[topology_] :=
   primaryParams
  ];
 
-
-(* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║         			ANALYTICAL PARAMETERS                      	║ *)
-(* ║  (Гамильтониан, матрицы, представления - символическое)      	║ *)
-(* ╚════════════════════════════════════════════════════════════════╝ *)
-
-
-ComputeAnalyticalParams[topology_, primaryParams_, method_] := 
+ComputeAnalyticalParams[topology_, primaryParams_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
  		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering, potential},
   
@@ -322,15 +351,10 @@ ComputeAnalyticalParams[topology_, primaryParams_, method_] :=
   |>
  ];
 
-
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║                  УПРАВЛЕНИЕ И КЭШИРОВАНИЕ                      ║ *)
+(* ║               4. ДВИЖОК ЗАВИСИМОСТЕЙ (CONFIG)                  ║ *)
+(* ║   (Граф ленивых вычислений и JIT-компиляции, обновляемый)      ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
-
-
-(* ════════════════════════════════════════════════════════════════ *)
-(* ФАЗА 2: ДВИЖОК ЗАВИСИМОСТЕЙ (DEPENDENCY ENGINE)                  *)
-(* ════════════════════════════════════════════════════════════════ *)
 
 GetSectoralHashes[modelAssoc_] := Module[
   {primaryData, valuePaths, extractSector},
@@ -507,32 +531,10 @@ $DependencyRegistry = <|
   |>
 |>;
 
-
-(* === GLOBAL MODEL REGISTRY === *)
-$ModelRegistry = <||>;
-
-RegisterModel[model_Association] := Module[{id, m},
-  If[KeyExistsQ[model, "ModelID"],
-    id = model["ModelID"];
-    $ModelRegistry[id] = model;
-    Return[id];
-  ];
-  id = CreateUUID["model-"];
-  m = model;
-  m["ModelID"] = id;
-  $ModelRegistry[id] = m;
-  id
-];
-
-GetModel[id_String] := Lookup[$ModelRegistry, id, $Failed];
-
-UpdateModelParameter[id_String, tag_String, param_String, val_] := Module[{m},
-  m = GetModel[id];
-  If[AssociationQ[m],
-    m["Primary", tag, param, "Value"] = val;
-    $ModelRegistry[id] = m;
-  ];
-];
+(* ╔════════════════════════════════════════════════════════════════╗ *)
+(* ║                    5. ПУБЛИЧНОЕ API                            ║ *)
+(* ║    (Handle-Based управление моделями и доступ к кэшу)          ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
 
 GetNumericalQuantity[modelAssoc_, keyString_String] := Module[
   {registryNode, currentHashes, cachedValues, cachedEntry, isCacheValid, depsData, computedValue, id},
@@ -570,10 +572,35 @@ GetNumericalQuantity[modelAssoc_, keyString_String] := Module[
 
 GetNumericalQuantity::unknown = "Unknown dependency key: `1`";
 
+RegisterModel[model_Association] := Module[{id, m},
+  If[KeyExistsQ[model, "ModelID"],
+    id = model["ModelID"];
+    $ModelRegistry[id] = model;
+    Return[id];
+  ];
+  id = CreateUUID["model-"];
+  m = model;
+  m["ModelID"] = id;
+  $ModelRegistry[id] = m;
+  id
+];
+
+GetModel[id_String] := Lookup[$ModelRegistry, id, $Failed];
+
+UpdateModelCache[id_String, m_Association] := ($ModelRegistry[id] = m;);
+
+UpdateModelParameter[id_String, tag_String, param_String, val_] := Module[{m},
+  m = GetModel[id];
+  If[AssociationQ[m],
+    m["Primary", tag, param, "Value"] = val;
+    $ModelRegistry[id] = m;
+  ];
+];
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
-(* ║             API: WAVEFUNCTIONS                                 ║ *)
-(* ╚════════════════════════════════════════════════════════════════ *)
+(* ║                 6. ДОПОЛНИТЕЛЬНЫЕ МОДУЛИ                       ║ *)
+(* ║           (Волновые функции и система пресетов)                ║ *)
+(* ╚════════════════════════════════════════════════════════════════╝ *)
 
 GetWaveFunction[model_Association, quantumNumbers_List] := 
  Module[{diagData, frequencies, effCaps, transform, topology, subRules, psiSymbolic},
@@ -602,10 +629,6 @@ GetWaveFunction[model_Association, quantumNumbers_List] :=
   (* Используем subRules, которые содержат правила для minSymbols *)
   psiSymbolic //. subRules
  ];
-
-(* ════════════════════════════════════════════════════════════════ *)
-(* PRESET MANAGEMENT SYSTEM (Handle-Based)                          *)
-(* ════════════════════════════════════════════════════════════════ *)
 
 SavePreset[id_String, name_String] := Module[{m},
   m = GetModel[id];
