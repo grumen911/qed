@@ -1051,26 +1051,28 @@ CalculateDephasingRates[model_Association, opts:OptionsPattern[]] := Module[
   A = OptionValue["FluxNoiseAmplitude"];
   logFac = OptionValue["PinkNoiseLogFactor"];
   
-  (* 2. Создаем замыкание через наш новый конвейер (без всяких cleanModel) *)
+  (* 2. Узнаем текущую рабочую точку (Внешний поток из первичных параметров) *)
+  phiExtDimless = (QED`$PhiExt /. QED`Model`GetStaticRules[model]) / QED`$Phi0Value;
+  If[!NumericQ[phiExtDimless], phiExtDimless = 0.0];
+
+  (* 3. Центральная частота (мгновенно из кэша O(1)) *)
+  w0 = QED`Model`GetNumericalQuantity[model, "PlasmonFrequencies"];
+  If[FailureQ[w0], Return[$Failed]];
+
+  (* 4. Создаем конвейер ТОЛЬКО для расчета боковых сдвигов *)
   freqFunc = GenerateSweepPipeline[model, "PlasmonFrequencies"];
   If[freqFunc === $Failed, Return[$Failed]];
 
-  (* 3. Рабочая точка *)
-  phiExtDimless = (QED`$PhiExt /. model["SubstitutionRules"]) / QED`$Phi0Value;
-  If[!NumericQ[phiExtDimless], phiExtDimless = 0.0];
-
-  (* 4. Считаем частоты (мгновенно благодаря JIT и кэшу путей!) *)
-  w0 = freqFunc[phiExtDimless];
   wPlus = freqFunc[phiExtDimless + h];
   wMinus = freqFunc[phiExtDimless - h];
   
-  If[AnyTrue[{w0, wPlus, wMinus}, FailureQ], Return[$Failed]];
+  If[AnyTrue[{wPlus, wMinus}, FailureQ], Return[$Failed]];
 
   (* 5. Численные производные (центральная разность) *)
   d1 = (wPlus - wMinus) / (2 * h);
   d2 = (wPlus - 2*w0 + wMinus) / (h^2);
   
-  (* 6. Скорости *)
+  (* 6. Скорости дефазировки *)
   gamma1 = A * logFac * Abs[d1];
   gamma2 = (A^2) * logFac * Abs[d2]; 
   totalRate = Sqrt[gamma1^2 + gamma2^2];
