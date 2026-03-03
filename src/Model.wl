@@ -122,7 +122,7 @@ GetParameterRules[modelAssoc_Association] := Module[
 
 GetStaticRules[modelAssoc_Association] := Join[
   GetParameterRules[modelAssoc],
-  {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue, QED`$e -> QED`$eValue}
+  {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue, QED`$e -> QED`$eValue, QED`$Z0 -> QED`$Z0Value}
 ];
 
 GetParameterSymbols[modelAssoc_Association] := Map[First, GetParameterRules[modelAssoc]];
@@ -338,11 +338,11 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
   potentialGradient = BuildPotentialGradient[hamiltonian, topology];
 
 (* Вычисляем S-матрицу для портов {1, 2} (считаем, что они всегда есть) *)
-  scattering12 = QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 2}];
+  scattering12 = QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 2}, ReferenceImpedance -> QED`$Z0];
   
   (* Безопасное вычисление S-матрицы для портов {1, 4} *)
   scattering14 = If[MemberQ[topology["Nodes"], 4],
-      QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 4}],
+      QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 4}, ReferenceImpedance -> QED`$Z0],
       $Failed
   ];
 
@@ -503,7 +503,7 @@ $DependencyRegistry = <|
         If[!NumericQ[omega], Return[$Failed]];
         
         portIndices = scatData["PortIndices"];
-        z0 = 50.0;
+        z0 = QED`$Z0Value;
         
         QED`Numeric`Calculators`CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0]
       ]
@@ -526,7 +526,7 @@ $DependencyRegistry = <|
         If[!NumericQ[omega], Return[$Failed]];
         
         portIndices = scatData["PortIndices"];
-        z0 = 50.0;
+        z0 = QED`$Z0Value;
         
         QED`Numeric`Calculators`CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0]
       ]

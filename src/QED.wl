@@ -21,6 +21,13 @@ $hbar = Symbol["\[HBar]"];
 $hbarValue::usage = "Numerical value of reduced Planck constant in J·s.";
 $hbarValue = 1.054571817 * 10.^-34;
 
+(* Волновое сопротивление измерительного тракта (портов) *)
+$Z0::usage = "Subscript[Z, 0] - reference impedance for scattering matrix ports.";
+$Z0 = Subscript[Symbol["Z"], 0];
+
+$Z0Value::usage = "Numerical value of reference impedance in Ohms.";
+$Z0Value = 50.0;
+
 (* Символ внешнего магнитного потока *)
 $PhiExt::usage = "Subscript[\[CapitalPhi], ext] - external magnetic flux threading superconducting loops.";
 $PhiExt = Subscript[Symbol["\[CapitalPhi]"], "ext"];
