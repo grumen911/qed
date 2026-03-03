@@ -217,12 +217,28 @@ RegisterPlot["DephasingTime", "Pure Dephasing Time (T_phi)", "Heavy",
   Function[{m}, QED`Plots`PlotDephasingTime[m]]
 ];
 
-RegisterPlot["Smatrix", "Scattering Parameters (S-matrix)", "Light", 
-  Function[{m}, QED`Plots`PlotFrequencyResponse[m]]
+RegisterPlot["Smatrix_1_2", "S-matrix (Ports 1-2)", "Light", 
+  Function[{m}, QED`Plots`PlotFrequencyResponse[m, "Ports" -> "{1,2}"]]
 ];
 
-RegisterPlot["SmatrixHeatmap", "Scattering Parameters Heatmap", "Heavy", 
-  Function[{m}, QED`Plots`PlotSParameterMap[m]]
+RegisterPlot["Smatrix_1_4", "S-matrix (Ports 1-4)", "Light", 
+  Function[{m}, QED`Plots`PlotFrequencyResponse[m, "Ports" -> "{1,4}"]]
+];
+
+RegisterPlot["SmatrixHeatmap_1_2", "S-matrix Heatmap (Ports 1-2)", "Heavy", 
+  Function[{m}, QED`Plots`PlotSParameterMap[m, "Ports" -> "{1,2}"]]
+];
+
+RegisterPlot["SmatrixHeatmap_1_4", "S-matrix Heatmap (Ports 1-4)", "Heavy", 
+  Function[{m}, QED`Plots`PlotSParameterMap[m, "Ports" -> "{1,4}"]]
+];
+
+RegisterPlot["BICCondition_1_2", "BIC Condition (Ports 1-2)", "Heavy", 
+  Function[{m}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,2}"]]
+];
+
+RegisterPlot["BICCondition_1_4", "BIC Condition (Ports 1-4)", "Heavy", 
+  Function[{m}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,4}"]]
 ];
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)

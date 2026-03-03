@@ -190,16 +190,83 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
             QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"]
           ]["NormalModeFrequencies"],
         
-        "SMatrix",
-          Module[{invLNum, portIndices},
-            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
-            portIndices = modelAssoc["Analytical"]["Scattering"]["PortIndices"];
+        "SMatrix_1_2",
+          Module[{invLNum, portIndices, scatData},
+            scatData = modelAssoc["Analytical"]["Scattering"]["1_2"];
+            If[scatData === $Failed, Return[$Failed]];
             
-            (* Возвращаем чистую функцию от частоты omega *)
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            portIndices = scatData["PortIndices"];
+            
             Function[{omegaReq},
               QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, staticMats[[1]], invLNum, portIndices, 50.0]
             ]
           ],
+          
+        "SMatrix_1_4",
+          Module[{invLNum, portIndices, scatData},
+            scatData = modelAssoc["Analytical"]["Scattering"]["1_4"];
+            If[scatData === $Failed, Return[$Failed]];
+            
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            portIndices = scatData["PortIndices"];
+            
+            Function[{omegaReq},
+              QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, staticMats[[1]], invLNum, portIndices, 50.0]
+            ]
+          ],
+
+        "BICRoots_1_2",
+          Module[{bicData, eqs, xVar, dynamicRules, nodes, minSymbols},
+            bicData = modelAssoc["Analytical"]["BICCondition_1_2"];
+            If[bicData === $Failed, Return[$Failed]];
+            
+            eqs = bicData["FullSystem"];
+            xVar = bicData["Variable"];
+            dynamicRules = modelAssoc["Analytical"]["DynamicInductanceRules"];
+            
+            (* 1. Подготавливаем символы узлов один раз для генерации правил *)
+            nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+            minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+            
+            Function[{omegaReq},
+              Module[{numEqs, guessRules, paramRules},
+                (* 2. Сшиваем символы с текущими численными массивами *)
+                guessRules = Thread[minSymbols -> currentGuess];
+                paramRules = Thread[paramSymbols -> currentParamVector];
+                
+                (* 3. Делаем правильную подстановку ВСЕГО, включая константы кванта потока! *)
+                numEqs = eqs /. dynamicRules /. guessRules /. paramRules /. {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue};
+
+                QED`Numeric`Calculators`CalcBICRootsNumeric[numEqs, xVar]
+              ]
+            ]
+          ],
+
+        "BICRoots_1_4",
+          Module[{bicData, eqs, xVar, dynamicRules, nodes, minSymbols},
+            bicData = modelAssoc["Analytical"]["BICCondition_1_4"];
+            If[bicData === $Failed, Return[$Failed]];
+            
+            eqs = bicData["FullSystem"];
+            xVar = bicData["Variable"];
+            dynamicRules = modelAssoc["Analytical"]["DynamicInductanceRules"];
+            
+            nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+            minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+            
+            Function[{omegaReq},
+              Module[{numEqs, guessRules, paramRules},
+                guessRules = Thread[minSymbols -> currentGuess];
+                paramRules = Thread[paramSymbols -> currentParamVector];
+                
+                numEqs = eqs /. dynamicRules /. guessRules /. paramRules /. {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue};
+                
+                QED`Numeric`Calculators`CalcBICRootsNumeric[numEqs, xVar]
+              ]
+            ]
+          ],
+
         _, 
           $Failed
       ]

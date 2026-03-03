@@ -122,7 +122,7 @@ GetParameterRules[modelAssoc_Association] := Module[
 
 GetStaticRules[modelAssoc_Association] := Join[
   GetParameterRules[modelAssoc],
-  {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue, QED`$e -> QED`$eValue}
+  {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue, QED`$e -> QED`$eValue, QED`$Z0 -> QED`$Z0Value}
 ];
 
 GetParameterSymbols[modelAssoc_Association] := Map[First, GetParameterRules[modelAssoc]];
@@ -315,8 +315,10 @@ GenerateDefaultParameters[topology_] :=
  ];
 
 ComputeAnalyticalParams[topology_, primaryParams_] := 
- Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
- 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering, potential},
+ Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian, potential,
+ 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, 
+     scattering12, scattering14, scattering, bicCondition12, bicCondition14, 
+     dynamicInductanceRules},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -333,10 +335,43 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
   (* Индуктивная матрица (обратная) *)
   indMatrix = BuildInductanceMatrix[hamiltonian, topology];
   
-  (*Градиент потенциала для поиска равновесия *)
+  (* Градиент потенциала для поиска равновесия *)
   potentialGradient = BuildPotentialGradient[hamiltonian, topology];
+  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
 
-  scattering = QED`Scattering`BuildSymbolicScattering[topology, primaryParams];
+  (* Генерируем динамические правила индуктивности *)
+  dynamicInductanceRules = QED`Analytic`BuildDynamicInductanceRules[topology, primaryParams, potential];
+
+(* Вычисляем S-матрицу для портов {1, 2} (считаем, что они всегда есть) *)
+  scattering12 = QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 2}, ReferenceImpedance -> QED`$Z0];
+  
+  (* Безопасное вычисление S-матрицы для портов {1, 4} *)
+  scattering14 = If[MemberQ[topology["Nodes"], 4],
+      QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 4}, ReferenceImpedance -> QED`$Z0],
+      $Failed
+  ];
+
+  (* Вычисляем гибридное условие BIC, передавая правило зануления CJ для аналитики *)
+  bicCondition12 = If[scattering12 =!= $Failed,
+      QED`Scattering`BuildSymbolicBICCondition[scattering12, 
+          SimplificationRules -> {Subscript[QED`$JosephsonCapacitanceSymbol, _] -> 0}
+      ],
+      $Failed
+  ];
+
+  (* Вычисляем гибридное условие BIC, передавая правило зануления CJ для аналитики *)
+  bicCondition14 = If[scattering14 =!= $Failed,
+      QED`Scattering`BuildSymbolicBICCondition[scattering14, 
+          SimplificationRules -> {Subscript[QED`$JosephsonCapacitanceSymbol, _] -> 0}
+      ],
+      $Failed
+  ];
+
+  (* Упаковываем в ассоциацию *)
+  scattering = <|
+      "1_2" -> scattering12, 
+      "1_4" -> scattering14
+  |>;
 
   <|
     "CapacitanceMatrix" -> capMatrix,
@@ -344,10 +379,13 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
     "HarmonicHamiltonian" -> harmonicHamiltonian,
     "InductanceMatrix" -> indMatrix,
     "PotentialGradient" -> potentialGradient,
-    "Potential" -> hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0,
+    "Potential" -> potential,
     "CurrentOperator" -> currentOp,
     "VoltageOperators" -> voltageOperatorsSym,
-    "Scattering" -> scattering
+    "Scattering" -> scattering,
+    "BICCondition_1_2" -> bicCondition12,
+    "BICCondition_1_4" -> bicCondition14,
+    "DynamicInductanceRules" -> dynamicInductanceRules
   |>
  ];
 
@@ -473,27 +511,48 @@ $DependencyRegistry = <|
     ]
   |>,
 
-  "SMatrix" -> <|
+  "SMatrix_1_2" -> <|
     "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
     "RelevantHashes" -> {"Kinetic", "Potential", "External"},
     "Compute" -> Function[{modelAssoc, depsData},
-      Module[{cNum, invLNum, omega, portIndices, z0, analytical},
-        cNum = depsData["StaticMatrices"][[1]]; (* Первая матрица - C *)
+      Module[{cNum, invLNum, omega, portIndices, z0, analytical, scatData},
+        cNum = depsData["StaticMatrices"][[1]];
         invLNum = depsData["SystemMatrices"]["InverseInductance"];
         analytical = modelAssoc["Analytical"];
         
-        (* Извлекаем частоту и порты из правил (на будущее можно вынести в параметры GUI) *)
-        omega = ReplaceAll[analytical["Scattering"]["FrequencyVariable"], GetStaticRules[modelAssoc]];
-        
-        (* Если omega не задана числом, возвращаем Failed *)
+        scatData = analytical["Scattering"]["1_2"];
+        If[scatData === $Failed, Return[$Failed]];
+
+        omega = ReplaceAll[scatData["FrequencyVariable"], GetStaticRules[modelAssoc]];
         If[!NumericQ[omega], Return[$Failed]];
         
-        portIndices = analytical["Scattering"]["PortIndices"];
-        z0 = 50.0; (* Базовый импеданс линии *)
+        portIndices = scatData["PortIndices"];
+        z0 = QED`$Z0Value;
         
-        QED`Numeric`Calculators`CalcSMatrixNumeric[
-          omega, cNum, invLNum, portIndices, z0
-        ]
+        QED`Numeric`Calculators`CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0]
+      ]
+    ]
+  |>,
+
+  "SMatrix_1_4" -> <|
+    "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{cNum, invLNum, omega, portIndices, z0, analytical, scatData},
+        cNum = depsData["StaticMatrices"][[1]];
+        invLNum = depsData["SystemMatrices"]["InverseInductance"];
+        analytical = modelAssoc["Analytical"];
+        
+        scatData = analytical["Scattering"]["1_4"];
+        If[scatData === $Failed, Return[$Failed]];
+
+        omega = ReplaceAll[scatData["FrequencyVariable"], GetStaticRules[modelAssoc]];
+        If[!NumericQ[omega], Return[$Failed]];
+        
+        portIndices = scatData["PortIndices"];
+        z0 = QED`$Z0Value;
+        
+        QED`Numeric`Calculators`CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0]
       ]
     ]
   |>,

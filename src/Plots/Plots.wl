@@ -116,6 +116,9 @@ Options:
 Performance:
   Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
 
+PlotBICModes::usage = "PlotBICModes[model, options] plots the dispersion curves of the two polynomial BIC conditions. \
+Intersections of these curves indicate the presence of a Bound State in the Continuum.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
@@ -123,10 +126,17 @@ PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceCon
 Begin["`Private`"];
 
 
+Options[PlotBICModes] = {
+  Ports -> "{1, 2}",
+  SweepRange -> {0., 0.5},
+  SweepPoints -> 100
+};
+
 Options[PlotSParameterMap] = {
   "FrequencyRange" -> {4., 12.},
   "FluxRange" -> {0., 0.5},
   "Measurement" -> "S21",
+  "Ports" -> "{1,2}",
   PlotPoints -> 50,
   ColorFunction -> "SunsetColors",
   FrameLabel -> {
@@ -139,6 +149,7 @@ Options[PlotFrequencyResponse] = {
   "FrequencyRange" -> {0., 20.}, 
   "FluxRange" -> {0., 0.5}, 
   "Measurement" -> "S21", (* "S11" or "S21" *) 
+  "Ports" -> "{1,2}",
   PlotPoints -> 50
 };
 
@@ -1104,21 +1115,28 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
 ];
 
 PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] := 
- Module[{measure, sIndex, color, label, phiExt, sMatrixAtPhi, plotFunc, plotPoints, fMin, fMax},
+ Module[{measure, sIndex, color, label, phiExt, sMatrixAtPhi, plotFunc, plotPoints, fMin, fMax, portsOpt, depKey},
   
   {fMin, fMax} = OptionValue["FrequencyRange"];
   measure = OptionValue["Measurement"];
+  portsOpt = OptionValue["Ports"];
   plotPoints = OptionValue[PlotPoints];
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
 
   (* 1. Получаем текущий внешний поток *)
   phiExt = (QED`$PhiExt /. QED`Model`GetStaticRules[model]) / QED`$Phi0Value;
   
-  (* 2. Используем JIT-конвейер *)
-  sMatrixAtPhi = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"][phiExt];
+  (* 2. Формируем ключ JIT-конвейера и безопасно вызываем его *)
+  depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
+  Module[{sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey]},
+    If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+       Return[Graphics[{Red, Text[Style[depKey <> " not available\n(missing nodes?)", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+    ];
+    sMatrixAtPhi = sweepFunc[phiExt];
+  ];
   
-  If[sMatrixAtPhi === $Failed,
-     Return[Graphics[{Red, Text[Style["S-Matrix engine failed.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  If[sMatrixAtPhi === $Failed || Head[sMatrixAtPhi] === $Failed,
+     Return[Graphics[{Red, Text[Style["S-Matrix evaluation failed.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
 
   (* 3. Защищенная функция (принимает только числа) *)
@@ -1144,12 +1162,15 @@ PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] :=
 PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   Module[{
     fMin, fMax, fluxRange, measure, plotPoints, colFunc,
-    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend
+    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
+    portsOpt, depKey
   },
   
   {fMin, fMax} = OptionValue["FrequencyRange"];
   fluxRange = OptionValue["FluxRange"];
   measure = OptionValue["Measurement"];
+  portsOpt = OptionValue["Ports"];
+
   plotPoints = OptionValue[PlotPoints];
   colFunc = OptionValue[ColorFunction];
   
@@ -1157,11 +1178,12 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
   legendLabel = If[measure === "S11", "|S11|", "|S21|"];
 
-  (* 1. Используем JIT-конвейер *)
-  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"];
-
-  If[sweepFunc === $Failed,
-      Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
+  (* 1. Формируем ключ JIT-конвейера и вызываем его *)
+  depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
+  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey];
+  
+  If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+      Return[Graphics[{Red, Text[Style["Error: " <> depKey <> " not available\n(missing nodes?)", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
 
   (* 2. Защищенная функция (принимает только числа) *)
@@ -1291,6 +1313,82 @@ PlotSpectroscopyScanner[model_Association, opts:OptionsPattern[]] :=
        ]
     }, Alignment -> Center]
   ];
+
+PlotBICModes[model_Association, OptionsPattern[]] := Module[
+  {portsOpt, phiMin, phiMax, plotPts, depKey, sweepFunc, 
+   computeRoots, lastPhi = "Init", lastRoots = {{}, {}}, getEqRoot,
+   maxRoots = 3, funcsToPlot, plotStyles},
+  
+  portsOpt = OptionValue[Ports];
+  {phiMin, phiMax} = OptionValue[SweepRange];
+  plotPts = OptionValue[SweepPoints];
+  
+  (* 1. Получаем замыкание из JIT-движка *)
+  depKey = If[portsOpt === "{1,4}", "BICRoots_1_4", "BICRoots_1_2"];
+  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey];
+  
+  If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+     Return[Graphics[{Red, Text[Style["BIC Analytical Roots not available\n(" <> depKey <> ")", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+  
+  (* 2. Внутренняя функция расчета с умным кэшем *)
+  computeRoots[phi_] := Module[{res},
+    QED`Numeric`GenerateSweepPipeline[model, "SweepInit"][phi];
+    res = sweepFunc[phi][0.0];
+    If[ListQ[res], res / (2 * Pi * 10^9), {{}, {}}]
+  ];
+  
+  getEqRoot[eqIdx_Integer, rootIdx_Integer, phi_?NumericQ] := (
+     If[phi =!= lastPhi,
+        lastPhi = phi;
+        lastRoots = computeRoots[phi];
+     ];
+     If[eqIdx <= Length[lastRoots] && rootIdx <= Length[lastRoots[[eqIdx]]],
+        lastRoots[[eqIdx, rootIdx]],
+        Indeterminate
+     ]
+  );
+  
+  (* 3. Подготовка плоских структур для функции Plot *)
+  (* ВАЖНО: Рисуем сначала полюса (eq=2), затем нули (eq=1), чтобы нули оказались на переднем плане *)
+  funcsToPlot = Flatten[Table[getEqRoot[eq, r, phi], {eq, {2, 1}}, {r, 1, maxRoots}]];
+  
+  plotStyles = Flatten[Table[
+    If[eq == 1, 
+        Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]],         (* Синий сплошной для Нулей *)
+        Directive[RGBColor[1.0, 0.50, 0.05], Dashed, Thickness[0.005]]   (* Оранжевый пунктир для Полюсов *)
+    ],
+    {eq, {2, 1}}, {r, 1, maxRoots}
+  ]];
+  
+  (* 4. Отрисовка адаптивного графика *)
+  Plot[
+    Evaluate[funcsToPlot],
+    {phi, phiMin, phiMax},
+    
+    PlotStyle -> plotStyles,
+    PlotRange -> {0, 15}, 
+    PlotLegends -> Placed[
+      LineLegend[
+        {Directive[RGBColor[0.12, 0.47, 0.71]], 
+         Directive[RGBColor[1.0, 0.50, 0.05], Dashed]}, 
+        {"Zeros", "Poles"},
+        (* Добавляем белый фон и аккуратную скругленную рамку *)
+        LegendFunction -> (Framed[#, Background -> White, RoundingRadius -> 5, FrameStyle -> GrayLevel[0.8]] &)
+      ], 
+      {Left, Bottom}
+    ],
+    Frame -> True,
+    FrameLabel -> {Style["External Flux (\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\))", 14], 
+                   Style["Frequency (GHz)", 14]},
+    PlotLabel -> Style["BIC Modes Intersection (Ports " <> portsOpt <> ")", 16],
+    GridLines -> None,
+    ImageSize -> 600,
+    
+    MaxRecursion -> 2,
+    PlotPoints -> plotPts
+  ]
+];
 
 End[];
 EndPackage[];
