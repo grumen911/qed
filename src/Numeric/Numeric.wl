@@ -215,6 +215,47 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
               QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, staticMats[[1]], invLNum, portIndices, 50.0]
             ]
           ],
+
+        "BICRoots_1_2",
+          Module[{bicData, eqs, xVar, dynamicRules},
+            bicData = modelAssoc["Analytical"]["BICCondition_1_2"];
+            If[bicData === $Failed, Return[$Failed]];
+            
+            eqs = bicData["FullSystem"];
+            xVar = bicData["Variable"];
+            dynamicRules = modelAssoc["Analytical"]["DynamicInductanceRules"];
+            
+            (* Возвращаем замыкание. Аргумент omegaReq игнорируется, так как мы ИЩЕМ частоты *)
+            Function[{omegaReq},
+              Module[{numEqs},
+                (* Магия тройной подстановки: 
+                   1. L_EJ -> Формулы с Cos
+                   2. Ф_min -> Текущие численные фазы
+                   3. EJ, C -> Текущие численные параметры схемы *)
+                numEqs = eqs /. dynamicRules /. currentGuess /. currentParamVector;
+                
+                QED`Numeric`Calculators`CalcBICRootsNumeric[numEqs, xVar]
+              ]
+            ]
+          ],
+
+        "BICRoots_1_4",
+          Module[{bicData, eqs, xVar, dynamicRules},
+            bicData = modelAssoc["Analytical"]["BICCondition_1_4"];
+            If[bicData === $Failed, Return[$Failed]];
+            
+            eqs = bicData["FullSystem"];
+            xVar = bicData["Variable"];
+            dynamicRules = modelAssoc["Analytical"]["DynamicInductanceRules"];
+            
+            Function[{omegaReq},
+              Module[{numEqs},
+                numEqs = eqs /. dynamicRules /. currentGuess /. currentParamVector;
+                QED`Numeric`Calculators`CalcBICRootsNumeric[numEqs, xVar]
+              ]
+            ]
+          ],  
+          
         _, 
           $Failed
       ]
