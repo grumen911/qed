@@ -1331,25 +1331,18 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
      Return[Graphics[{Red, Text[Style["BIC Analytical Roots not available\n(" <> depKey <> ")", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
   
-  (* 2. Внутренняя функция расчета с умным кэшем (аналогично PlotRelaxationTime) *)
+  (* 2. Внутренняя функция расчета с умным кэшем *)
   computeRoots[phi_] := Module[{res},
-    (* Инициализируем шаг по потоку, чтобы движок пересчитал фазы phi_min *)
     QED`Numeric`GenerateSweepPipeline[model, "SweepInit"][phi];
-    
-    (* ВАЖНО: Вызываем двойное замыкание! Сначала передаем phi, затем фиктивную частоту 0.0 *)
     res = sweepFunc[phi][0.0];
-    
-    (* Переводим циклические частоты (рад/с) в гигагерцы (ГГц) *)
     If[ListQ[res], res / (2 * Pi * 10^9), {{}, {}}]
   ];
   
   getEqRoot[eqIdx_Integer, rootIdx_Integer, phi_?NumericQ] := (
-     (* Если точка phi новая - пересчитываем все корни и кэшируем *)
      If[phi =!= lastPhi,
         lastPhi = phi;
         lastRoots = computeRoots[phi];
      ];
-     (* Безопасно извлекаем нужный корень или возвращаем Indeterminate *)
      If[eqIdx <= Length[lastRoots] && rootIdx <= Length[lastRoots[[eqIdx]]],
         lastRoots[[eqIdx, rootIdx]],
         Indeterminate
@@ -1357,14 +1350,15 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
   );
   
   (* 3. Подготовка плоских структур для функции Plot *)
-  funcsToPlot = Flatten[Table[getEqRoot[eq, r, phi], {eq, 1, 2}, {r, 1, maxRoots}]];
+  (* ВАЖНО: Рисуем сначала полюса (eq=2), затем нули (eq=1), чтобы нули оказались на переднем плане *)
+  funcsToPlot = Flatten[Table[getEqRoot[eq, r, phi], {eq, {2, 1}}, {r, 1, maxRoots}]];
   
   plotStyles = Flatten[Table[
     If[eq == 1, 
-        Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], (* Синий для Eq1 *)
-        Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]   (* Оранжевый для Eq2 *)
+        Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]],         (* Синий сплошной для Нулей *)
+        Directive[RGBColor[1.0, 0.50, 0.05], Dashed, Thickness[0.005]]   (* Оранжевый пунктир для Полюсов *)
     ],
-    {eq, 1, 2}, {r, 1, maxRoots}
+    {eq, {2, 1}}, {r, 1, maxRoots}
   ]];
   
   (* 4. Отрисовка адаптивного графика *)
@@ -1373,22 +1367,24 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
     {phi, phiMin, phiMax},
     
     PlotStyle -> plotStyles,
-    PlotRange -> {0, 15}, (* Ограничение по оси Y (ГГц), чтобы выбросы не ломали масштаб *)
+    PlotRange -> {0, 15}, 
     PlotLegends -> Placed[
       LineLegend[
-        {RGBColor[0.12, 0.47, 0.71], RGBColor[1.0, 0.50, 0.05]}, 
-        {"Condition 1 (\!\(\*SubscriptBox[\(\[CapitalDelta]\), \(Y\)]\) = 0)", "Condition 2 (Det[M] = 0)"}
+        {Directive[RGBColor[0.12, 0.47, 0.71]], 
+         Directive[RGBColor[1.0, 0.50, 0.05], Dashed]}, 
+        {"Zeros", "Poles"},
+        (* Добавляем белый фон и аккуратную скругленную рамку *)
+        LegendFunction -> (Framed[#, Background -> White, RoundingRadius -> 5, FrameStyle -> GrayLevel[0.8]] &)
       ], 
-      Below
+      {Left, Bottom}
     ],
     Frame -> True,
     FrameLabel -> {Style["External Flux (\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\))", 14], 
                    Style["Frequency (GHz)", 14]},
     PlotLabel -> Style["BIC Modes Intersection (Ports " <> portsOpt <> ")", 16],
-    GridLines -> Automatic,
+    GridLines -> None,
     ImageSize -> 600,
     
-    (* Встроенные оптимизации Mathematica для гладких линий *)
     MaxRecursion -> 2,
     PlotPoints -> plotPts
   ]
