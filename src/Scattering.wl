@@ -1,6 +1,11 @@
 BeginPackage["QED`Scattering`", {"QED`Model`"}];
 
-BuildSymbolicScattering::usage = "BuildSymbolicScattering[topology, primaryParams, options] computes symbolic S-matrix. Note: Ignores topological GroundNode (floating ground assumption).";
+BuildSymbolicScattering::usage = "BuildSymbolicScattering[topology, primaryParams, options] computes symbolic S-matrix. \
+Note: Ignores topological GroundNode (floating ground assumption).";
+
+BuildSymbolicBICCondition::usage = "BuildSymbolicBICCondition[sMatrixAssoc] computes the analytical conditions \
+for Bound States in the Continuum (BIC). It extracts the determinant of the S-matrix, treats it as a polynomial \
+in Z0, and eliminates the frequency variable to find Z0-independent purely imaginary roots.";
 
 ComputeNumericalScattering::usage = "ComputeNumericalScattering[model, frequencyList] computes numerical S-parameters.";
 
@@ -16,6 +21,10 @@ Options[BuildSymbolicScattering] = {
   Ports -> {1,2}, (* Automatic *)
   ReferenceImpedance -> 50,
   IgnoreJunctionCapacitance -> False
+};
+
+Options[BuildSymbolicBICCondition] = {
+  SimplificationRules -> {}
 };
 
 BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : OptionsPattern[]] := 
@@ -141,13 +150,61 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
   |>
  ];
 
+BuildSymbolicBICCondition[sMatrixAssoc_Association, opts : OptionsPattern[]] := 
+ Module[{sMat, sVar, z0Var, xVar, detS, charPoly, coeffs, processPoly, 
+         rawSystem, rules, simplifiedSystem, cond},
+  
+  sMat = sMatrixAssoc["SMatrix"];
+  sVar = sMatrixAssoc["FrequencyVariable"];
+  z0Var = QED`$Z0;
+  xVar = Symbol["x"]; (* Переменная для x = s^2 = -\omega^2 *)
+  
+  (* 1. Вычисляем детерминант S-матрицы *)
+  detS = Det[sMat];
+  
+  (* 2. Берем только числитель (избавляемся от знаменателей) *)
+  charPoly = Numerator[Together[detS]];
+  
+  (* 3. Извлекаем коэффициенты при степенях Z0 *)
+  coeffs = CoefficientList[Expand[charPoly], z0Var];
+  
+  (* 4. Вспомогательная функция: разделяет четность и делает замену s^2 -> x *)
+  processPoly[p_] := Module[{even, odd, pX},
+    even = Simplify[(p + (p /. sVar -> -sVar))/2];
+    odd = Simplify[(p - (p /. sVar -> -sVar))/(2 * sVar)];
+    pX = Simplify[even + odd];
+    pX = pX /. {sVar^n_Integer /; EvenQ[n] :> xVar^(n/2), sVar^2 -> xVar};
+    Simplify[pX]
+  ];
+  
+  (* 5. ПОЛНАЯ СИСТЕМА (Стратегия Б) - для численных сканирований *)
+  rawSystem = DeleteCases[Simplify[processPoly /@ coeffs], 0];
+  
+  (* 6. ПРИМЕНЕНИЕ ПРАВИЛ (Стратегия В) - для аналитики *)
+  rules = OptionValue[SimplificationRules];
+  simplifiedSystem = DeleteCases[Simplify[rawSystem /. rules], 0];
+  
+  (* 7. Исключаем x для получения финального аналитического условия *)
+  cond = If[Length[simplifiedSystem] >= 2,
+    Simplify[Eliminate[Thread[simplifiedSystem == 0], xVar]],
+    If[Length[simplifiedSystem] == 1,
+        simplifiedSystem[[1]] == 0,
+        True
+    ]
+  ];
+  
+  <|
+    "FullSystem" -> Thread[rawSystem == 0],         (* Строгая система из 2 уравнений *)
+    "SimplifiedSystem" -> Thread[simplifiedSystem == 0], (* Система после зануления CJ *)
+    "Variable" -> xVar,                             (* Искомая частота x = -omega^2 *)
+    "Condition" -> cond,                            (* Итоговое аналитическое условие (Eliminate) *)
+    "RulesApplied" -> rules
+  |>
+ ];
+
 (* ════════════════════════════════════════════════════════════════ *)
 (* ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ *)
 (* ════════════════════════════════════════════════════════════════ *)
-
-(* src/Scattering.wl *)
-
-(* src/Scattering.wl *)
 
 GetEffectiveInductances[model_Association, runtimeRules : (_List | Automatic) : Automatic] := 
  Module[{topology, primary, subRules, components, groundNode, 

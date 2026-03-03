@@ -317,7 +317,7 @@ GenerateDefaultParameters[topology_] :=
 ComputeAnalyticalParams[topology_, primaryParams_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
  		 potentialGradient, currentOp, voltageOperatorsSym, nodes, 
-     scattering12, scattering14, scattering},
+     scattering12, scattering14, scattering, bicCondition12, bicCondition14},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -346,6 +346,22 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
       $Failed
   ];
 
+  (* Вычисляем гибридное условие BIC, передавая правило зануления CJ для аналитики *)
+  bicCondition12 = If[scattering12 =!= $Failed,
+      QED`Scattering`BuildSymbolicBICCondition[scattering12, 
+          SimplificationRules -> {Subscript[QED`$JosephsonCapacitanceSymbol, _] -> 0}
+      ],
+      $Failed
+  ];
+
+  (* Вычисляем гибридное условие BIC, передавая правило зануления CJ для аналитики *)
+  bicCondition14 = If[scattering14 =!= $Failed,
+      QED`Scattering`BuildSymbolicBICCondition[scattering14, 
+          SimplificationRules -> {Subscript[QED`$JosephsonCapacitanceSymbol, _] -> 0}
+      ],
+      $Failed
+  ];
+
   (* Упаковываем в ассоциацию *)
   scattering = <|
       "1_2" -> scattering12, 
@@ -361,7 +377,9 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
     "Potential" -> hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0,
     "CurrentOperator" -> currentOp,
     "VoltageOperators" -> voltageOperatorsSym,
-    "Scattering" -> scattering
+    "Scattering" -> scattering,
+    "BICCondition_1_2" -> bicCondition12,
+    "BICCondition_1_4" -> bicCondition14
   |>
  ];
 
