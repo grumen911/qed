@@ -316,7 +316,8 @@ GenerateDefaultParameters[topology_] :=
 
 ComputeAnalyticalParams[topology_, primaryParams_] := 
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
- 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, scattering, potential},
+ 		 potentialGradient, currentOp, voltageOperatorsSym, nodes, 
+     scattering12, scattering14, scattering},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -336,7 +337,20 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
   (*Градиент потенциала для поиска равновесия *)
   potentialGradient = BuildPotentialGradient[hamiltonian, topology];
 
-  scattering = QED`Scattering`BuildSymbolicScattering[topology, primaryParams];
+(* Вычисляем S-матрицу для портов {1, 2} (считаем, что они всегда есть) *)
+  scattering12 = QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 2}];
+  
+  (* Безопасное вычисление S-матрицы для портов {1, 4} *)
+  scattering14 = If[MemberQ[topology["Nodes"], 4],
+      QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 4}],
+      $Failed
+  ];
+
+  (* Упаковываем в ассоциацию *)
+  scattering = <|
+      "1_2" -> scattering12, 
+      "1_4" -> scattering14
+  |>;
 
   <|
     "CapacitanceMatrix" -> capMatrix,
