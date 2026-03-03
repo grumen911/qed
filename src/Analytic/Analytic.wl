@@ -417,7 +417,7 @@ BuildDynamicInductanceRules[topology_, primaryParams_, potential_] :=
           
           If[Length[cosArgs] > 0,
             (* Формируем символ эффективной индуктивности *)
-            lEjSym = Subscript[QED`$InductanceSymbol, Symbol[name]];
+            lEjSym = Subscript[QED`$InductanceSymbol, name];
             
             (* Правило перевода обычных потоков узлов в равновесные (с индексом "min") *)
             minRule = (Subscript[QED`$FluxSymbol, i_] :> Subscript[QED`$FluxSymbol, "min", i]);

@@ -94,7 +94,7 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
         "JosephsonJunction",
            symC = primaryParams[name]["CJ"]["Symbol"];
            valC = If[ignoreCap, 0, sVar * symC];
-           valL = 1 / (sVar * Subscript["L", name]);
+           valL = 1 / (sVar * Subscript[QED`$InductanceSymbol, name]);
            valC + valL,
            
         _, 0
