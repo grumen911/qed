@@ -127,6 +127,7 @@ Options[PlotSParameterMap] = {
   "FrequencyRange" -> {4., 12.},
   "FluxRange" -> {0., 0.5},
   "Measurement" -> "S21",
+  "Ports" -> "{1,2}",
   PlotPoints -> 50,
   ColorFunction -> "SunsetColors",
   FrameLabel -> {
@@ -139,6 +140,7 @@ Options[PlotFrequencyResponse] = {
   "FrequencyRange" -> {0., 20.}, 
   "FluxRange" -> {0., 0.5}, 
   "Measurement" -> "S21", (* "S11" or "S21" *) 
+  "Ports" -> "{1,2}",
   PlotPoints -> 50
 };
 
@@ -1104,18 +1106,20 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
 ];
 
 PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] := 
- Module[{measure, sIndex, color, label, phiExt, sMatrixAtPhi, plotFunc, plotPoints, fMin, fMax},
+ Module[{measure, sIndex, color, label, phiExt, sMatrixAtPhi, plotFunc, plotPoints, fMin, fMax, portsOpt, depKey},
   
   {fMin, fMax} = OptionValue["FrequencyRange"];
   measure = OptionValue["Measurement"];
+  portsOpt = OptionValue["Ports"];
   plotPoints = OptionValue[PlotPoints];
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
 
   (* 1. Получаем текущий внешний поток *)
   phiExt = (QED`$PhiExt /. QED`Model`GetStaticRules[model]) / QED`$Phi0Value;
   
-  (* 2. Используем JIT-конвейер *)
-  sMatrixAtPhi = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"][phiExt];
+  (* 2. Формируем ключ JIT-конвейера и вызываем его *)
+  depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
+  sMatrixAtPhi = QED`Numeric`GenerateSweepPipeline[model, depKey][phiExt];
   
   If[sMatrixAtPhi === $Failed,
      Return[Graphics[{Red, Text[Style["S-Matrix engine failed.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
@@ -1144,12 +1148,15 @@ PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] :=
 PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   Module[{
     fMin, fMax, fluxRange, measure, plotPoints, colFunc,
-    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend
+    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
+    portsOpt, depKey
   },
   
   {fMin, fMax} = OptionValue["FrequencyRange"];
   fluxRange = OptionValue["FluxRange"];
   measure = OptionValue["Measurement"];
+  portsOpt = OptionValue["Ports"];
+
   plotPoints = OptionValue[PlotPoints];
   colFunc = OptionValue[ColorFunction];
   
@@ -1157,8 +1164,9 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
   legendLabel = If[measure === "S11", "|S11|", "|S21|"];
 
-  (* 1. Используем JIT-конвейер *)
-  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "SMatrix"];
+  (* 1. Формируем ключ JIT-конвейера и вызываем его *)
+  depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
+  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey];
 
   If[sweepFunc === $Failed,
       Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
