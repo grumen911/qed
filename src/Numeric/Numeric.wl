@@ -217,7 +217,7 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
           ],
 
         "BICRoots_1_2",
-          Module[{bicData, eqs, xVar, dynamicRules},
+          Module[{bicData, eqs, xVar, dynamicRules, nodes, minSymbols},
             bicData = modelAssoc["Analytical"]["BICCondition_1_2"];
             If[bicData === $Failed, Return[$Failed]];
             
@@ -225,22 +225,26 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
             xVar = bicData["Variable"];
             dynamicRules = modelAssoc["Analytical"]["DynamicInductanceRules"];
             
-            (* Возвращаем замыкание. Аргумент omegaReq игнорируется, так как мы ИЩЕМ частоты *)
+            (* 1. Подготавливаем символы узлов один раз для генерации правил *)
+            nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+            minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+            
             Function[{omegaReq},
-              Module[{numEqs},
-                (* Магия тройной подстановки: 
-                   1. L_EJ -> Формулы с Cos
-                   2. Ф_min -> Текущие численные фазы
-                   3. EJ, C -> Текущие численные параметры схемы *)
-                numEqs = eqs /. dynamicRules /. currentGuess /. currentParamVector;
+              Module[{numEqs, guessRules, paramRules},
+                (* 2. Сшиваем символы с текущими численными массивами *)
+                guessRules = Thread[minSymbols -> currentGuess];
+                paramRules = Thread[paramSymbols -> currentParamVector];
                 
+                (* 3. Делаем правильную подстановку ВСЕГО, включая константы кванта потока! *)
+                numEqs = eqs /. dynamicRules /. guessRules /. paramRules /. {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue};
+
                 QED`Numeric`Calculators`CalcBICRootsNumeric[numEqs, xVar]
               ]
             ]
           ],
 
         "BICRoots_1_4",
-          Module[{bicData, eqs, xVar, dynamicRules},
+          Module[{bicData, eqs, xVar, dynamicRules, nodes, minSymbols},
             bicData = modelAssoc["Analytical"]["BICCondition_1_4"];
             If[bicData === $Failed, Return[$Failed]];
             
@@ -248,14 +252,21 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
             xVar = bicData["Variable"];
             dynamicRules = modelAssoc["Analytical"]["DynamicInductanceRules"];
             
+            nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+            minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+            
             Function[{omegaReq},
-              Module[{numEqs},
-                numEqs = eqs /. dynamicRules /. currentGuess /. currentParamVector;
+              Module[{numEqs, guessRules, paramRules},
+                guessRules = Thread[minSymbols -> currentGuess];
+                paramRules = Thread[paramSymbols -> currentParamVector];
+                
+                numEqs = eqs /. dynamicRules /. guessRules /. paramRules /. {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue};
+                
                 QED`Numeric`Calculators`CalcBICRootsNumeric[numEqs, xVar]
               ]
             ]
-          ],  
-          
+          ],
+
         _, 
           $Failed
       ]
