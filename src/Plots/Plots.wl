@@ -1335,9 +1335,12 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
   computeRoots[phi_] := Module[{res},
     (* Инициализируем шаг по потоку, чтобы движок пересчитал фазы phi_min *)
     QED`Numeric`GenerateSweepPipeline[model, "SweepInit"][phi];
-    (* Вызываем функцию (аргумент частоты игнорируется нашим узлом) *)
-    res = sweepFunc[0.0];
-    If[ListQ[res], res, {{}, {}}]
+    
+    (* ВАЖНО: Вызываем двойное замыкание! Сначала передаем phi, затем фиктивную частоту 0.0 *)
+    res = sweepFunc[phi][0.0];
+    
+    (* Переводим циклические частоты (рад/с) в гигагерцы (ГГц) *)
+    If[ListQ[res], res / (2 * Pi * 10^9), {{}, {}}]
   ];
   
   getEqRoot[eqIdx_Integer, rootIdx_Integer, phi_?NumericQ] := (
@@ -1358,19 +1361,19 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
   
   plotStyles = Flatten[Table[
     If[eq == 1, 
-       Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], (* Синий для Eq1 *)
-       Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]   (* Оранжевый для Eq2 *)
+        Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], (* Синий для Eq1 *)
+        Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]   (* Оранжевый для Eq2 *)
     ],
     {eq, 1, 2}, {r, 1, maxRoots}
   ]];
   
-  Print["Plotting BIC modes for ports: " , funcsToPlot[[1 ;; 2]]/.{phi->0.1}];
   (* 4. Отрисовка адаптивного графика *)
   Plot[
     Evaluate[funcsToPlot],
     {phi, phiMin, phiMax},
     
     PlotStyle -> plotStyles,
+    PlotRange -> {0, 15}, (* Ограничение по оси Y (ГГц), чтобы выбросы не ломали масштаб *)
     PlotLegends -> Placed[
       LineLegend[
         {RGBColor[0.12, 0.47, 0.71], RGBColor[1.0, 0.50, 0.05]}, 

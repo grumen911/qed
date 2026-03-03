@@ -233,8 +233,12 @@ RegisterPlot["SmatrixHeatmap_1_4", "S-matrix Heatmap (Ports 1-4)", "Heavy",
   Function[{m}, QED`Plots`PlotSParameterMap[m, "Ports" -> "{1,4}"]]
 ];
 
-RegisterPlot["BICCondition_1_2", "BIC Condition (Ports 1-2)", "Light", 
+RegisterPlot["BICCondition_1_2", "BIC Condition (Ports 1-2)", "Heavy", 
   Function[{m}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,2}"]]
+];
+
+RegisterPlot["BICCondition_1_4", "BIC Condition (Ports 1-4)", "Heavy", 
+  Function[{m}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,4}"]]
 ];
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
