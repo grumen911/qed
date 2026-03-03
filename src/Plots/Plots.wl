@@ -1117,12 +1117,17 @@ PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] :=
   (* 1. Получаем текущий внешний поток *)
   phiExt = (QED`$PhiExt /. QED`Model`GetStaticRules[model]) / QED`$Phi0Value;
   
-  (* 2. Формируем ключ JIT-конвейера и вызываем его *)
+  (* 2. Формируем ключ JIT-конвейера и безопасно вызываем его *)
   depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
-  sMatrixAtPhi = QED`Numeric`GenerateSweepPipeline[model, depKey][phiExt];
+  Module[{sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey]},
+    If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+       Return[Graphics[{Red, Text[Style[depKey <> " not available\n(missing nodes?)", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+    ];
+    sMatrixAtPhi = sweepFunc[phiExt];
+  ];
   
-  If[sMatrixAtPhi === $Failed,
-     Return[Graphics[{Red, Text[Style["S-Matrix engine failed.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  If[sMatrixAtPhi === $Failed || Head[sMatrixAtPhi] === $Failed,
+     Return[Graphics[{Red, Text[Style["S-Matrix evaluation failed.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
 
   (* 3. Защищенная функция (принимает только числа) *)
@@ -1167,9 +1172,9 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   (* 1. Формируем ключ JIT-конвейера и вызываем его *)
   depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
   sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey];
-
-  If[sweepFunc === $Failed,
-      Return[Graphics[{Red, Text["Error: Flux Sweep failed.", {0,0}]}]]
+  
+  If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+      Return[Graphics[{Red, Text[Style["Error: " <> depKey <> " not available\n(missing nodes?)", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
 
   (* 2. Защищенная функция (принимает только числа) *)

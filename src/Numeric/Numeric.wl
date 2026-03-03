@@ -190,12 +190,27 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
             QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"]
           ]["NormalModeFrequencies"],
         
-        "SMatrix",
-          Module[{invLNum, portIndices},
-            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
-            portIndices = modelAssoc["Analytical"]["Scattering"]["PortIndices"];
+        "SMatrix_1_2",
+          Module[{invLNum, portIndices, scatData},
+            scatData = modelAssoc["Analytical"]["Scattering"]["1_2"];
+            If[scatData === $Failed, Return[$Failed]];
             
-            (* Возвращаем чистую функцию от частоты omega *)
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            portIndices = scatData["PortIndices"];
+            
+            Function[{omegaReq},
+              QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, staticMats[[1]], invLNum, portIndices, 50.0]
+            ]
+          ],
+          
+        "SMatrix_1_4",
+          Module[{invLNum, portIndices, scatData},
+            scatData = modelAssoc["Analytical"]["Scattering"]["1_4"];
+            If[scatData === $Failed, Return[$Failed]];
+            
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            portIndices = scatData["PortIndices"];
+            
             Function[{omegaReq},
               QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, staticMats[[1]], invLNum, portIndices, 50.0]
             ]
