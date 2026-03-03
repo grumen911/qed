@@ -505,7 +505,7 @@ $DependencyRegistry = <|
     ]
   |>,
 
-"SMatrix_1_2" -> <|
+  "SMatrix_1_2" -> <|
     "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
     "RelevantHashes" -> {"Kinetic", "Potential", "External"},
     "Compute" -> Function[{modelAssoc, depsData},

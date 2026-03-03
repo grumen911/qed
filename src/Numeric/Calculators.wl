@@ -20,6 +20,10 @@ of quadratic Hamiltonian. Returns Association with normal mode transformation ma
 CalcSMatrixNumeric::usage = "CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0] \
 calculates the numerical S-matrix at a given angular frequency using floating ground expansion and Schur complement.";
 
+CalcBICRootsNumeric::usage = "CalcBICRootsNumeric[eqs, xVar] numerically finds the physical frequencies \
+(in GHz) corresponding to the roots of the BIC polynomial equations. It filters for real, negative x \
+(where x = -omega^2) and converts them to cyclic frequencies.";
+
 Begin["`Private`"];
 
 
@@ -244,6 +248,30 @@ CalcSMatrixNumeric[omega_?NumericQ, cNum_?MatrixQ, invLNum_?MatrixQ, portIndices
   
   Developer`ToPackedArray[sMat, Complex]
 ];
+
+CalcBICRootsNumeric[eqs_List, xVar_Symbol] := 
+ Module[{findFreqs},
+  
+  (* Вспомогательная функция для обработки одного уравнения *)
+  findFreqs[eq_] := Module[{sols, realNegRoots, freqs},
+    (* Находим численные корни. Quiet подавляет возможные варнинги точности *)
+    sols = Quiet @ NSolve[eq, xVar];
+    
+    If[sols === $Failed || Length[sols] == 0, Return[{}]];
+    
+    (* Извлекаем значения x и фильтруем: 
+       оставляем только вещественные (Im == 0) и отрицательные (x < 0), так как x = -omega^2 *)
+    realNegRoots = Select[xVar /. sols, NumericQ[#] && Chop[Im[#]] == 0 && Re[#] < 0 &];
+    
+    (* Переводим x в частоту f в ГГц: omega = Sqrt[-x], f = omega / (2 Pi * 10^9) *)
+    freqs = Sqrt[-Re[realNegRoots]];
+    
+    Sort[freqs]
+  ];
+  
+  (* Применяем решатель к каждому уравнению из переданного списка (FullSystem) *)
+  Map[findFreqs, eqs]
+ ];
 
 End[];
 EndPackage[];
