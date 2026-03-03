@@ -487,27 +487,48 @@ $DependencyRegistry = <|
     ]
   |>,
 
-  "SMatrix" -> <|
+"SMatrix_1_2" -> <|
     "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
     "RelevantHashes" -> {"Kinetic", "Potential", "External"},
     "Compute" -> Function[{modelAssoc, depsData},
-      Module[{cNum, invLNum, omega, portIndices, z0, analytical},
-        cNum = depsData["StaticMatrices"][[1]]; (* Первая матрица - C *)
+      Module[{cNum, invLNum, omega, portIndices, z0, analytical, scatData},
+        cNum = depsData["StaticMatrices"][[1]];
         invLNum = depsData["SystemMatrices"]["InverseInductance"];
         analytical = modelAssoc["Analytical"];
         
-        (* Извлекаем частоту и порты из правил (на будущее можно вынести в параметры GUI) *)
-        omega = ReplaceAll[analytical["Scattering"]["FrequencyVariable"], GetStaticRules[modelAssoc]];
-        
-        (* Если omega не задана числом, возвращаем Failed *)
+        scatData = analytical["Scattering"]["1_2"];
+        If[scatData === $Failed, Return[$Failed]];
+
+        omega = ReplaceAll[scatData["FrequencyVariable"], GetStaticRules[modelAssoc]];
         If[!NumericQ[omega], Return[$Failed]];
         
-        portIndices = analytical["Scattering"]["PortIndices"];
-        z0 = 50.0; (* Базовый импеданс линии *)
+        portIndices = scatData["PortIndices"];
+        z0 = 50.0;
         
-        QED`Numeric`Calculators`CalcSMatrixNumeric[
-          omega, cNum, invLNum, portIndices, z0
-        ]
+        QED`Numeric`Calculators`CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0]
+      ]
+    ]
+  |>,
+
+  "SMatrix_1_4" -> <|
+    "Dependencies" -> {"StaticMatrices", "SystemMatrices"},
+    "RelevantHashes" -> {"Kinetic", "Potential", "External"},
+    "Compute" -> Function[{modelAssoc, depsData},
+      Module[{cNum, invLNum, omega, portIndices, z0, analytical, scatData},
+        cNum = depsData["StaticMatrices"][[1]];
+        invLNum = depsData["SystemMatrices"]["InverseInductance"];
+        analytical = modelAssoc["Analytical"];
+        
+        scatData = analytical["Scattering"]["1_4"];
+        If[scatData === $Failed, Return[$Failed]];
+
+        omega = ReplaceAll[scatData["FrequencyVariable"], GetStaticRules[modelAssoc]];
+        If[!NumericQ[omega], Return[$Failed]];
+        
+        portIndices = scatData["PortIndices"];
+        z0 = 50.0;
+        
+        QED`Numeric`Calculators`CalcSMatrixNumeric[omega, cNum, invLNum, portIndices, z0]
       ]
     ]
   |>,
