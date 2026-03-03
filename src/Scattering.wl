@@ -152,7 +152,7 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
 
 BuildSymbolicBICCondition[sMatrixAssoc_Association, opts : OptionsPattern[]] := 
  Module[{sMat, sVar, z0Var, xVar, detS, charPoly, coeffs, processPoly, 
-         rawSystem, rules, simplifiedSystem, cond},
+         rawSystem, rules, simplifiedSystem, cond, freqX, omegaBic},
   
   sMat = sMatrixAssoc["SMatrix"];
   sVar = sMatrixAssoc["FrequencyVariable"];
@@ -193,12 +193,34 @@ BuildSymbolicBICCondition[sMatrixAssoc_Association, opts : OptionsPattern[]] :=
     ]
   ];
   
+  (* 8. Аналитическая частота BIC (для упрощенной системы) *)
+  freqX = If[Length[simplifiedSystem] > 0,
+    Module[{sortedEqs, sol, simplestEq},
+      (* Сортируем уравнения по степени x, чтобы решать самое простое (в идеале линейное) *)
+      sortedEqs = SortBy[simplifiedSystem, Exponent[#, xVar] &];
+      simplestEq = sortedEqs[[1]];
+      
+      (* Пытаемся решить его относительно x *)
+      sol = Quiet@Solve[simplestEq == 0, xVar];
+      If[Length[sol] > 0,
+        Simplify[xVar /. sol[[1]]],
+        $Failed
+      ]
+    ],
+    $Failed
+  ];
+  
+  (* Поскольку x = s^2 = -omega^2, физическая частота omega = Sqrt[-x] *)
+  omegaBic = If[freqX =!= $Failed, Simplify[Sqrt[-freqX]], $Failed];
+
   <|
-    "FullSystem" -> Thread[rawSystem == 0],         (* Строгая система из 2 уравнений *)
-    "SimplifiedSystem" -> Thread[simplifiedSystem == 0], (* Система после зануления CJ *)
-    "Variable" -> xVar,                             (* Искомая частота x = -omega^2 *)
-    "Condition" -> cond,                            (* Итоговое аналитическое условие (Eliminate) *)
-    "RulesApplied" -> rules
+    "FullSystem" -> Thread[rawSystem == 0],         
+    "SimplifiedSystem" -> Thread[simplifiedSystem == 0], 
+    "Variable" -> xVar,                             
+    "Condition" -> cond,                            
+    "RulesApplied" -> rules,
+    "FrequencySquared" -> freqX,                    (* x = s^2 *)
+    "Frequency" -> omegaBic                         (* omega = Sqrt[-x] *)
   |>
  ];
 
