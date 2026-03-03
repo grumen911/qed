@@ -222,7 +222,7 @@ RegisterPlot["Smatrix_1_2", "S-matrix (Ports 1-2)", "Light",
 ];
 
 RegisterPlot["Smatrix_1_4", "S-matrix (Ports 1-4)", "Light", 
-  Function[{m}, QED`Plots`PlotFreqвuencyResponse[m, "Ports" -> "{1,4}"]]
+  Function[{m}, QED`Plots`PlotFrequencyResponse[m, "Ports" -> "{1,4}"]]
 ];
 
 RegisterPlot["SmatrixHeatmap_1_2", "S-matrix Heatmap (Ports 1-2)", "Heavy", 
