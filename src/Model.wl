@@ -315,9 +315,10 @@ GenerateDefaultParameters[topology_] :=
  ];
 
 ComputeAnalyticalParams[topology_, primaryParams_] := 
- Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian,
+ Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian, potential,
  		 potentialGradient, currentOp, voltageOperatorsSym, nodes, 
-     scattering12, scattering14, scattering, bicCondition12, bicCondition14},
+     scattering12, scattering14, scattering, bicCondition12, bicCondition14, 
+     dynamicInductanceRules},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
@@ -334,8 +335,12 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
   (* Индуктивная матрица (обратная) *)
   indMatrix = BuildInductanceMatrix[hamiltonian, topology];
   
-  (*Градиент потенциала для поиска равновесия *)
+  (* Градиент потенциала для поиска равновесия *)
   potentialGradient = BuildPotentialGradient[hamiltonian, topology];
+  potential = hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0;
+
+  (* Генерируем динамические правила индуктивности *)
+  dynamicInductanceRules = QED`Analytic`BuildDynamicInductanceRules[topology, primaryParams, potential];
 
 (* Вычисляем S-матрицу для портов {1, 2} (считаем, что они всегда есть) *)
   scattering12 = QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 2}, ReferenceImpedance -> QED`$Z0];
@@ -374,12 +379,13 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
     "HarmonicHamiltonian" -> harmonicHamiltonian,
     "InductanceMatrix" -> indMatrix,
     "PotentialGradient" -> potentialGradient,
-    "Potential" -> hamiltonian /. Subscript[QED`$ChargeSymbol, _] -> 0,
+    "Potential" -> potential,
     "CurrentOperator" -> currentOp,
     "VoltageOperators" -> voltageOperatorsSym,
     "Scattering" -> scattering,
     "BICCondition_1_2" -> bicCondition12,
-    "BICCondition_1_4" -> bicCondition14
+    "BICCondition_1_4" -> bicCondition14,
+    "DynamicInductanceRules" -> dynamicInductanceRules
   |>
  ];
 

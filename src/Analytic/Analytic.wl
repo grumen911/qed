@@ -30,6 +30,9 @@ of the circulating current operator I = -dH/dPhi_ext around the equilibrium flux
 BuildVoltageOperator::usage = "BuildVoltageOperator[hamiltonian, topology, nodeIndex] computes the symbolic voltage operator \
 V = dH/dq for a specific node, capturing the full capacitive coupling structure.";
 
+BuildDynamicInductanceRules::usage = "BuildDynamicInductanceRules[topology, primaryParams, potential] \
+builds replacement rules that express effective Josephson inductances L_EJ as functions of equilibrium phases.";
+
 
 Begin["`Private`"];
 
@@ -399,6 +402,38 @@ BuildVoltageOperator[hamiltonian_, topology_, nodeIndex_Integer] := Module[
   *)
   Simplify[D[hamiltonian, chargeSym]]
 ];
+
+BuildDynamicInductanceRules[topology_, primaryParams_, potential_] := 
+ Module[{rules},
+  Flatten @ DeleteMissing @ Map[
+    Function[comp,
+      If[comp[[1]] === "JosephsonJunction",
+        Module[{name, ejSym, cosArgs, lEjSym, minRule},
+          name = comp[[4]]; 
+          ejSym = primaryParams[name]["EJ"]["Symbol"]; 
+          
+          (* Ищем аргумент косинуса в потенциале, который умножается на этот E_J *)
+          cosArgs = Cases[potential, a_. * ejSym * Cos[arg_] :> arg, Infinity];
+          
+          If[Length[cosArgs] > 0,
+            (* Формируем символ эффективной индуктивности *)
+            lEjSym = Subscript[QED`$InductanceSymbol, Symbol[name]];
+            
+            (* Правило перевода обычных потоков узлов в равновесные (с индексом "min") *)
+            minRule = (Subscript[QED`$FluxSymbol, i_] :> Subscript[QED`$FluxSymbol, "min", i]);
+            
+            (* Возвращаем правило замены *)
+            lEjSym -> (QED`$Phi0^2 / (4 * Pi^2 * ejSym * Cos[cosArgs[[1]] /. minRule]))
+          ,
+            Missing[]
+          ]
+        ],
+        Missing[]
+      ]
+    ],
+    topology["Components"]
+  ]
+ ];
 
 End[];
 EndPackage[];
