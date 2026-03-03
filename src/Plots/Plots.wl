@@ -116,12 +116,21 @@ Options:
 Performance:
   Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
 
+PlotBICModes::usage = "PlotBICModes[model, options] plots the dispersion curves of the two polynomial BIC conditions. \
+Intersections of these curves indicate the presence of a Bound State in the Continuum.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
 
 Begin["`Private`"];
 
+
+Options[PlotBICModes] = {
+  Ports -> "{1, 2}",
+  SweepRange -> {0., 0.5},
+  SweepPoints -> 100
+};
 
 Options[PlotSParameterMap] = {
   "FrequencyRange" -> {4., 12.},
@@ -1304,6 +1313,83 @@ PlotSpectroscopyScanner[model_Association, opts:OptionsPattern[]] :=
        ]
     }, Alignment -> Center]
   ];
+
+PlotBICModes[model_Association, OptionsPattern[]] := Module[
+  {portsOpt, phiMin, phiMax, plotPts, depKey, sweepFunc, 
+   computeRoots, lastPhi = "Init", lastRoots = {{}, {}}, getEqRoot,
+   maxRoots = 3, funcsToPlot, plotStyles},
+  
+  portsOpt = OptionValue[Ports];
+  {phiMin, phiMax} = OptionValue[SweepRange];
+  plotPts = OptionValue[SweepPoints];
+  
+  (* 1. Получаем замыкание из JIT-движка *)
+  depKey = If[portsOpt === "{1,4}", "BICRoots_1_4", "BICRoots_1_2"];
+  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey];
+  
+  If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+     Return[Graphics[{Red, Text[Style["BIC Analytical Roots not available\n(" <> depKey <> ")", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+  
+  (* 2. Внутренняя функция расчета с умным кэшем (аналогично PlotRelaxationTime) *)
+  computeRoots[phi_] := Module[{res},
+    (* Инициализируем шаг по потоку, чтобы движок пересчитал фазы phi_min *)
+    QED`Numeric`GenerateSweepPipeline[model, "SweepInit"][phi];
+    (* Вызываем функцию (аргумент частоты игнорируется нашим узлом) *)
+    res = sweepFunc[0.0];
+    If[ListQ[res], res, {{}, {}}]
+  ];
+  
+  getEqRoot[eqIdx_Integer, rootIdx_Integer, phi_?NumericQ] := (
+     (* Если точка phi новая - пересчитываем все корни и кэшируем *)
+     If[phi =!= lastPhi,
+        lastPhi = phi;
+        lastRoots = computeRoots[phi];
+     ];
+     (* Безопасно извлекаем нужный корень или возвращаем Indeterminate *)
+     If[eqIdx <= Length[lastRoots] && rootIdx <= Length[lastRoots[[eqIdx]]],
+        lastRoots[[eqIdx, rootIdx]],
+        Indeterminate
+     ]
+  );
+  
+  (* 3. Подготовка плоских структур для функции Plot *)
+  funcsToPlot = Flatten[Table[getEqRoot[eq, r, phi], {eq, 1, 2}, {r, 1, maxRoots}]];
+  
+  plotStyles = Flatten[Table[
+    If[eq == 1, 
+       Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], (* Синий для Eq1 *)
+       Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]   (* Оранжевый для Eq2 *)
+    ],
+    {eq, 1, 2}, {r, 1, maxRoots}
+  ]];
+  
+  Print["Plotting BIC modes for ports: " , funcsToPlot[[1 ;; 2]]/.{phi->0.1}];
+  (* 4. Отрисовка адаптивного графика *)
+  Plot[
+    Evaluate[funcsToPlot],
+    {phi, phiMin, phiMax},
+    
+    PlotStyle -> plotStyles,
+    PlotLegends -> Placed[
+      LineLegend[
+        {RGBColor[0.12, 0.47, 0.71], RGBColor[1.0, 0.50, 0.05]}, 
+        {"Condition 1 (\!\(\*SubscriptBox[\(\[CapitalDelta]\), \(Y\)]\) = 0)", "Condition 2 (Det[M] = 0)"}
+      ], 
+      Below
+    ],
+    Frame -> True,
+    FrameLabel -> {Style["External Flux (\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\))", 14], 
+                   Style["Frequency (GHz)", 14]},
+    PlotLabel -> Style["BIC Modes Intersection (Ports " <> portsOpt <> ")", 16],
+    GridLines -> Automatic,
+    ImageSize -> 600,
+    
+    (* Встроенные оптимизации Mathematica для гладких линий *)
+    MaxRecursion -> 2,
+    PlotPoints -> plotPts
+  ]
+];
 
 End[];
 EndPackage[];
