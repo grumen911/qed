@@ -305,8 +305,8 @@ ExtractInteractiveParams[model_Association] :=
   ];
 
 (* Слайдер принимает ID модели и отправляет изменения прямо в Ядро *)
-SetAttributes[MakeParameterControl, HoldFirst];
-MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_, isComputingSymbol_] := 
+SetAttributes[MakeParameterControl, HoldAll];
+MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpdate_] := 
   Row[{
     Style[tag <> "." <> param <> ": ", 12],
     
@@ -319,8 +319,7 @@ MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpda
         ]
       ],
       {min, max, step},
-      ImageSize -> 120,
-      Enabled -> Dynamic[!TrueQ[isComputingSymbol]] (* Блокировка слайдера *)
+      ImageSize -> 120
     ],
     
     Spacer[5],
@@ -334,8 +333,7 @@ MakeParameterControl[modelId_, {tag_, param_, val_, {min_, max_, step_}}, onUpda
         ]
       ],
       Number, 
-      FieldSize -> {6, 1},
-      Enabled -> Dynamic[!TrueQ[isComputingSymbol]] (* Блокировка поля ввода *)
+      FieldSize -> {6, 1}
     ]
   }];
 
@@ -372,21 +370,20 @@ SelectModel[currentModelIdSymbol_, modelIdsStack_List, onUpdate_] :=
     ]
   }];
 
-SetAttributes[PlotControlPanel, HoldFirst];
-PlotControlPanel[modelIdSymbol_, onUpdate_, onForceUpdate_, triggerSymbol_, isComputingSymbol_] := 
+SetAttributes[PlotControlPanel, HoldAll];
+PlotControlPanel[modelIdSymbol_, onUpdate_, onForceUpdate_, triggerSymbol_] := 
   Dynamic[
     Module[{m = QED`Model`GetModel[modelIdSymbol], params},
       If[!AssociationQ[m], Return[""]];
       params = ExtractInteractiveParams[m];
       Column[
         Join[
-          Map[MakeParameterControl[modelIdSymbol, #, onUpdate, isComputingSymbol] &, params],
+          Map[MakeParameterControl[modelIdSymbol, #, onUpdate] &, params],
           {Spacer[10],
            Button["Update Plot", 
              onForceUpdate[],
              Method -> "Queued",
-             ImageSize -> {140, 30},
-             Enabled -> Dynamic[!TrueQ[isComputingSymbol]] (* Блокировка кнопки *)
+             ImageSize -> {140, 30}
            ]}
         ]
       ]
@@ -394,7 +391,7 @@ PlotControlPanel[modelIdSymbol_, onUpdate_, onForceUpdate_, triggerSymbol_, isCo
     TrackedSymbols :> {modelIdSymbol, triggerSymbol} 
   ];
 
-SetAttributes[PresetControlPanel, HoldFirst];
+SetAttributes[PresetControlPanel, HoldAll];
 PresetControlPanel[modelIdSymbol_, onModelUpdate_] := 
   DynamicModule[{selectedPreset = Null, getModelKey, hamburgerIcon},
     
@@ -496,24 +493,24 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
 
 (* Виджет для управления интервалами (Flux / Frequency) *)
 SetAttributes[MakeIntervalControl, HoldAll];
-MakeIntervalControl[label_, symbol_, {minLimit_, maxLimit_, step_}, onUpdate_, isComputingSymbol_] := 
+MakeIntervalControl[label_, symbol_, {minLimit_, maxLimit_, step_}, onUpdate_] := 
   Column[{
     Style[label, 11, Bold, GrayLevel[0.3]],
     Row[{
       InputField[
         Dynamic[symbol[[1]], Function[{v}, symbol = {Min[v, symbol[[2]] - step], symbol[[2]]}; onUpdate[]]], 
-        Number, FieldSize -> {4, 1}, Enabled -> Dynamic[!TrueQ[isComputingSymbol]]
+        Number, FieldSize -> {4, 1}
       ],
       Spacer[5],
       IntervalSlider[
         Dynamic[symbol, Function[{v}, symbol = v; onUpdate[]]], 
         {minLimit, maxLimit, step}, 
-        ImageSize -> 120, MinIntervalSize -> step, Enabled -> Dynamic[!TrueQ[isComputingSymbol]]
+        ImageSize -> 120, MinIntervalSize -> step
       ],
       Spacer[5],
       InputField[
         Dynamic[symbol[[2]], Function[{v}, symbol = {symbol[[1]], Max[v, symbol[[1]] + step]}; onUpdate[]]], 
-        Number, FieldSize -> {4, 1}, Enabled -> Dynamic[!TrueQ[isComputingSymbol]]
+        Number, FieldSize -> {4, 1}
       ]
     }]
   }, Alignment -> Left];
@@ -599,8 +596,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
                uiTick++; 
             ],
             Function[{}, performUpdate[]],
-            uiTick,
-            isComputing
+            uiTick
           ],
 
           Spacer[15],
@@ -618,8 +614,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
                     plotCache = Association[plotCache, selectedPlotId -> Missing["Stale"]]
                   ];
                   uiTick++;
-                ], 
-                isComputing
+                ]
               ],
               Spacer[10],
               MakeIntervalControl["Frequency (GHz):", globalFreqRange, {0.0, 40.0, 0.1}, 
@@ -630,8 +625,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
                     plotCache = Association[plotCache, selectedPlotId -> Missing["Stale"]]
                   ];
                   uiTick++;
-                ], 
-                isComputing
+                ]
               ]
             }],
             FrameStyle -> LightGray, RoundingRadius -> 3, Background -> White, 
