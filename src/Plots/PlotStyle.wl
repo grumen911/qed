@@ -1,5 +1,3 @@
-(* src/Plots/PlotStyle.wl *)
-
 BeginPackage["QED`Style`"];
 
 QubitPlot::usage = "QubitPlot[expr, range] plots with default styling.";
@@ -22,29 +20,36 @@ ApplyExportPreset[g_, "Screen"] := g;
 ApplyExportPreset[Legended[plot_, legend_], "Publication"] := 
   Module[{baseFontSize = 14, fontName = "Arial", styledPlot, styledLegend, plotSize = 72 * 5},
     
-    (* 1. СТИЛИЗАЦИЯ ЛЕГЕНДЫ ПЕРЕД РАСТЕРИЗАЦИЕЙ *)
-    (* Мы находим BarLegend и ПРИНУДИТЕЛЬНО вшиваем в него шрифты публикации *)
+    (* 1. СТИЛИЗАЦИЯ ЛЕГЕНДЫ ПЕРЕД РАСТЕРИЗАЦИЕЙ (Для тепловых карт) *)
     styledLegend = legend /. BarLegend[arg_, opts___] :> 
        BarLegend[arg, 
-          (* Устанавливаем шрифт как у осей графика *)
           LabelStyle -> Directive[Black, baseFontSize, FontFamily -> fontName],
-          (* Высота легенды должна быть чуть меньше высоты графика (0.8 от ImageSize) *)
           LegendMarkerSize -> {20, plotSize * 0.8},
-          (* Пробрасываем остальные опции, исключая конфликтующие *)
           Sequence @@ FilterRules[{opts}, Except[LabelStyle | LegendMarkerSize]]
        ];
 
-    (* 2. РАСТЕРИЗАЦИЯ УЖЕ СТИЛИЗОВАННОЙ ЛЕГЕНДЫ *)
-    (* Теперь цифры в легенде будут изначально крупными *)
+    (* 2. РАСТЕРИЗАЦИЯ УЖЕ СТИЛИЗОВАННОЙ BARLEGEND *)
     styledLegend = styledLegend /. l_BarLegend :> 
        Image[
           Rasterize[l, "Image", ImageResolution -> 600, Background -> None], 
-          (* ImageSize здесь отвечает за финальный размер на холсте *)
           ImageSize -> {Automatic, plotSize * 0.8}
        ];
 
+    (* --- НОВЫЙ БЛОК --- *)
+    (* 2.5 СТИЛИЗАЦИЯ LINELEGEND (Без растеризации, оставляем в векторе) *)
+    styledLegend = styledLegend /. LineLegend[styles_, labels_, opts___] :> 
+       LineLegend[styles, labels, 
+          (* Шрифт чуть меньше, чем у осей (12pt вместо 14pt) *)
+          LabelStyle -> Directive[Black, baseFontSize - 2, FontFamily -> fontName],
+          (* Делаем цветные черточки короткими и аккуратными *)
+          LegendMarkerSize -> 15,
+          (* Уменьшаем вертикальный интервал между строками в легенде *)
+          Spacings -> {0.5, 0.2}, 
+          Sequence @@ FilterRules[{opts}, Except[LabelStyle | LegendMarkerSize | Spacings]]
+       ];
+    (* ------------------ *)
+
     (* 3. СТИЛИЗАЦИЯ ГРАФИКА *)
-    (* Вызываем основную функцию для отрисовки осей и линий *)
     styledPlot = ApplyExportPreset[plot, "Publication"];
     
     (* Собираем обратно *)

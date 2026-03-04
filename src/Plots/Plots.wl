@@ -140,8 +140,8 @@ Options[PlotSParameterMap] = {
   PlotPoints -> 50,
   ColorFunction -> "SunsetColors",
   FrameLabel -> {
-    "\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)", 
-    "Frequency (GHz)"
+    Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", 16],
+    Style["Frequency (GHz)", FontFamily -> "Times", 16]
   }
 };
 
@@ -172,14 +172,14 @@ Options[PlotRelaxationTime] = Join[
   Options[PlotPlasmonSpectrum],
   {
     "RelaxationChannel" -> "CapacitiveRelaxationRate",
-    "LogTimeRange" -> {-8, 2}
+    "LogTimeRange" -> {Automatic, -1}(* {-8, 2} *)
   }
 ];
 
 Options[PlotDephasingTime] = Join[
   Options[PlotPlasmonSpectrum],
   {
-    "LogTimeRange" -> {-8, 2}
+    "LogTimeRange" -> {-6, -2}
   }
 ];
 
@@ -214,14 +214,21 @@ Module[{freqFunc, nModes, range, scale, modeFreq},
         Evaluate @ Table[modeFreq[i][phi], {i, nModes}],
         {phi, range[[1]], range[[2]]},
         
-        PlotLegends -> Table[Subscript["\[Omega]", i], {i, nModes}],
+        PlotLegends -> Placed[
+            LineLegend[
+                Automatic,
+                Table["Mode " <> ToString[i], {i, nModes}],
+                LegendFunction -> (Framed[#, Background -> White, FrameMargins -> 2, FrameStyle -> GrayLevel[0.6]] &)
+            ],
+            {Right, Bottom} (* Размещаем внизу, так как кривые обычно идут вверх *)
+        ],
         Frame -> True,
         FrameLabel -> {
-          Style[Subscript["\[CapitalPhi]", "ext"] / Subscript["\[CapitalPhi]", "0"], 16],
-          Style["Frequency (GHz)", 16]
+          Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", 16],
+          Style["Frequency (GHz)", FontFamily -> "Times", 16]
         },
         PlotRange -> All,
-        PlotPoints -> 25,
+        PlotPoints -> 250,
         MaxRecursion -> 1,
         AspectRatio -> 0.6,
         ImageSize -> 600,
@@ -873,7 +880,8 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
     logRange = OptionValue["LogTimeRange"];
     
     timeRange = If[ListQ[logRange] && Length[logRange] == 2,
-        {10.^logRange[[1]], 10.^logRange[[2]]},
+        (* Проходимся по каждому элементу списка: если число -> 10^x, иначе -> Automatic *)
+        If[NumericQ[#], 10.^#, Automatic] & /@ logRange,
         All
     ];
     
@@ -965,7 +973,7 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
     );
 
     labelSub = Switch[channel, "InductiveRelaxationRate", "ind", "CapacitiveRelaxationRate", "cap", "TotalT1", "tot", _, "x"];
-
+    
     (* 6. График *)
     Plot[
         Evaluate @ Table[getRate[i, phi], {i, nModes}],
@@ -974,34 +982,35 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
         ScalingFunctions -> "Log10",
         PlotRange -> {Automatic, timeRange}, 
         
-        Axes -> True,
-        Frame -> False,
-        AxesLabel -> {
-            Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
-            Style[Subscript["T", "1"], FontFamily -> "Times New Roman", Large]
-        }, 
-        AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        (* 1. ЗАКРЫТАЯ РАМКА ВМЕСТО ОТКРЫТЫХ ОСЕЙ *)
+        Axes -> False,
+        Frame -> True,
+        FrameLabel -> {
+            Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", Large], 
+            Style[Row[{Subscript["T", "1"]^labelSub, " (s)"}], FontFamily -> "Times", Large]
+        },
+        FrameStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        
         MeshFunctions -> Function[{x, y}, y],
         ImageSize -> 600, 
         
         PlotLegends -> Placed[
-            Table[
-                Row[{
-                   Subscript["T", "1"]^labelSub,
-                   " (", Subscript[Style["|1\[RightAngleBracket]", Italic], i], " \[Rule] ", Style["|0\[RightAngleBracket]", Italic], ")"
-                }], 
-                {i, nModes}
+            LineLegend[
+                Automatic,
+                Table["Mode " <> ToString[i], {i, nModes}],
+                (* 2. СТРОГИЙ АКАДЕМИЧНЫЙ БОКС (острые углы, тонкая серая линия) *)
+                LegendFunction -> (Framed[#, Background -> White, FrameMargins -> 2, FrameStyle -> GrayLevel[0.6]] &)
             ],
-            Right
+            {Right, Top}
         ],
         
         PlotStyle -> {
             Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
-            Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
+            Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005], Dashed]
         },
         
         MaxRecursion -> 2, 
-        PlotPoints -> 50
+        PlotPoints -> 250
     ]
   ];
 
@@ -1083,34 +1092,33 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
         ScalingFunctions -> "Log10",
         PlotRange -> {Automatic, timeRange}, 
         
-        Axes -> True,
-        Frame -> False,
-        AxesLabel -> {
-            Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times New Roman", Large], 
-            Style[Subscript["T", "\[Phi]"], FontFamily -> "Times New Roman", Large]
-        }, 
+        Axes -> False,
+        Frame -> True,
+        FrameLabel -> {
+            Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", Large], 
+            Style[Row[{Subscript["T", "\[Phi]"], " (s)"}], FontFamily -> "Times", Large]
+        },
         AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
         MeshFunctions -> Function[{x, y}, y],
         ImageSize -> 600, 
         
         PlotLegends -> Placed[
-            Table[
-                Row[{
-                   Subscript["T", "\[Phi]"],
-                   " (", Subscript[Style["|1\[RightAngleBracket]", Italic], i], " \[Rule] ", Style["|0\[RightAngleBracket]", Italic], ")"
-                }], 
-                {i, nModes}
+            LineLegend[
+                Automatic, 
+                (* Лаконичная легенда *)
+                Table["Mode " <> ToString[i], {i, nModes}],
+                LegendFunction -> (Framed[#, Background -> White, FrameMargins -> 2, FrameStyle -> GrayLevel[0.6]] &)
             ],
-            Right
+            {Right, Top}
         ],
         
         PlotStyle -> {
             Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]], 
-            Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005]]
+            Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.005], Dashed]
         },
         
         MaxRecursion -> 2, 
-        PlotPoints -> 50
+        PlotPoints -> 250
     ]
 ];
 
@@ -1317,7 +1325,7 @@ PlotSpectroscopyScanner[model_Association, opts:OptionsPattern[]] :=
 PlotBICModes[model_Association, OptionsPattern[]] := Module[
   {portsOpt, phiMin, phiMax, plotPts, depKey, sweepFunc, 
    computeRoots, lastPhi = "Init", lastRoots = {{}, {}}, getEqRoot,
-   maxRoots = 3, funcsToPlot, plotStyles},
+   maxRoots = 2, funcsToPlot, plotStyles},
   
   portsOpt = OptionValue[Ports];
   {phiMin, phiMax} = OptionValue[SweepRange];
@@ -1367,21 +1375,21 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
     {phi, phiMin, phiMax},
     
     PlotStyle -> plotStyles,
-    PlotRange -> {0, 15}, 
+    PlotRange -> Automatic, 
     PlotLegends -> Placed[
       LineLegend[
-        {Directive[RGBColor[0.12, 0.47, 0.71]], 
-         Directive[RGBColor[1.0, 0.50, 0.05], Dashed]}, 
+        Automatic, 
         {"Zeros", "Poles"},
         (* Добавляем белый фон и аккуратную скругленную рамку *)
-        LegendFunction -> (Framed[#, Background -> White, RoundingRadius -> 5, FrameStyle -> GrayLevel[0.8]] &)
+        LegendFunction -> (Framed[#, Background -> White, FrameMargins -> 2, FrameStyle -> GrayLevel[0.6]] &)
       ], 
       {Left, Bottom}
     ],
     Frame -> True,
-    FrameLabel -> {Style["External Flux (\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\))", 14], 
-                   Style["Frequency (GHz)", 14]},
-    PlotLabel -> Style["BIC Modes Intersection (Ports " <> portsOpt <> ")", 16],
+    FrameLabel -> {
+      Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", 14], 
+      Style["Frequency (GHz)", FontFamily -> "Times", 14]
+    },
     GridLines -> None,
     ImageSize -> 600,
     

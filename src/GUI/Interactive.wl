@@ -606,7 +606,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
             Column[{
               Style["Sweep Domains", Bold, 11, GrayLevel[0.5]],
               Spacer[5],
-              MakeIntervalControl["External Flux (\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)):", globalFluxRange, {0.0, 0.5, 0.01}, 
+              MakeIntervalControl["External Flux \!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\) (\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)):", globalFluxRange, {0.0, 0.5, 0.01}, 
                 Function[{}, 
                   If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
                     plotCache = KeyDrop[plotCache, selectedPlotId];
