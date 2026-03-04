@@ -50,13 +50,9 @@ RegisterPlot[id_String, label_String, type_String, computeFunc_] :=
 
 (* ИНСПЕКТОР СОСТОЯНИЯ: Полный дамп модели *)
 RegisterPlot["ModelState", "Model State Inspector", "Light",
-  Function[{m},
+  Function[{m, fluxR, freqR},
     Module[{displayModel},
-      
-      (* 1. Убираем картинку схемы *)
       displayModel = KeyDrop[m, "Image"];
-
-      (* 2. СТЕРИЛИЗАЦИЯ: убираем токсичные бинарные объекты Ядра перед отправкой в UI *)
       displayModel = Replace[displayModel,
         {
           _CompiledFunction -> "<CompiledFunction>",
@@ -65,8 +61,6 @@ RegisterPlot["ModelState", "Model State Inspector", "Light",
         },
         {0, Infinity}
       ];
-
-      (* 3. Вызываем инспектор *)
       CreateDrillDownInspector[displayModel]
     ]
   ]
@@ -74,171 +68,103 @@ RegisterPlot["ModelState", "Model State Inspector", "Light",
 
 (* Регистрация базовых графиков *)
 RegisterPlot["PlasmonSpectrum", "Plasmon Spectrum", "Light", 
-  Function[{m}, QED`Plots`PlotPlasmonSpectrum[m]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotPlasmonSpectrum[m, FluxRange -> fluxR]]
 ];
 
 RegisterPlot["Potential3D", "Potential Landscape 3D", "Heavy", 
-  Function[{m}, QED`Plots`PlotPotentialSlices3D[m]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotPotentialSlices3D[m]] (* Пока не трогаем, он сам считает центры *)
 ];
 
-(* Schrödinger Equation Verification Tool *)
 RegisterPlot["WaveFunctionCheck", "Verify Harmonic Wavefunctions", "Heavy",
-  Function[{m},
+  Function[{m, fluxR, freqR},
     Module[{states, report, grid, nDOF},
       nDOF = m["Topology"]["DegreesOfFreedom"];
-      
-      states = {{0,0,0}, {1,0,0}, {0,1,0}, {0,0,1}}; (* Default states to check *)
-      (* Adjust for actual DOF *)
+      states = {{0,0,0}, {1,0,0}, {0,1,0}, {0,0,1}};
       states = Select[states, Length[#] == nDOF &];
       If[states === {}, states = {ConstantArray[0, nDOF]}];
       
-      report = Map[
-        Function[s, 
-          QED`Numeric`VerifyWaveFunction[m, s]
-        ],
-        states
-      ];
-      
-      (* Render Report Table *)
-      Grid[
-        Prepend[
-          Map[
-            Function[r, {
-              r["State"],
-              If[r["Status"] === "OK", Style["OK", Green, Bold], Style["FAIL", Red, Bold]],
-              Pane[ScientificForm[r["TotalEnergy"], 5], 100],
-              Pane[r["Norm"], 100],
-              Pane[r["H_psi"], {250, 120}, Scrollbars -> True], (* H\[Psi] Column *)
-              Pane[r["E_psi"], {250, 120}, Scrollbars -> True]  (* E\[Psi] Column *)
-            }],
-            report
-          ],
-          {
-            Style["State", Bold],
-            Style["Status", Bold],
-            Style["Total Energy (J)", Bold],
-            Style["Norm \[Psi]", Bold],
-            Style["H\[Psi]", Bold],
-            Style["E\[Psi]", Bold]
-          }
-        ],
-        Frame -> All,
-        Background -> {None, {Lighter[Gray, 0.8], None}},
-        ItemSize -> {Automatic, 2.5},
-        Alignment -> {Left, Center}
-      ]
+      report = Map[Function[s, QED`Numeric`VerifyWaveFunction[m, s]], states];
+      Grid[Prepend[Map[Function[r, {r["State"], If[r["Status"] === "OK", Style["OK", Green, Bold], Style["FAIL", Red, Bold]], Pane[ScientificForm[r["TotalEnergy"], 5], 100], Pane[r["Norm"], 100], Pane[r["H_psi"], {250, 120}, Scrollbars -> True], Pane[r["E_psi"], {250, 120}, Scrollbars -> True]}], report], {Style["State", Bold], Style["Status", Bold], Style["Total Energy (J)", Bold], Style["Norm \[Psi]", Bold], Style["H\[Psi]", Bold], Style["E\[Psi]", Bold]}], Frame -> All, Background -> {None, {Lighter[Gray, 0.8], None}}, ItemSize -> {Automatic, 2.5}, Alignment -> {Left, Center}]
     ]
   ]
 ];
 
-(* NEW: Harmonic diagonalization consistency check (Light) *)
 RegisterPlot["DiagonalizationCheck", "Verify Harmonic Diagonalization", "Light",
-  Function[{m},
+  Function[{m, fluxR, freqR},
     Module[{r, okStyle, failStyle, boolStyle},
       okStyle = Style["OK", Darker[Green, 0.2], Bold];
       failStyle = Style["FAIL", Red, Bold];
       boolStyle = Function[b, If[TrueQ[b], okStyle, failStyle]];
 
       r = QED`Numeric`VerifyDiagonalization[m];
-
-      If[r === $Failed || FailureQ[r],
-        Return[Panel[Style["VerifyDiagonalization failed.", Red], ImageSize -> {600, 200}]]
-      ];
-
-      Grid[
-        {
-          {Style["Check", Bold], Style["Result", Bold]},
-          {"Is L transformed diagonal?", boolStyle[r["Is_L_Diagonal"]]},
-          {"Is C transformed diagonal?", boolStyle[r["Is_C_Diagonal"]]},
-          {"Ceff / Diagonal[N^T C N]", Pane[Short[r["EffectiveCapacitances_Check"], 3], {420, 40}, Scrollbars -> True]},
-          {"Transformed C = N^T C N", Pane[MatrixForm[r["Transformed_C"]], {420, 120}, Scrollbars -> True]},
-          {"Transformed L = N^T L^-1 N", Pane[MatrixForm[r["Transformed_L_Inverse"]], {420, 120}, Scrollbars -> True]}
-        },
-        Frame -> All,
-        Background -> {None, {Lighter[Gray, 0.8], None}},
-        Alignment -> {Left, Center},
-        ItemSize -> {Automatic, Automatic}
-      ]
+      If[r === $Failed || FailureQ[r], Return[Panel[Style["VerifyDiagonalization failed.", Red], ImageSize -> {600, 200}]]];
+      Grid[{{Style["Check", Bold], Style["Result", Bold]}, {"Is L transformed diagonal?", boolStyle[r["Is_L_Diagonal"]]}, {"Is C transformed diagonal?", boolStyle[r["Is_C_Diagonal"]]}, {"Ceff / Diagonal[N^T C N]", Pane[Short[r["EffectiveCapacitances_Check"], 3], {420, 40}, Scrollbars -> True]}, {"Transformed C = N^T C N", Pane[MatrixForm[r["Transformed_C"]], {420, 120}, Scrollbars -> True]}, {"Transformed L = N^T L^-1 N", Pane[MatrixForm[r["Transformed_L_Inverse"]], {420, 120}, Scrollbars -> True]}}, Frame -> All, Background -> {None, {Lighter[Gray, 0.8], None}}, Alignment -> {Left, Center}, ItemSize -> {Automatic, Automatic}]
     ]
   ]
 ];
 
-(* NEW: Symbolic WaveFunction Inspector *)
 RegisterPlot["SymbolicWaveFunction", "Inspect Symbolic Wave Function", "Light",
-  Function[{m},
+  Function[{m, fluxR, freqR},
     Module[{state, psiFormula, nDOF},
-      (* Default to ground state *)
       nDOF = m["Topology"]["DegreesOfFreedom"];
       state = ConstantArray[0, nDOF];
-      
-      (* Get the wavefunction expression *)
       psiFormula = QED`Model`GetWaveFunction[m, state];
-      
-      If[FailureQ[psiFormula], 
-        Return["Failed to generate wavefunction."]
-      ];
-
-      (* Keep expression on one line: horizontal scrolling instead of wrapping *)
-      Pane[
-        psiFormula,
-        ImageSize -> {700, 300},
-        Scrollbars -> True,
-        BaseStyle -> {LineBreakWithin -> False}
-      ]
+      If[FailureQ[psiFormula], Return["Failed to generate wavefunction."]];
+      Pane[psiFormula, ImageSize -> {700, 300}, Scrollbars -> True, BaseStyle -> {LineBreakWithin -> False}]
     ]
   ]
 ];
 
 RegisterPlot["SpectroscopyScanner", "Spectroscopy Scanner", "Light",
-  Function[{m}, QED`Plots`PlotSpectroscopyScanner[m]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotSpectroscopyScanner[m]]
 ];
 
 RegisterPlot["LabMatrixElements", "Matrix Elements (Lab Basis)", "Light", 
-  Function[{m}, QED`Plots`PlotLabMatrixElements[m]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotLabMatrixElements[m]]
 ];
 
 RegisterPlot["FermiRates", "T1 Relaxation Times (Fermi)", "Light", 
-  Function[{m}, QED`Plots`PlotFermiRates[m]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotFermiRates[m]]
 ];
 
 RegisterPlot["DephasingRates", "Pure Dephasing Times (T_phi)", "Light", 
-  Function[{m}, QED`Plots`PlotDephasingRates[m]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotDephasingRates[m]]
 ];
 
 RegisterPlot["CapacitiveRelaxationTime", "Relaxation Time (T1)", "Heavy", 
-  Function[{m}, QED`Plots`PlotRelaxationTime[m]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotRelaxationTime[m, FluxRange -> fluxR]]
 ];
 
 RegisterPlot["InductiveRelaxationTime", "Relaxation Time (T1)", "Heavy", 
-  Function[{m}, QED`Plots`PlotRelaxationTime[m, "RelaxationChannel" -> "InductiveRelaxationRate"]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotRelaxationTime[m, "RelaxationChannel" -> "InductiveRelaxationRate", FluxRange -> fluxR]]
 ];
 
 RegisterPlot["DephasingTime", "Pure Dephasing Time (T_phi)", "Heavy", 
-  Function[{m}, QED`Plots`PlotDephasingTime[m]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotDephasingTime[m, FluxRange -> fluxR]]
 ];
 
 RegisterPlot["Smatrix_1_2", "S-matrix (Ports 1-2)", "Light", 
-  Function[{m}, QED`Plots`PlotFrequencyResponse[m, "Ports" -> "{1,2}"]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotFrequencyResponse[m, "Ports" -> "{1,2}", "FrequencyRange" -> freqR]]
 ];
 
 RegisterPlot["Smatrix_1_4", "S-matrix (Ports 1-4)", "Light", 
-  Function[{m}, QED`Plots`PlotFrequencyResponse[m, "Ports" -> "{1,4}"]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotFrequencyResponse[m, "Ports" -> "{1,4}", "FrequencyRange" -> freqR]]
 ];
 
 RegisterPlot["SmatrixHeatmap_1_2", "S-matrix Heatmap (Ports 1-2)", "Heavy", 
-  Function[{m}, QED`Plots`PlotSParameterMap[m, "Ports" -> "{1,2}"]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotSParameterMap[m, "Ports" -> "{1,2}", FluxRange -> fluxR, "FrequencyRange" -> freqR]]
 ];
 
 RegisterPlot["SmatrixHeatmap_1_4", "S-matrix Heatmap (Ports 1-4)", "Heavy", 
-  Function[{m}, QED`Plots`PlotSParameterMap[m, "Ports" -> "{1,4}"]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotSParameterMap[m, "Ports" -> "{1,4}", FluxRange -> fluxR, "FrequencyRange" -> freqR]]
 ];
 
 RegisterPlot["BICCondition_1_2", "BIC Condition (Ports 1-2)", "Heavy", 
-  Function[{m}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,2}"]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,2}", SweepRange -> fluxR]]
 ];
 
 RegisterPlot["BICCondition_1_4", "BIC Condition (Ports 1-4)", "Heavy", 
-  Function[{m}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,4}"]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,4}", SweepRange -> fluxR]]
 ];
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
@@ -246,19 +172,19 @@ RegisterPlot["BICCondition_1_4", "BIC Condition (Ports 1-4)", "Heavy",
 (* ║     (Compute Worker, связь UI и математического ядра)          ║ *)
 (* ╚════════════════════════════════════════════════════════════════╝ *)
 
-ComputePlotData[plotId_String, modelId_String] := 
+ComputePlotData[plotId_String, modelId_String, fluxRange_List, freqRange_List] := 
   Module[{info, func, graphic, localModel},
     
     (* Достаем базовую модель из реестра *)
     localModel = QED`Model`GetModel[modelId];
     If[!AssociationQ[localModel], Return[Graphics[{Red, Text["Invalid Model ID"]}]]];
 
-    (* Вызов функции отрисовки (передаем чистую локальную копию!) *)
+    (* Вызов функции отрисовки (передаем локальную копию и диапазоны!) *)
     info = $PlotRegistry[plotId];
     graphic = If[MissingQ[info], 
        Graphics[{Red, Text["Unknown Plot ID"]}],
        func = info["Compute"];
-       func[localModel]
+       func[localModel, fluxRange, freqRange]
     ];
     
     graphic
@@ -568,6 +494,30 @@ PresetControlPanel[modelIdSymbol_, onModelUpdate_] :=
     ]
   ];
 
+(* Виджет для управления интервалами (Flux / Frequency) *)
+SetAttributes[MakeIntervalControl, HoldAll];
+MakeIntervalControl[label_, symbol_, {minLimit_, maxLimit_, step_}, onUpdate_, isComputingSymbol_] := 
+  Column[{
+    Style[label, 11, Bold, GrayLevel[0.3]],
+    Row[{
+      InputField[
+        Dynamic[symbol[[1]], Function[{v}, symbol = {Min[v, symbol[[2]] - step], symbol[[2]]}; onUpdate[]]], 
+        Number, FieldSize -> {4, 1}, Enabled -> Dynamic[!TrueQ[isComputingSymbol]]
+      ],
+      Spacer[5],
+      IntervalSlider[
+        Dynamic[symbol, Function[{v}, symbol = v; onUpdate[]]], 
+        {minLimit, maxLimit, step}, 
+        ImageSize -> 120, MinIntervalSize -> step, Enabled -> Dynamic[!TrueQ[isComputingSymbol]]
+      ],
+      Spacer[5],
+      InputField[
+        Dynamic[symbol[[2]], Function[{v}, symbol = {symbol[[1]], Max[v, symbol[[1]] + step]}; onUpdate[]]], 
+        Number, FieldSize -> {4, 1}, Enabled -> Dynamic[!TrueQ[isComputingSymbol]]
+      ]
+    }]
+  }, Alignment -> Left];
+
 makeGearIcon[color_] := Graphics[{color, Disk[{0, 0}, 0.7], Table[Rotate[{EdgeForm[None], Rectangle[{-0.15, 0.6}, {0.15, 0.95}]}, ang, {0, 0}], {ang, 0, 2 Pi - 0.1, Pi/4}], White, Disk[{0, 0}, 0.3]}, ImageSize -> 18, PlotRange -> {{-1, 1}, {-1, 1}}, BaselinePosition -> Center];
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
@@ -587,7 +537,10 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     exportPreset = "Publication",
     performUpdate,
     
-    isComputing = False
+    isComputing = False,
+
+    globalFluxRange = {0.0, 0.5},
+    globalFreqRange = {0.0, 20.0}
   },
   
   performUpdate = Function[{},
@@ -602,10 +555,10 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
       FinishDynamic[]; (* Принудительно заставляем UI нарисовать заглушку *)
     ];
     
-(* Вызываем Compute *)
+    (* Вызываем Compute *)
     Module[{newData},
-      newData = ComputePlotData[selectedPlotId, currentModelId];
-      (* Создаем НОВУЮ ассоциацию в памяти *)
+      (* ТЕПЕРЬ ПЕРЕДАЕМ ДИАПАЗОНЫ *)
+      newData = ComputePlotData[selectedPlotId, currentModelId, globalFluxRange, globalFreqRange];
       plotCache = Association[plotCache, selectedPlotId -> newData];
     ];
     
@@ -648,7 +601,43 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
             Function[{}, performUpdate[]],
             uiTick,
             isComputing
+          ],
+
+          Spacer[15],
+          
+          (* --- НОВЫЙ БЛОК: SWEEP DOMAINS --- *)
+          Framed[
+            Column[{
+              Style["Sweep Domains", Bold, 11, GrayLevel[0.5]],
+              Spacer[5],
+              MakeIntervalControl["External Flux (\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(ext\)]\)/\!\(\*SubscriptBox[\(\[CapitalPhi]\), \(0\)]\)):", globalFluxRange, {0.0, 0.5, 0.01}, 
+                Function[{}, 
+                  If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
+                    plotCache = KeyDrop[plotCache, selectedPlotId];
+                    performUpdate[], 
+                    plotCache = Association[plotCache, selectedPlotId -> Missing["Stale"]]
+                  ];
+                  uiTick++;
+                ], 
+                isComputing
+              ],
+              Spacer[10],
+              MakeIntervalControl["Frequency (GHz):", globalFreqRange, {0.0, 40.0, 0.1}, 
+                Function[{}, 
+                  If[$PlotRegistry[selectedPlotId]["Type"] === "Light",
+                    plotCache = KeyDrop[plotCache, selectedPlotId];
+                    performUpdate[], 
+                    plotCache = Association[plotCache, selectedPlotId -> Missing["Stale"]]
+                  ];
+                  uiTick++;
+                ], 
+                isComputing
+              ]
+            }],
+            FrameStyle -> LightGray, RoundingRadius -> 3, Background -> White, 
+            ImageMargins -> 0, FrameMargins -> 10
           ]
+          (* --------------------------------- *)
         }],
         Alignment -> Top
       ],
