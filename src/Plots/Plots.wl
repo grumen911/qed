@@ -220,22 +220,22 @@ Module[{freqFunc, nModes, range, scale, modeFreq},
                 Table["Mode " <> ToString[i], {i, nModes}],
                 LegendFunction -> (Framed[#, Background -> White, FrameMargins -> 2, FrameStyle -> GrayLevel[0.6]] &)
             ],
-            {Right, Bottom} (* Размещаем внизу, так как кривые обычно идут вверх *)
+            {Left, Bottom} (* Размещаем внизу, так как кривые обычно идут вверх *)
         ],
         Frame -> True,
         FrameLabel -> {
           Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", 16],
           Style["Frequency (GHz)", FontFamily -> "Times", 16]
         },
-        PlotRange -> All,
+        PlotRange -> Automatic,
         PlotPoints -> 250,
-        MaxRecursion -> 1,
+        MaxRecursion -> 3,
         AspectRatio -> 0.6,
         ImageSize -> 600,
         TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
         PlotStyle -> {
           Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.006]],  (* Синий *)
-          Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006]]    (* Оранжевый *)
+          Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006], Dashed]    (* Оранжевый *)
         },
         FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black]
     ]
