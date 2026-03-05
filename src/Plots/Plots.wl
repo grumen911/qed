@@ -140,8 +140,8 @@ Options[PlotSParameterMap] = {
   PlotPoints -> 50,
   ColorFunction -> "SunsetColors",
   FrameLabel -> {
-    Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", 16],
-    Style["Frequency (GHz)", FontFamily -> "Times", 16]
+    Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16],
+    Style["Frequency (GHz)", 16]
   }
 };
 
@@ -224,20 +224,20 @@ Module[{freqFunc, nModes, range, scale, modeFreq},
         ],
         Frame -> True,
         FrameLabel -> {
-          Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", 16],
-          Style["Frequency (GHz)", FontFamily -> "Times", 16]
+          Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16],
+          Style["Frequency (GHz)", 16]
         },
         PlotRange -> Automatic,
         PlotPoints -> 250,
         MaxRecursion -> 3,
         AspectRatio -> 0.6,
         ImageSize -> 600,
-        TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
+        TicksStyle -> Directive[FontSize -> 14],
         PlotStyle -> {
           Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.006]],  (* Синий *)
           Directive[RGBColor[1.0, 0.50, 0.05], Thickness[0.006], Dashed]    (* Оранжевый *)
         },
-        FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black]
+        FrameStyle -> Directive[FontSize -> 14, Black]
     ]
   ];
 
@@ -986,10 +986,10 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
         Axes -> False,
         Frame -> True,
         FrameLabel -> {
-            Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", Large], 
-            Style[Row[{Subscript["T", "1"]^labelSub, " (s)"}], FontFamily -> "Times", Large]
+            Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16], 
+            Style[Row[{Subscript["T", "1"]^labelSub, " (s)"}], 16]
         },
-        FrameStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        FrameStyle -> Directive[Black, FontSize -> 16],
         
         MeshFunctions -> Function[{x, y}, y],
         ImageSize -> 600, 
@@ -1095,10 +1095,10 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
         Axes -> False,
         Frame -> True,
         FrameLabel -> {
-            Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", Large], 
-            Style[Row[{Subscript["T", "\[Phi]"], " (s)"}], FontFamily -> "Times", Large]
+            Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16], 
+            Style[Row[{Subscript["T", "\[Phi]"], " (s)"}], 16]
         },
-        AxesStyle -> Directive[Black, FontSize -> 16, FontFamily -> "Times"],
+        AxesStyle -> Directive[Black, FontSize -> 16],
         MeshFunctions -> Function[{x, y}, y],
         ImageSize -> 600, 
         
@@ -1157,12 +1157,12 @@ PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] :=
   Plot[plotFunc[f], {f, fMin, fMax},
      Frame -> True,
      FrameLabel -> {Style["Frequency (GHz)", 16], Style["Magnitude |S|", 16]},
-     FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-     TicksStyle -> Directive[FontSize -> 14, FontFamily -> "Times"],
+     FrameStyle -> Directive[FontSize -> 14, Black],
+     TicksStyle -> Directive[FontSize -> 14],
      PlotRange -> {0, 1.02}, 
      PlotStyle -> Directive[color, Thickness[0.006]],
      GridLines -> Automatic, AspectRatio -> 0.6, ImageSize -> 600,
-     PlotLabel -> Style[label, 14, FontFamily -> "Times"],
+     PlotLabel -> Style[label, 14],
      MaxRecursion -> 10, PlotPoints -> plotPoints
   ]
  ];
@@ -1212,8 +1212,8 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       ColorFunction -> colFunc,
       Frame -> True,
       FrameLabel -> OptionValue[FrameLabel],
-      FrameStyle -> Directive[FontSize -> 14, FontFamily -> "Times", Black],
-      PlotLabel -> Style[label, 16, FontFamily -> "Times"],
+      FrameStyle -> Directive[FontSize -> 14, Black],
+      PlotLabel -> Style[label, 16],
       PlotLegends -> None, 
       ImageSize -> 600,
       MaxRecursion -> 2
@@ -1222,8 +1222,8 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   (* 4. Исправленная легенда без несуществующих опций *)
   legend = BarLegend[
       {colFunc, {0, 1.05}},
-      LegendLabel -> Style[legendLabel, FontSize -> 16, FontFamily -> "Times"],
-      LabelStyle -> Directive[Black, 14, FontFamily -> "Times"],
+      LegendLabel -> Style[legendLabel, FontSize -> 16],
+      LabelStyle -> Directive[Black, 14],
       LegendMarkerSize -> {20, 300}
   ];
 
@@ -1387,8 +1387,8 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
     ],
     Frame -> True,
     FrameLabel -> {
-      Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], FontFamily -> "Times", 14], 
-      Style["Frequency (GHz)", FontFamily -> "Times", 14]
+      Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 14], 
+      Style["Frequency (GHz)", 14]
     },
     GridLines -> None,
     ImageSize -> 600,
