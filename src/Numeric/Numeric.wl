@@ -320,7 +320,7 @@ GenerateParameterSweep[modelAssoc_, targetQuantity_String, targetSymbol_, Option
       ];
       
       currentParamVector = paramVector;
-      currentParamVector[[targetIndex]] = paramReq;
+      currentParamVector[[targetIndex]] = actualParamVal;
       
       (* Классическая схема: замораживаем равновесие в нуле *)
       currentGuess = ConstantArray[0., numVars];
