@@ -68,12 +68,21 @@ targetQuantity at a given external flux φ_ext. \n\nArguments:\n\
   sweepFunc = GenerateSweepPipeline[modelAssoc, 'PlasmonFrequencies'];\n\
   frequencies = sweepFunc[0.25];";
 
+GenerateParameterSweep::usage = "GenerateParameterSweep[modelAssoc, targetQuantity, targetSymbol] \
+returns a function f[paramValue] that computes targetQuantity at a given value of targetSymbol. \
+Assumes classical/linear operation (equilibrium fluxes are frozen at zero).";
 
 Begin["`Private`"];
 
 
 Options[GenerateSweepPipeline] = {
   MaxFluxStep -> 0.05
+};
+
+Options[GenerateParameterSweep] = {
+  "ConvertFromInductance" -> False,
+  "AssumeZeroFlux" -> True,
+  "IgnoreJunctionCapacitance" -> False
 };
 
 Options[CalculateDephasingRates] = {
@@ -274,6 +283,106 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
   ]
 ];
 
+GenerateParameterSweep::notsym = "Symbol `1` not found in model parameters.";
+
+GenerateParameterSweep[modelAssoc_, targetQuantity_String, targetSymbol_, OptionsPattern[]] := Module[
+  {
+    engines, paramVector, fastLInv, numVars,
+    paramSymbols, targetIndex, symC, phiExtIndex,
+    components, primary, cjSymbols (* <-- Новые переменные *)
+  },
+  
+  engines = QED`Model`GetNumericalQuantity[modelAssoc, "CompiledEngines"];
+  If[engines === $Failed, Return[$Failed]];
+  
+  paramVector = QED`Model`GetParameterVector[modelAssoc];
+  paramSymbols = QED`Model`GetParameterSymbols[modelAssoc];
+  
+  targetIndex = FirstPosition[paramSymbols, targetSymbol];
+  If[MissingQ[targetIndex], 
+     Message[GenerateParameterSweep::notsym, targetSymbol];
+     Return[$Failed]
+  ];
+  targetIndex = First[targetIndex];
+
+  phiExtIndex = FirstPosition[paramSymbols, QED`$PhiExt];
+  If[!MissingQ[phiExtIndex], phiExtIndex = First[phiExtIndex]];
+  
+  numVars = Length[Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]]];
+  fastLInv = engines[[3]];
+  
+  symC = modelAssoc["Analytical"]["CapacitanceMatrix"];
+  
+  (* --- НОВЫЙ БЛОК: Ищем символы емкостей переходов --- *)
+  components = modelAssoc["Topology"]["Components"];
+  primary = modelAssoc["Primary"];
+  cjSymbols = Cases[components, 
+      {"JosephsonJunction", _, _, name_, ___} :> primary[name]["CJ"]["Symbol"]
+  ];
+  
+  (* ВОЗВРАЩАЕМОЕ ЗАМЫКАНИЕ *)
+  Function[{paramReq},
+    Module[
+      {currentGuess, currentParamVector, paramRules, ignoreCapRules, currentCNum, actualParamVal},
+
+      actualParamVal = If[TrueQ[OptionValue["ConvertFromInductance"]],
+        (QED`$Phi0Value / (2 * Pi))^2 / paramReq,
+        paramReq
+      ];
+      
+      currentParamVector = paramVector;
+      currentParamVector[[targetIndex]] = actualParamVal;
+      
+      If[TrueQ[OptionValue["AssumeZeroFlux"]] && !MissingQ[phiExtIndex],
+         currentParamVector[[phiExtIndex]] = 0.0;
+      ];
+      
+      currentGuess = ConstantArray[0., numVars];
+      
+      (* --- НОВЫЙ БЛОК: Правило обнуления емкостей --- *)
+      ignoreCapRules = If[TrueQ[OptionValue["IgnoreJunctionCapacitance"]], 
+          Thread[cjSymbols -> 0.0], 
+          {}
+      ];
+      
+      paramRules = Thread[paramSymbols -> currentParamVector];
+      
+      (* Применяем сначала зануление, а потом уже подставляем остальные числа *)
+      currentCNum = N[symC /. ignoreCapRules /. paramRules];
+      
+      Switch[targetQuantity,
+        "SMatrix_1_2",
+          Module[{invLNum, portIndices, scatData},
+            scatData = modelAssoc["Analytical"]["Scattering"]["1_2"];
+            If[scatData === $Failed, Return[$Failed]];
+            
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            portIndices = scatData["PortIndices"];
+            
+            Function[{omegaReq},
+              QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, currentCNum, invLNum, portIndices, 50.0]
+            ]
+          ],
+          
+        "SMatrix_1_4",
+          Module[{invLNum, portIndices, scatData},
+            scatData = modelAssoc["Analytical"]["Scattering"]["1_4"];
+            If[scatData === $Failed, Return[$Failed]];
+            
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            portIndices = scatData["PortIndices"];
+            
+            Function[{omegaReq},
+              QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, currentCNum, invLNum, portIndices, 50.0]
+            ]
+          ],
+          
+        _, 
+          $Failed
+      ]
+    ]
+  ]
+];
 
 (*
   Physics: Find equilibrium positions φ_min where ∂U/∂φ = 0.

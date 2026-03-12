@@ -116,6 +116,10 @@ Options:
 Performance:
   Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
 
+PlotClassicalSParameterMap::usage = 
+"PlotClassicalSParameterMap[model, sweepParam, options] creates a density plot of S-parameters \
+while sweeping a classical component value (e.g., L or C) and frequency.";
+
 PlotBICModes::usage = "PlotBICModes[model, options] plots the dispersion curves of the two polynomial BIC conditions. \
 Intersections of these curves indicate the presence of a Bound State in the Continuum.";
 
@@ -143,6 +147,23 @@ Options[PlotSParameterMap] = {
     Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16],
     Style["Frequency (GHz)", 16]
   }
+};
+
+PlotClassicalSParameterMap::nosweep = "You must specify a \"SweepParameter\" option.";
+
+Options[PlotClassicalSParameterMap] = {
+  "SweepParameter" -> Subscript[QED`$JosephsonEnergySymbol, 1],
+  "FrequencyRange" -> {0.01, 20.},
+  "ParameterLabel" -> Row[{Subscript["L", 1], " (nH)"}],
+  "ParameterRange" -> {0.01, 8.},
+  "ParameterMultiplier" -> 10^-9,
+  "Measurement" -> "S21",
+  "Ports" -> "{1,4}",
+  "ConvertFromInductance" -> True,
+  "AssumeZeroFlux" -> True,
+  "IgnoreJunctionCapacitance" -> True,
+  PlotPoints -> 50,
+  ColorFunction -> "SunsetColors"
 };
 
 Options[PlotFrequencyResponse] = {
@@ -1151,7 +1172,10 @@ PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] :=
   plotFunc[fGHz_?NumericQ] := Abs[ sMatrixAtPhi[fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
 
   color = Switch[measure, "S11", RGBColor[0.12, 0.47, 0.71], _, RGBColor[1.0, 0.50, 0.05]];
-  label = Switch[measure, "S11", "|S11| (Reflection)", _, "|S21| (Transmission)"];
+  label = Switch[measure,
+            "S11", Row[{"|", Subscript["S", "11"], "| (Reflection)"}],
+            _, Row[{"|", Subscript["S", "21"], "| (Transmission)"}]
+          ];
 
   (* 4. Отрисовка *)
   Plot[plotFunc[f], {f, fMin, fMax},
@@ -1183,8 +1207,8 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   colFunc = OptionValue[ColorFunction];
   
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
-  label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
-  legendLabel = If[measure === "S11", "|S11|", "|S21|"];
+  label = If[measure === "S11", "Reflection", "Transmission"];
+  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "|"}], Row[{"|", Subscript["S", "21"], "|"}]];
 
   (* 1. Формируем ключ JIT-конвейера и вызываем его *)
   depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
@@ -1228,6 +1252,87 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   ];
 
   (* Сборка графика и легенды *)
+  Legended[plot, Placed[legend, Right]]
+];
+
+PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
+  Module[{
+    fMin, fMax, paramRange, measure, plotPoints, colFunc,
+    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
+    portsOpt, depKey, paramLabel, sweepParam, paramMultiplier
+  },
+  
+  (* Извлекаем сканируемый параметр из опций *)
+  sweepParam = OptionValue["SweepParameter"];
+  
+  (* Защита от пустого параметра *)
+  If[sweepParam === None,
+      Message[PlotClassicalSParameterMap::nosweep];
+      Return[Graphics[{Red, Text[Style["Error: \"SweepParameter\" is not specified.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+
+  {fMin, fMax} = OptionValue["FrequencyRange"];
+  paramRange = OptionValue["ParameterRange"];
+  paramMultiplier = OptionValue["ParameterMultiplier"];
+  measure = OptionValue["Measurement"];
+  portsOpt = OptionValue["Ports"];
+  paramLabel = OptionValue["ParameterLabel"];
+
+  plotPoints = OptionValue[PlotPoints];
+  colFunc = OptionValue[ColorFunction];
+
+  sIndex = If[measure === "S11", {1, 1}, {2, 1}];
+  label = label = If[measure === "S11", "Reflection", "Transmission"];
+  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "|"}], Row[{"|", Subscript["S", "21"], "|"}]];
+
+  (* 1. Формируем ключ JIT-конвейера и вызываем НАШ КЛАССИЧЕСКИЙ генератор *)
+  depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
+  sweepFunc = QED`Numeric`GenerateParameterSweep[
+      model, 
+      depKey, 
+      sweepParam, 
+      "ConvertFromInductance" -> OptionValue["ConvertFromInductance"],
+      "AssumeZeroFlux" -> OptionValue["AssumeZeroFlux"],
+      "IgnoreJunctionCapacitance" -> OptionValue["IgnoreJunctionCapacitance"]
+  ];
+  
+  If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+      Return[Graphics[{Red, Text[Style["Error: Sweep generation failed for " <> ToString[sweepParam], 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+
+  (* 2. Защищенная функция: paramVal (ось X) и fGHz (ось Y) *)
+  plotFunc[paramVal_?NumericQ, fGHz_?NumericQ] := 
+    Abs[ sweepFunc[paramVal * paramMultiplier][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+
+  (* 3. Вызов DensityPlot *)
+  plot = DensityPlot[
+      plotFunc[p, f], 
+      {p, paramRange[[1]], paramRange[[2]]}, 
+      {f, fMin, fMax},
+      
+      PlotPoints -> {100, 100}, 
+      Exclusions -> None,
+      PerformanceGoal -> "Quality",
+
+      PlotRange -> {0, 1.05}, 
+      ColorFunction -> colFunc,
+      Frame -> True,
+      FrameLabel -> {Style[paramLabel, 16], Style["Frequency (GHz)", 16]},
+      FrameStyle -> Directive[FontSize -> 14, Black],
+      PlotLabel -> Style[label, 16],
+      PlotLegends -> None, 
+      ImageSize -> 600,
+      MaxRecursion -> 4
+  ];
+
+  (* 4. Легенда *)
+  legend = BarLegend[
+      {colFunc, {0, 1.05}},
+      LegendLabel -> Style[legendLabel, FontSize -> 16],
+      LabelStyle -> Directive[Black, 14],
+      LegendMarkerSize -> {20, 300}
+  ];
+
   Legended[plot, Placed[legend, Right]]
 ];
 
