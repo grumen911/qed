@@ -68,12 +68,19 @@ targetQuantity at a given external flux φ_ext. \n\nArguments:\n\
   sweepFunc = GenerateSweepPipeline[modelAssoc, 'PlasmonFrequencies'];\n\
   frequencies = sweepFunc[0.25];";
 
+GenerateParameterSweep::usage = "GenerateParameterSweep[modelAssoc, targetQuantity, targetSymbol] \
+returns a function f[paramValue] that computes targetQuantity at a given value of targetSymbol. \
+Assumes classical/linear operation (equilibrium fluxes are frozen at zero).";
 
 Begin["`Private`"];
 
 
 Options[GenerateSweepPipeline] = {
   MaxFluxStep -> 0.05
+};
+
+Options[GenerateParameterSweep] = {
+  "ConvertFromInductance" -> False
 };
 
 Options[CalculateDephasingRates] = {
@@ -274,6 +281,89 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
   ]
 ];
 
+GenerateParameterSweep::notsym = "Symbol `1` not found in model parameters.";
+
+GenerateParameterSweep[modelAssoc_, targetQuantity_String, targetSymbol_, OptionsPattern[]] := Module[
+  {
+    engines, paramVector, fastLInv, numVars,
+    paramSymbols, targetIndex, symC
+  },
+  
+  engines = QED`Model`GetNumericalQuantity[modelAssoc, "CompiledEngines"];
+  If[engines === $Failed, Return[$Failed]];
+  
+  paramVector = QED`Model`GetParameterVector[modelAssoc];
+  paramSymbols = QED`Model`GetParameterSymbols[modelAssoc];
+  
+  (* Ищем индекс сканируемого параметра *)
+  targetIndex = FirstPosition[paramSymbols, targetSymbol];
+  If[MissingQ[targetIndex], 
+     Message[GenerateParameterSweep::notsym, targetSymbol];
+     Return[$Failed]
+  ];
+  targetIndex = First[targetIndex];
+  
+  numVars = Length[Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]]];
+  fastLInv = engines[[3]]; (* Извлекаем скомпилированный Гессиан *)
+  
+  (* Символьная матрица емкостей для пересчета на лету *)
+  symC = modelAssoc["Analytical"]["CapacitanceMatrix"];
+  
+  (* ВОЗВРАЩАЕМОЕ ЗАМЫКАНИЕ *)
+  Function[{paramReq},
+    Module[
+      {currentGuess, currentParamVector, paramRules, currentCNum, actualParamVal},
+
+      actualParamVal = If[TrueQ[OptionValue["ConvertFromInductance"]],
+        (QED`$Phi0Value / (2 * Pi))^2 / paramReq,
+        paramReq
+      ];
+      
+      currentParamVector = paramVector;
+      currentParamVector[[targetIndex]] = paramReq;
+      
+      (* Классическая схема: замораживаем равновесие в нуле *)
+      currentGuess = ConstantArray[0., numVars];
+      
+      (* Пересчет матрицы емкостей: быстрая подстановка новых чисел в символьную матрицу *)
+      paramRules = Thread[paramSymbols -> currentParamVector];
+      currentCNum = N[symC /. paramRules];
+      
+      Switch[targetQuantity,
+        "SMatrix_1_2",
+          Module[{invLNum, portIndices, scatData},
+            scatData = modelAssoc["Analytical"]["Scattering"]["1_2"];
+            If[scatData === $Failed, Return[$Failed]];
+            
+            (* fastLInv мгновенно пересчитает L^-1 с новыми E_J, E_L и т.д. *)
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            portIndices = scatData["PortIndices"];
+            
+            (* Возвращаем функцию от частоты *)
+            Function[{omegaReq},
+              QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, currentCNum, invLNum, portIndices, 50.0]
+            ]
+          ],
+          
+        "SMatrix_1_4",
+          Module[{invLNum, portIndices, scatData},
+            scatData = modelAssoc["Analytical"]["Scattering"]["1_4"];
+            If[scatData === $Failed, Return[$Failed]];
+            
+            invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
+            portIndices = scatData["PortIndices"];
+            
+            Function[{omegaReq},
+              QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, currentCNum, invLNum, portIndices, 50.0]
+            ]
+          ],
+          
+        _, 
+          $Failed
+      ]
+    ]
+  ]
+];
 
 (*
   Physics: Find equilibrium positions φ_min where ∂U/∂φ = 0.

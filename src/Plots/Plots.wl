@@ -116,6 +116,10 @@ Options:
 Performance:
   Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
 
+PlotClassicalSParameterMap::usage = 
+"PlotClassicalSParameterMap[model, sweepParam, options] creates a density plot of S-parameters \
+while sweeping a classical component value (e.g., L or C) and frequency.";
+
 PlotBICModes::usage = "PlotBICModes[model, options] plots the dispersion curves of the two polynomial BIC conditions. \
 Intersections of these curves indicate the presence of a Bound State in the Continuum.";
 
@@ -143,6 +147,17 @@ Options[PlotSParameterMap] = {
     Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16],
     Style["Frequency (GHz)", 16]
   }
+};
+
+Options[PlotClassicalSParameterMap] = {
+  "FrequencyRange" -> {0.01, 20.},
+  "ParameterRange" -> {1.*^-9, 10.*^-9}, 
+  "ParameterLabel" -> "Inductance (H)",
+  "Measurement" -> "S21",
+  "Ports" -> "{1,4}",
+  "ConvertFromInductance" -> True,
+  PlotPoints -> 50,
+  ColorFunction -> "SunsetColors"
 };
 
 Options[PlotFrequencyResponse] = {
@@ -1228,6 +1243,75 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   ];
 
   (* Сборка графика и легенды *)
+  Legended[plot, Placed[legend, Right]]
+];
+
+PlotClassicalSParameterMap[model_Association, sweepParam_, opts:OptionsPattern[]] :=
+  Module[{
+    fMin, fMax, paramRange, measure, plotPoints, colFunc,
+    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
+    portsOpt, depKey, paramLabel
+  },
+  
+  {fMin, fMax} = OptionValue["FrequencyRange"];
+  paramRange = OptionValue["ParameterRange"];
+  measure = OptionValue["Measurement"];
+  portsOpt = OptionValue["Ports"];
+  paramLabel = OptionValue["ParameterLabel"];
+
+  plotPoints = OptionValue[PlotPoints];
+  colFunc = OptionValue[ColorFunction];
+
+  sIndex = If[measure === "S11", {1, 1}, {2, 1}];
+  label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
+  legendLabel = If[measure === "S11", "|S11|", "|S21|"];
+
+  (* 1. Формируем ключ JIT-конвейера и вызываем НАШ КЛАССИЧЕСКИЙ генератор *)
+  depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
+  sweepFunc = QED`Numeric`GenerateParameterSweep[
+      model, 
+      depKey, 
+      sweepParam, 
+      "ConvertFromInductance" -> OptionValue["ConvertFromInductance"]
+  ];
+  
+  If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+      Return[Graphics[{Red, Text[Style["Error: Sweep generation failed for " <> ToString[sweepParam], 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+
+  (* 2. Защищенная функция: paramVal (ось X) и fGHz (ось Y) *)
+  plotFunc[paramVal_?NumericQ, fGHz_?NumericQ] := 
+    Abs[ sweepFunc[paramVal][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+
+  (* 3. Вызов DensityPlot *)
+  plot = DensityPlot[
+      plotFunc[p, f], 
+      {p, paramRange[[1]], paramRange[[2]]}, 
+      {f, fMin, fMax},
+      
+      PlotPoints -> {10, 50}, 
+      Exclusions -> None,
+      PerformanceGoal -> "Quality",
+
+      PlotRange -> {0, 1.05}, 
+      ColorFunction -> colFunc,
+      Frame -> True,
+      FrameLabel -> {Style[paramLabel, 16], Style["Frequency (GHz)", 16]},
+      FrameStyle -> Directive[FontSize -> 14, Black],
+      PlotLabel -> Style[label, 16],
+      PlotLegends -> None, 
+      ImageSize -> 600,
+      MaxRecursion -> 2
+  ];
+
+  (* 4. Легенда *)
+  legend = BarLegend[
+      {colFunc, {0, 1.05}},
+      LegendLabel -> Style[legendLabel, FontSize -> 16],
+      LabelStyle -> Directive[Black, 14],
+      LegendMarkerSize -> {20, 300}
+  ];
+
   Legended[plot, Placed[legend, Right]]
 ];
 
