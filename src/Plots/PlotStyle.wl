@@ -58,16 +58,46 @@ ApplyExportPreset[Legended[plot_, legend_], "Publication"] :=
 
 (* Основная функция для графиков без Legended или для внутренней части Legended *)
 ApplyExportPreset[g_, "Publication"] := 
-  Module[{styledG, baseFontSize = 14, fontName = "Arial", plotSize = 72 * 5},
+  Module[{styledG, baseFontSize = 14, fontName = "Arial", plotSize = 72 * 5, hybridRule},
     
+   (* --- ПРАВИЛО ГИБРИДНОЙ РАСТЕРИЗАЦИИ ТЕПЛОВЫХ КАРТ --- *)
+    hybridRule = Graphics[prims_, opts___] /; !FreeQ[prims, GraphicsComplex] :> 
+      Module[{img},
+        img = RemoveAlphaChannel @ Rasterize[
+            Graphics[
+                prims, 
+                PlotRangePadding -> None, 
+                Frame -> False, 
+                Axes -> False,
+                (* ФИКС: Прокидываем оригинальные пропорции (например, AspectRatio -> 1) *)
+                Sequence @@ FilterRules[{opts}, AspectRatio] 
+            ], 
+            "Image", RasterSize -> 1000
+        ];
+        
+        Graphics[
+            Inset[img, Scaled[{0, 0}], {0, 0}, Scaled[{1, 1}]],
+            PlotRangePadding -> None,
+            Sequence @@ FilterRules[{opts}, Except[PlotRangePadding]]
+        ]
+      ];
+
+    (* Применяем растеризацию, если это тепловая карта *)
+    styledG = g /. hybridRule;
+
     (* Масштабируем толщины линий *)
-    styledG = g /. {
+    styledG = styledG /.
+    {
        Thickness[t_?NumericQ] :> Thickness[2.5 * t], 
        AbsoluteThickness[t_] :> AbsoluteThickness[2 * t]
     };
 
     (* Применяем общий стиль оформления *)
     Show[styledG,
+       (* ФИКС ОБРЕЗАННОЙ РАМКИ: Даем запас по краям (особенно справа и сверху) *)
+       ImagePadding -> {{Automatic, 15}, {Automatic, 15}},
+       PlotRangeClipping -> False,
+       
        BaseStyle -> {FontFamily -> fontName, FontSize -> baseFontSize},
        FrameStyle -> Directive[Black, AbsoluteThickness[1.5], FontSize -> baseFontSize],
        AxesStyle -> Directive[Black, AbsoluteThickness[1.5], FontSize -> baseFontSize],

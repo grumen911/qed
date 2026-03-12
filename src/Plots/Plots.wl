@@ -154,7 +154,7 @@ PlotClassicalSParameterMap::nosweep = "You must specify a \"SweepParameter\" opt
 Options[PlotClassicalSParameterMap] = {
   "SweepParameter" -> Subscript[QED`$JosephsonEnergySymbol, 1],
   "FrequencyRange" -> {0.01, 20.},
-  "ParameterLabel" -> "L1 (nH)",
+  "ParameterLabel" -> Row[{Subscript["L", 1], " (nH)"}],
   "ParameterRange" -> {0.01, 8.},
   "ParameterMultiplier" -> 10^-9,
   "Measurement" -> "S21",
@@ -1172,7 +1172,10 @@ PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] :=
   plotFunc[fGHz_?NumericQ] := Abs[ sMatrixAtPhi[fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
 
   color = Switch[measure, "S11", RGBColor[0.12, 0.47, 0.71], _, RGBColor[1.0, 0.50, 0.05]];
-  label = Switch[measure, "S11", "|S11| (Reflection)", _, "|S21| (Transmission)"];
+  label = Switch[measure,
+            "S11", Row[{"|", Subscript["S", "11"], "| (Reflection)"}],
+            _, Row[{"|", Subscript["S", "21"], "| (Transmission)"}]
+          ];
 
   (* 4. Отрисовка *)
   Plot[plotFunc[f], {f, fMin, fMax},
@@ -1204,8 +1207,8 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   colFunc = OptionValue[ColorFunction];
   
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
-  label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
-  legendLabel = If[measure === "S11", "|S11|", "|S21|"];
+  label = If[measure === "S11", "Reflection", "Transmission"];
+  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "|"}], Row[{"|", Subscript["S", "21"], "|"}]];
 
   (* 1. Формируем ключ JIT-конвейера и вызываем его *)
   depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
@@ -1279,8 +1282,8 @@ PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
   colFunc = OptionValue[ColorFunction];
 
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
-  label = If[measure === "S11", "|S11| Reflection", "|S21| Transmission"];
-  legendLabel = If[measure === "S11", "|S11|", "|S21|"];
+  label = label = If[measure === "S11", "Reflection", "Transmission"];
+  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "|"}], Row[{"|", Subscript["S", "21"], "|"}]];
 
   (* 1. Формируем ключ JIT-конвейера и вызываем НАШ КЛАССИЧЕСКИЙ генератор *)
   depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
