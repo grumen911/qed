@@ -154,8 +154,9 @@ PlotClassicalSParameterMap::nosweep = "You must specify a \"SweepParameter\" opt
 Options[PlotClassicalSParameterMap] = {
   "SweepParameter" -> Subscript[QED`$JosephsonEnergySymbol, 1],
   "FrequencyRange" -> {0.01, 20.},
-  "ParameterRange" -> {1.*^-9, 10.*^-9}, 
-  "ParameterLabel" -> "Inductance (H)",
+  "ParameterLabel" -> "L1 (nH)",
+  "ParameterRange" -> {0.01, 8.},
+  "ParameterMultiplier" -> 10^-9,
   "Measurement" -> "S21",
   "Ports" -> "{1,4}",
   "ConvertFromInductance" -> True,
@@ -1255,7 +1256,7 @@ PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
   Module[{
     fMin, fMax, paramRange, measure, plotPoints, colFunc,
     sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
-    portsOpt, depKey, paramLabel, sweepParam
+    portsOpt, depKey, paramLabel, sweepParam, paramMultiplier
   },
   
   (* Извлекаем сканируемый параметр из опций *)
@@ -1269,6 +1270,7 @@ PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
 
   {fMin, fMax} = OptionValue["FrequencyRange"];
   paramRange = OptionValue["ParameterRange"];
+  paramMultiplier = OptionValue["ParameterMultiplier"];
   measure = OptionValue["Measurement"];
   portsOpt = OptionValue["Ports"];
   paramLabel = OptionValue["ParameterLabel"];
@@ -1297,7 +1299,7 @@ PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
 
   (* 2. Защищенная функция: paramVal (ось X) и fGHz (ось Y) *)
   plotFunc[paramVal_?NumericQ, fGHz_?NumericQ] := 
-    Abs[ sweepFunc[paramVal][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+    Abs[ sweepFunc[paramVal * paramMultiplier][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
 
   (* 3. Вызов DensityPlot *)
   plot = DensityPlot[
@@ -1305,7 +1307,7 @@ PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
       {p, paramRange[[1]], paramRange[[2]]}, 
       {f, fMin, fMax},
       
-      PlotPoints -> {10, 50}, 
+      PlotPoints -> {100, 100}, 
       Exclusions -> None,
       PerformanceGoal -> "Quality",
 
@@ -1317,7 +1319,7 @@ PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
       PlotLabel -> Style[label, 16],
       PlotLegends -> None, 
       ImageSize -> 600,
-      MaxRecursion -> 2
+      MaxRecursion -> 4
   ];
 
   (* 4. Легенда *)
