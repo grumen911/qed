@@ -80,7 +80,9 @@ Options[GenerateSweepPipeline] = {
 };
 
 Options[GenerateParameterSweep] = {
-  "ConvertFromInductance" -> False
+  "ConvertFromInductance" -> False,
+  "AssumeZeroFlux" -> True,
+  "IgnoreJunctionCapacitance" -> False
 };
 
 Options[CalculateDephasingRates] = {
@@ -286,7 +288,8 @@ GenerateParameterSweep::notsym = "Symbol `1` not found in model parameters.";
 GenerateParameterSweep[modelAssoc_, targetQuantity_String, targetSymbol_, OptionsPattern[]] := Module[
   {
     engines, paramVector, fastLInv, numVars,
-    paramSymbols, targetIndex, symC
+    paramSymbols, targetIndex, symC, phiExtIndex,
+    components, primary, cjSymbols (* <-- Новые переменные *)
   },
   
   engines = QED`Model`GetNumericalQuantity[modelAssoc, "CompiledEngines"];
@@ -295,24 +298,32 @@ GenerateParameterSweep[modelAssoc_, targetQuantity_String, targetSymbol_, Option
   paramVector = QED`Model`GetParameterVector[modelAssoc];
   paramSymbols = QED`Model`GetParameterSymbols[modelAssoc];
   
-  (* Ищем индекс сканируемого параметра *)
   targetIndex = FirstPosition[paramSymbols, targetSymbol];
   If[MissingQ[targetIndex], 
      Message[GenerateParameterSweep::notsym, targetSymbol];
      Return[$Failed]
   ];
   targetIndex = First[targetIndex];
+
+  phiExtIndex = FirstPosition[paramSymbols, QED`$PhiExt];
+  If[!MissingQ[phiExtIndex], phiExtIndex = First[phiExtIndex]];
   
   numVars = Length[Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]]];
-  fastLInv = engines[[3]]; (* Извлекаем скомпилированный Гессиан *)
+  fastLInv = engines[[3]];
   
-  (* Символьная матрица емкостей для пересчета на лету *)
   symC = modelAssoc["Analytical"]["CapacitanceMatrix"];
+  
+  (* --- НОВЫЙ БЛОК: Ищем символы емкостей переходов --- *)
+  components = modelAssoc["Topology"]["Components"];
+  primary = modelAssoc["Primary"];
+  cjSymbols = Cases[components, 
+      {"JosephsonJunction", _, _, name_, ___} :> primary[name]["CJ"]["Symbol"]
+  ];
   
   (* ВОЗВРАЩАЕМОЕ ЗАМЫКАНИЕ *)
   Function[{paramReq},
     Module[
-      {currentGuess, currentParamVector, paramRules, currentCNum, actualParamVal},
+      {currentGuess, currentParamVector, paramRules, ignoreCapRules, currentCNum, actualParamVal},
 
       actualParamVal = If[TrueQ[OptionValue["ConvertFromInductance"]],
         (QED`$Phi0Value / (2 * Pi))^2 / paramReq,
@@ -322,12 +333,22 @@ GenerateParameterSweep[modelAssoc_, targetQuantity_String, targetSymbol_, Option
       currentParamVector = paramVector;
       currentParamVector[[targetIndex]] = actualParamVal;
       
-      (* Классическая схема: замораживаем равновесие в нуле *)
+      If[TrueQ[OptionValue["AssumeZeroFlux"]] && !MissingQ[phiExtIndex],
+         currentParamVector[[phiExtIndex]] = 0.0;
+      ];
+      
       currentGuess = ConstantArray[0., numVars];
       
-      (* Пересчет матрицы емкостей: быстрая подстановка новых чисел в символьную матрицу *)
+      (* --- НОВЫЙ БЛОК: Правило обнуления емкостей --- *)
+      ignoreCapRules = If[TrueQ[OptionValue["IgnoreJunctionCapacitance"]], 
+          Thread[cjSymbols -> 0.0], 
+          {}
+      ];
+      
       paramRules = Thread[paramSymbols -> currentParamVector];
-      currentCNum = N[symC /. paramRules];
+      
+      (* Применяем сначала зануление, а потом уже подставляем остальные числа *)
+      currentCNum = N[symC /. ignoreCapRules /. paramRules];
       
       Switch[targetQuantity,
         "SMatrix_1_2",
@@ -335,11 +356,9 @@ GenerateParameterSweep[modelAssoc_, targetQuantity_String, targetSymbol_, Option
             scatData = modelAssoc["Analytical"]["Scattering"]["1_2"];
             If[scatData === $Failed, Return[$Failed]];
             
-            (* fastLInv мгновенно пересчитает L^-1 с новыми E_J, E_L и т.д. *)
             invLNum = QED`Numeric`Calculators`CalcSystemMatrices[fastLInv, currentGuess, currentParamVector]["InverseInductance"];
             portIndices = scatData["PortIndices"];
             
-            (* Возвращаем функцию от частоты *)
             Function[{omegaReq},
               QED`Numeric`Calculators`CalcSMatrixNumeric[omegaReq, currentCNum, invLNum, portIndices, 50.0]
             ]

@@ -160,7 +160,7 @@ RegisterPlot["SmatrixHeatmap_1_4", "S-matrix Heatmap (Ports 1-4)", "Heavy",
 ];
 
 RegisterPlot["SmatrixHeatmap_1_4 (Classical)", "S-matrix Heatmap (Ports 1-4, Classical)", "Heavy", 
-  Function[{m, fluxR, freqR}, QED`Plots`PlotClassicalSParameterMap[m, Subscript[QED`$JosephsonEnergySymbol, 2], "Ports" -> "{1,4}", "FrequencyRange" -> freqR]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotClassicalSParameterMap[m, "Ports" -> "{1,4}", "FrequencyRange" -> freqR]]
 ];
 
 RegisterPlot["BICCondition_1_2", "BIC Condition (Ports 1-2)", "Heavy", 

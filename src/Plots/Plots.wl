@@ -149,13 +149,18 @@ Options[PlotSParameterMap] = {
   }
 };
 
+PlotClassicalSParameterMap::nosweep = "You must specify a \"SweepParameter\" option.";
+
 Options[PlotClassicalSParameterMap] = {
+  "SweepParameter" -> Subscript[QED`$JosephsonEnergySymbol, 1],
   "FrequencyRange" -> {0.01, 20.},
   "ParameterRange" -> {1.*^-9, 10.*^-9}, 
   "ParameterLabel" -> "Inductance (H)",
   "Measurement" -> "S21",
   "Ports" -> "{1,4}",
   "ConvertFromInductance" -> True,
+  "AssumeZeroFlux" -> True,
+  "IgnoreJunctionCapacitance" -> True,
   PlotPoints -> 50,
   ColorFunction -> "SunsetColors"
 };
@@ -1246,13 +1251,22 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   Legended[plot, Placed[legend, Right]]
 ];
 
-PlotClassicalSParameterMap[model_Association, sweepParam_, opts:OptionsPattern[]] :=
+PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
   Module[{
     fMin, fMax, paramRange, measure, plotPoints, colFunc,
     sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
-    portsOpt, depKey, paramLabel
+    portsOpt, depKey, paramLabel, sweepParam
   },
   
+  (* Извлекаем сканируемый параметр из опций *)
+  sweepParam = OptionValue["SweepParameter"];
+  
+  (* Защита от пустого параметра *)
+  If[sweepParam === None,
+      Message[PlotClassicalSParameterMap::nosweep];
+      Return[Graphics[{Red, Text[Style["Error: \"SweepParameter\" is not specified.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+
   {fMin, fMax} = OptionValue["FrequencyRange"];
   paramRange = OptionValue["ParameterRange"];
   measure = OptionValue["Measurement"];
@@ -1272,7 +1286,9 @@ PlotClassicalSParameterMap[model_Association, sweepParam_, opts:OptionsPattern[]
       model, 
       depKey, 
       sweepParam, 
-      "ConvertFromInductance" -> OptionValue["ConvertFromInductance"]
+      "ConvertFromInductance" -> OptionValue["ConvertFromInductance"],
+      "AssumeZeroFlux" -> OptionValue["AssumeZeroFlux"],
+      "IgnoreJunctionCapacitance" -> OptionValue["IgnoreJunctionCapacitance"]
   ];
   
   If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
