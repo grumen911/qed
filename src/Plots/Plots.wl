@@ -224,8 +224,8 @@ Module[{freqFunc, nModes, range, scale, modeFreq},
         ],
         Frame -> True,
         FrameLabel -> {
-          Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16],
-          Style["Frequency (GHz)", 16]
+          Row[{Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times", Italic], Style[" (", FontFamily -> "Arial"], Style[Subscript["\[CapitalPhi]", "0"], FontFamily -> "Times", Italic], Style[")", FontFamily -> "Arial"]}],
+          Style["Frequency (GHz)", FontFamily -> "Arial"]
         },
         PlotRange -> Automatic,
         PlotPoints -> 250,
@@ -986,8 +986,8 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
         Axes -> False,
         Frame -> True,
         FrameLabel -> {
-            Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16], 
-            Style[Row[{Subscript["T", "1"]^labelSub, " (s)"}], 16]
+          Row[{Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times", Italic], Style[" (", FontFamily -> "Arial"], Style[Subscript["\[CapitalPhi]", "0"], FontFamily -> "Times", Italic], Style[")", FontFamily -> "Arial"]}],
+          Row[{Style[Subscript["T", "1"]^labelSub, FontFamily -> "Times", Italic], Style[" (s)", FontFamily -> "Arial"]}]
         },
         FrameStyle -> Directive[Black, FontSize -> 16],
         
@@ -1095,8 +1095,8 @@ PlotDephasingTime[model_Association, opts:OptionsPattern[]] :=
         Axes -> False,
         Frame -> True,
         FrameLabel -> {
-            Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16], 
-            Style[Row[{Subscript["T", "\[Phi]"], " (s)"}], 16]
+          Row[{Style[Subscript["\[CapitalPhi]", "ext"], FontFamily -> "Times", Italic], Style[" (", FontFamily -> "Arial"], Style[Subscript["\[CapitalPhi]", "0"], FontFamily -> "Times", Italic], Style[")", FontFamily -> "Arial"]}],
+          Row[{Style[Subscript["T", "\[Phi]"], FontFamily -> "Times", Italic], Style[" (s)", FontFamily -> "Arial"]}]
         },
         AxesStyle -> Directive[Black, FontSize -> 16],
         MeshFunctions -> Function[{x, y}, y],
