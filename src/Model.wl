@@ -318,11 +318,13 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian, potential,
  		 potentialGradient, currentOp, voltageOperatorsSym, nodes, 
      scattering12, scattering14, scattering, bicCondition12, bicCondition14, 
-     dynamicInductanceRules, zeroModeData},
+     dynamicInductanceRules, zeroModeData, combinedRules},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   zeroModeData = QED`Analytic`BuildZeroModeTransform[topology];
-  lagrangian = lagrangian /. zeroModeData["FluxRules"] /. zeroModeData["FluxDotRules"];
+  
+  combinedRules = Join[zeroModeData["FluxDotRules"], zeroModeData["FluxRules"]];
+  lagrangian = lagrangian /. combinedRules;
 
   capMatrix = BuildCapacitanceMatrix[lagrangian, topology];
   hamiltonian = BuildHamiltonian[lagrangian, capMatrix, topology];

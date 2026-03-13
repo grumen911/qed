@@ -136,16 +136,46 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
  ];
 
 
-BuildCapacitanceMatrix[lagrangian_, topology_Association] := 
- Module[{nodes, phiDotVars, capacitanceMatrix},
-  nodes = getAllIndependentNodes[topology]; (* ВАЖНО: Берем ВСЕ узлы *)
-  phiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ nodes;
-  capacitanceMatrix = Outer[
-    D[D[lagrangian, #1], #2] &,
-    phiDotVars,
-    phiDotVars
+BuildCapacitanceMatrix[lagrangianTransformed_, topology_Association] := 
+ Module[{allNodes, activeNodes, allPhiDotVars, capMatrixFull, 
+         nonZeroIndices, capMatrixSolid, invCapMatrixSolid, invCapMatrixFull,
+         activeIndices, reducedInvCapMatrix, effCapMatrix},
+         
+  allNodes = getAllIndependentNodes[topology];
+  activeNodes = getActiveNodes[topology];
+  
+  allPhiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ allNodes;
+  
+  (* 1. Полная матрица емкостей (N x N) в новых координатах *)
+  capMatrixFull = Outer[
+    D[D[lagrangianTransformed, #1], #2] &,
+    allPhiDotVars,
+    allPhiDotVars
   ];
-  capacitanceMatrix
+  
+  (* 2. Находим узлы, у которых есть хоть какая-то емкость (диагональ != 0) *)
+  nonZeroIndices = Select[Range[Length[allNodes]], capMatrixFull[[#, #]] =!= 0 &];
+  
+  If[Length[nonZeroIndices] == 0,
+    Return[ConstantArray[0, {Length[activeNodes], Length[activeNodes]}]];
+  ];
+  
+  (* 3. Вырезаем невырожденную часть и обращаем её *)
+  capMatrixSolid = capMatrixFull[[nonZeroIndices, nonZeroIndices]];
+  invCapMatrixSolid = Inverse[capMatrixSolid];
+  
+  (* 4. Возвращаем нули на место для вырожденных (пустых) переменных *)
+  invCapMatrixFull = ConstantArray[0, Dimensions[capMatrixFull]];
+  invCapMatrixFull[[nonZeroIndices, nonZeroIndices]] = invCapMatrixSolid;
+  
+  (* 5. Выделяем блок матрицы обратных емкостей, соответствующий только активным узлам *)
+  activeIndices = Flatten[Map[FirstPosition[allNodes, #]&, activeNodes]];
+  reducedInvCapMatrix = invCapMatrixFull[[activeIndices, activeIndices]];
+  
+  (* 6. Итоговая матрица емкостей (N_act x N_act) - это обратная к редуцированной *)
+  effCapMatrix = Simplify[Inverse[reducedInvCapMatrix]];
+  
+  effCapMatrix
  ];
 
 
@@ -193,28 +223,21 @@ BuildInductanceMatrix[hamiltonian_, topology_Association] :=
   Simplify[hessianSymbolic]
  ];
 
-BuildHamiltonian[lagrangianTransformed_, capMatrix_, topology_Association] := 
- Module[{allNodes, activeNodes, allPhiDotVars, activeQVars, invCapMatrix, 
-         reducedInvCapMatrix, activeIndices, kineticEnergy, potentialEnergy},
+BuildHamiltonian[lagrangianTransformed_, capMatrixActive_, topology_Association] := 
+ Module[{activeNodes, activeQVars, invCapMatrixActive, 
+         kineticEnergy, potentialEnergy},
          
-  allNodes = getAllIndependentNodes[topology];
   activeNodes = getActiveNodes[topology];
-  
-  allPhiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ allNodes;
   activeQVars = Subscript[QED`$ChargeSymbol, #] & /@ activeNodes;
   
-  (* 1. Обращаем ПОЛНУЮ матрицу емкостей (N x N) для корректного учета всех перекрестных связей *)
-  invCapMatrix = Inverse[capMatrix];
+  (* 1. Обращаем матрицу емкостей (она уже правильного размера N_act x N_act) *)
+  invCapMatrixActive = Inverse[capMatrixActive];
   
-  (* 2. Вырезаем подматрицу только для активных узлов (эквивалентно подстановке Q_anchor -> 0) *)
-  activeIndices = Flatten[Map[FirstPosition[allNodes, #]&, activeNodes]];
-  reducedInvCapMatrix = invCapMatrix[[activeIndices, activeIndices]];
+  (* 2. Строим кинетическую энергию только для активных переменных *)
+  kineticEnergy = (1/2) * activeQVars . invCapMatrixActive . activeQVars;
   
-  (* 3. Строим кинетическую энергию только от активных зарядов *)
-  kineticEnergy = (1/2) * activeQVars . reducedInvCapMatrix . activeQVars;
-  
-  (* 4. Потенциальная энергия: зануляем все скорости в трансформированном лагранжиане *)
-  potentialEnergy = -lagrangianTransformed /. Thread[allPhiDotVars -> 0];
+  (* 3. Потенциальная энергия: УНИВЕРСАЛЬНО зануляем ЛЮБЫЕ скорости (производные) *)
+  potentialEnergy = -lagrangianTransformed /. Derivative[1][_][_] -> 0;
   
   Collect[kineticEnergy + potentialEnergy, Join[Subscript[QED`$FluxSymbol, #] & /@ activeNodes, activeQVars], Simplify]
  ];
