@@ -1694,7 +1694,7 @@ PlotBICOverlayMap[model_Association, opts:OptionsPattern[]] := Module[
   (* 5. Создаем новую высококонтрастную легенду для линий *)
   lineLeg = Placed[
      LineLegend[
-        {Directive[Cyan, Thickness[0.005]], Directive[White, Dashed, Thickness[0.005]]},
+        {Directive[Cyan, Thickness[0.005]], Directive[Black, Dashed, Thickness[0.005]]},
         {"Zeros", "Poles"},
         LegendFunction -> (Framed[#, Background -> White, FrameMargins -> 2, FrameStyle -> GrayLevel[0.6]] &)
      ],
