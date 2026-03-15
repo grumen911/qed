@@ -170,7 +170,7 @@ Options[PlotClassicalSParameterMap] = {
   "SweepParameter" -> Subscript[QED`$JosephsonEnergySymbol, 1],
   "FrequencyRange" -> {0.01, 20.},
   "ParameterLabel" -> Row[{Subscript["L", 1], " (nH)"}],
-  "ParameterRange" -> {0.01, 8.},
+  "ParameterRange" -> {0.01, 5.},
   "ParameterMultiplier" -> 10^-9,
   "Measurement" -> "S21",
   "Ports" -> "{1,4}",
@@ -1418,19 +1418,19 @@ PlotSParameterMapCustomMesh[model_Association, opts:OptionsPattern[]] :=
 ];
 
 PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
-  Module[{
-    fMin, fMax, paramRange, measure, plotPoints, colFunc,
-    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
-    portsOpt, depKey, paramLabel, sweepParam, paramMultiplier
-  },
-  
+Module[{
+  fMin, fMax, paramRange, measure, plotPoints, colFunc,
+  sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
+  portsOpt, depKey, paramLabel, sweepParam, paramMultiplier
+},
+
   (* Извлекаем сканируемый параметр из опций *)
   sweepParam = OptionValue["SweepParameter"];
-  
+
   (* Защита от пустого параметра *)
   If[sweepParam === None,
-      Message[PlotClassicalSParameterMap::nosweep];
-      Return[Graphics[{Red, Text[Style["Error: \"SweepParameter\" is not specified.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+    Message[PlotClassicalSParameterMap::nosweep];
+    Return[Graphics[{Red, Text[Style["Error: \"SweepParameter\" is not specified.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
 
   {fMin, fMax} = OptionValue["FrequencyRange"];
@@ -1445,53 +1445,57 @@ PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
 
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
   label = If[measure === "S11", "Reflection", "Transmission"];
-  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "|"}], Row[{"|", Subscript["S", "21"], "|"}]];
+  
+  (* ДОБАВЛЕНО: Подпись (dB) в легенде для ясности *)
+  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "| (dB)"}], Row[{"|", Subscript["S", "21"], "| (dB)"}]];
 
-  (* 1. Формируем ключ JIT-конвейера и вызываем НАШ КЛАССИЧЕСКИЙ генератор *)
+  (* 1. Формируем ключ JIT-конвейера и вызываем генератор *)
   depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
   sweepFunc = QED`Numeric`GenerateParameterSweep[
-      model, 
-      depKey, 
-      sweepParam, 
-      "ConvertFromInductance" -> OptionValue["ConvertFromInductance"],
-      "AssumeZeroFlux" -> OptionValue["AssumeZeroFlux"],
-      "IgnoreJunctionCapacitance" -> OptionValue["IgnoreJunctionCapacitance"]
+    model,
+    depKey,
+    sweepParam,
+    "ConvertFromInductance" -> OptionValue["ConvertFromInductance"],
+    "AssumeZeroFlux" -> OptionValue["AssumeZeroFlux"],
+    "IgnoreJunctionCapacitance" -> OptionValue["IgnoreJunctionCapacitance"]
   ];
-  
+
   If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
-      Return[Graphics[{Red, Text[Style["Error: Sweep generation failed for " <> ToString[sweepParam], 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+    Return[Graphics[{Red, Text[Style["Error: Sweep generation failed for " <> ToString[sweepParam], 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
 
-  (* 2. Защищенная функция: paramVal (ось X) и fGHz (ось Y) *)
-  plotFunc[paramVal_?NumericQ, fGHz_?NumericQ] := 
-    Abs[ sweepFunc[paramVal * paramMultiplier][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+  (* 2. Защищенная функция: ПЕРЕВОД В ДЕЦИБЕЛЫ с отсечкой на -40 дБ *)
+  plotFunc[paramVal_?NumericQ, fGHz_?NumericQ] :=
+    Max[-40, 20 * Log10[ Abs[ sweepFunc[paramVal * paramMultiplier][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ] + 10^-10 ]];
 
-  (* 3. Вызов DensityPlot *)
+  (* 3. Вызов DensityPlot с улучшенной сеткой *)
   plot = DensityPlot[
-      plotFunc[p, f], 
-      {p, paramRange[[1]], paramRange[[2]]}, 
-      {f, fMin, fMax},
-      
-      PlotPoints -> {100, 100}, 
-      Exclusions -> None,
-      PerformanceGoal -> "Quality",
+    plotFunc[p, f],
+    {p, paramRange[[1]], paramRange[[2]]},
+    {f, fMin, fMax},
 
-      PlotRange -> {0, 1.05}, 
-      ColorFunction -> colFunc,
-      Frame -> True,
-      FrameLabel -> {Style[paramLabel, 16], Style["Frequency (GHz)", 16]},
-      FrameStyle -> Directive[FontSize -> 14, Black],
-      PlotLegends -> None, 
-      ImageSize -> 600,
-      MaxRecursion -> 4
+    (* УЛУЧШЕНА СЕТКА: 200х200 базовых точек дадут отличную детализацию *)
+    PlotPoints -> {200, 200},
+    Exclusions -> None,
+    PerformanceGoal -> "Quality",
+
+    (* ОБНОВЛЕН ДИАПАЗОН ПОД ДЕЦИБЕЛЫ *)
+    PlotRange -> {-40, 0},
+    ColorFunction -> colFunc,
+    Frame -> True,
+    FrameLabel -> {Style[paramLabel, 16], Style["Frequency (GHz)", 16]},
+    FrameStyle -> Directive[FontSize -> 14, Black],
+    PlotLegends -> None,
+    ImageSize -> 600,
+    MaxRecursion -> 4
   ];
 
-  (* 4. Легенда *)
+  (* 4. Легенда с обновленным диапазоном *)
   legend = BarLegend[
-      {colFunc, {0, 1.05}},
-      LegendLabel -> Style[legendLabel, FontSize -> 16],
-      LabelStyle -> Directive[Black, 14],
-      LegendMarkerSize -> {20, 300}
+    {colFunc, {-40, 0}},
+    LegendLabel -> Style[legendLabel, FontSize -> 16],
+    LabelStyle -> Directive[Black, 14],
+    LegendMarkerSize -> {20, 300}
   ];
 
   Legended[plot, Placed[legend, Right]]
