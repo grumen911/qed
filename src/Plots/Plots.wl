@@ -116,6 +116,18 @@ Options:
 Performance:
   Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
 
+PlotSParameterMapCustomMesh::usage =
+"PlotSParameterMapCustomMesh[model, {fMin, fMax}] creates a density plot of S-parameters on a custom non-uniform mesh.
+
+Options:
+  FluxRange -> {-0.5, 0.5}
+  \"Measurement\" -> \"S21\" (default) | \"S11\"
+  PlotPoints -> {100, 400}
+  ColorFunction -> \"TemperatureMap\"
+
+Performance:
+  Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
+
 PlotClassicalSParameterMap::usage = 
 "PlotClassicalSParameterMap[model, sweepParam, options] creates a density plot of S-parameters \
 while sweeping a classical component value (e.g., L or C) and frequency.";
@@ -203,6 +215,20 @@ Options[PlotDephasingTime] = Join[
     "LogTimeRange" -> {-6, -2}
   }
 ];
+
+Options[PlotSParameterMapCustomMesh] = {
+  "FrequencyRange" -> {4., 12.},
+  "FluxRange" -> {0., 0.5},
+  "Measurement" -> "S21",
+  "Ports" -> "{1,2}",
+  PlotPoints -> {100, 400}, (* Теперь по умолчанию правильное разрешение *)
+  "ResonanceGuide" -> None, 
+  ColorFunction -> "SunsetColors",
+  FrameLabel -> {
+    Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16],
+    Style["Frequency (GHz)", 16]
+  }
+};
 
 $DebugPlotPlasmonSpectrum = False;
 $DebugPlotPotentialSlices3D = False;
@@ -1228,7 +1254,7 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       {phi, fluxRange[[1]], fluxRange[[2]]}, 
       {f, fMin, fMax},
       
-      PlotPoints -> {100, 400}, (* {400, 1500} *)
+      PlotPoints -> {10, 40}, (* {400, 1500} *)
       Exclusions -> None,
       PerformanceGoal -> "Quality",
 
@@ -1240,7 +1266,7 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       PlotLabel -> Style[label, 16],
       PlotLegends -> None, 
       ImageSize -> 600,
-      MaxRecursion -> 2
+      MaxRecursion -> 8
   ];
 
   (* 4. Исправленная легенда без несуществующих опций *)
@@ -1252,6 +1278,91 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   ];
 
   (* Сборка графика и легенды *)
+  Legended[plot, Placed[legend, Right]]
+];
+
+PlotSParameterMapCustomMesh[model_Association, opts:OptionsPattern[]] := 
+  Module[{
+    fMin, fMax, fluxRange, measure, plotPoints, colFunc,
+    sIndex, label, legendLabel, sweepFunc, plot, legend,
+    portsOpt, depKey,
+    phiGrid, fGrid, fullDataMesh, guideFunc
+  },
+  
+  {fMin, fMax} = OptionValue["FrequencyRange"];
+  fluxRange = OptionValue["FluxRange"];
+  measure = OptionValue["Measurement"];
+  portsOpt = OptionValue["Ports"];
+  
+  plotPoints = OptionValue[PlotPoints];
+  If[NumberQ[plotPoints], plotPoints = {plotPoints, plotPoints}];
+  
+  colFunc = OptionValue[ColorFunction];
+  guideFunc = OptionValue["ResonanceGuide"];
+  
+  sIndex = If[measure === "S11", {1, 1}, {2, 1}];
+  label = If[measure === "S11", "Reflection", "Transmission"];
+  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "|"}], Row[{"|", Subscript["S", "21"], "|"}]];
+
+  (* 1. Формируем ключ JIT-конвейера *)
+  depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
+  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey];
+  
+  If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+      Return[Graphics[{Red, Text[Style["Error: " <> depKey <> " not available", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+
+  (* 2. Сетки *)
+  phiGrid = Subdivide[fluxRange[[1]], fluxRange[[2]], plotPoints[[1]]];
+  fGrid = Subdivide[fMin, fMax, plotPoints[[2]]];
+
+  (* 3. Вычисления с защитой (как в оригинальном _?NumericQ) *)
+  fullDataMesh = Flatten[
+    Table[
+      With[{sMatFunc = sweepFunc[phiVal]}, 
+        Table[
+          Module[{rawResult, zVal},
+            (* Глушим варнинги деления на ноль, как это делает DensityPlot *)
+            rawResult = Quiet[ sMatFunc[fVal * 2 * Pi * 10^9] ];
+            
+            (* Строгая проверка: убеждаемся, что вернулась именно матрица, а не мусор *)
+            If[ListQ[rawResult] && Length[Dimensions[rawResult]] == 2,
+              zVal = Abs[ rawResult[[Sequence @@ sIndex]] ];
+              If[NumericQ[zVal],
+                {phiVal, fVal, zVal},
+                Nothing (* Удаляем нечисловые точки *)
+              ],
+              Nothing (* Если JIT движок не смог посчитать - пропускаем точку *)
+            ]
+          ],
+          {fVal, fGrid}
+        ]
+      ],
+      {phiVal, phiGrid} 
+    ],
+    1
+  ];
+
+  (* 4. Отрисовка *)
+  plot = ListDensityPlot[
+      fullDataMesh, 
+      PlotRange -> {0, 1.05}, 
+      ColorFunction -> colFunc,
+      Frame -> True,
+      FrameLabel -> OptionValue[FrameLabel],
+      FrameStyle -> Directive[FontSize -> 14, Black],
+      PlotLabel -> Style[label, 16],
+      PlotLegends -> None, 
+      ImageSize -> 600
+  ];
+
+  legend = BarLegend[
+      {colFunc, {0, 1.05}},
+      LegendLabel -> Style[legendLabel, FontSize -> 16],
+      LabelStyle -> Directive[Black, 14],
+      LegendMarkerSize -> {20, 300}
+  ];
+
   Legended[plot, Placed[legend, Right]]
 ];
 

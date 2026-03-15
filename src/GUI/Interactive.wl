@@ -159,6 +159,10 @@ RegisterPlot["SmatrixHeatmap_1_4", "S-matrix Heatmap (Ports 1-4)", "Heavy",
   Function[{m, fluxR, freqR}, QED`Plots`PlotSParameterMap[m, "Ports" -> "{1,4}", FluxRange -> fluxR, "FrequencyRange" -> freqR]]
 ];
 
+RegisterPlot["SmatrixHeatmapCustom_1_4", "S-matrix Heatmap (Custom Mesh, Ports 1-4)", "Heavy", 
+  Function[{m, fluxR, freqR}, QED`Plots`PlotSParameterMapCustomMesh[m, "Ports" -> "{1,4}", FluxRange -> fluxR, "FrequencyRange" -> freqR]]
+];
+
 RegisterPlot["SmatrixHeatmap_1_4 (Classical)", "S-matrix Heatmap (Ports 1-4, Classical)", "Heavy", 
   Function[{m, fluxR, freqR}, QED`Plots`PlotClassicalSParameterMap[m, "Ports" -> "{1,4}", "FrequencyRange" -> freqR]]
 ];
