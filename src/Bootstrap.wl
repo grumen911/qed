@@ -32,8 +32,8 @@ InitQED[] := Module[{srcDir, loadTime},
 
     (* Загрузка модулей *)
     loadPackage["Scattering.wl"];
-    loadPackage["Plots/Plots.wl"];
     loadPackage["Plots/PlotStyle.wl"];
+    loadPackage["Plots/Plots.wl"];
     loadPackage["Analytic/Analytic.wl"];
     loadPackage["Numeric/Calculators.wl"];   
     loadPackage["Numeric/Numeric.wl"];

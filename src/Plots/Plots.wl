@@ -1,5 +1,7 @@
 BeginPackage["QED`Plots`"];
 
+(* Needs["QED`PlotStyle`"]; *)
+
 PlotSpectroscopyScanner::usage = "PlotSpectroscopyScanner[model] displays a real-time table \
 of the lowest energy levels (spectroscopy), including their frequencies and photon number assignments.";
 
@@ -1705,7 +1707,8 @@ PlotBICOverlayMap[model_Association, opts:OptionsPattern[]] := Module[
   (* baseMap идет первым, поэтому он жестко фиксирует PlotRange и рамки осей по тепловой карте *)
   combinedPlot = Show[
      baseMap,
-     baseLines
+     baseLines,
+     PlotRange -> {OptionValue["FluxRange"], OptionValue["FrequencyRange"]}
   ];
 
   (* 7. Собираем финальный объект с двумя легендами (справа шкала S21, слева внизу - линии) *)

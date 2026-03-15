@@ -712,7 +712,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
                  If[StringQ[targetFile],
                     savedOverlays = Lookup[overlayBasket, selectedPlotId, {}];
                     gToSave = If[Length[savedOverlays] > 0, Show[Join[savedOverlays, {plotCache[selectedPlotId]}], PlotRange->All], plotCache[selectedPlotId]];
-                    finalG = QED`Style`ApplyExportPreset[gToSave, exportPreset];
+                    finalG = QED`PlotStyle`ApplyExportPreset[gToSave, exportPreset];
                     Check[Export[targetFile, finalG, "PDF"]; Beep[], Beep[]; Beep[]]
                  ];
               ],

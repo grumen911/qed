@@ -1,4 +1,4 @@
-BeginPackage["QED`Style`"];
+BeginPackage["QED`PlotStyle`"];
 
 QubitPlot::usage = "QubitPlot[expr, range] plots with default styling.";
 DefaultPlotOptions::usage = "DefaultPlotOptions[key] returns plot options.";
@@ -96,7 +96,7 @@ ApplyExportPreset[g_, "Publication"] :=
     Show[styledG,
        (* ФИКС ОБРЕЗАННОЙ РАМКИ: Даем запас по краям (особенно справа и сверху) *)
        ImagePadding -> {{Automatic, 15}, {Automatic, 15}},
-       PlotRangeClipping -> False,
+       PlotRangeClipping -> True,
        
        BaseStyle -> {FontFamily -> fontName, FontSize -> baseFontSize},
        FrameStyle -> Directive[Black, AbsoluteThickness[1.5], FontSize -> baseFontSize],
