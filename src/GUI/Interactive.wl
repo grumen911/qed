@@ -163,6 +163,10 @@ RegisterPlot["SmatrixHeatmapCustom_1_4", "S-matrix Heatmap (Custom Mesh, Ports 1
   Function[{m, fluxR, freqR}, QED`Plots`PlotSParameterMapCustomMesh[m, "Ports" -> "{1,4}", FluxRange -> fluxR, "FrequencyRange" -> freqR]]
 ];
 
+RegisterPlot["SmatrixHeatmapCustom_1_2", "S-matrix Heatmap (Custom Mesh, Ports 1-2)", "Heavy", 
+  Function[{m, fluxR, freqR}, QED`Plots`PlotSParameterMapCustomMesh[m, "Ports" -> "{1,2}", FluxRange -> fluxR, "FrequencyRange" -> freqR]]
+];
+
 RegisterPlot["SmatrixHeatmap_1_4 (Classical)", "S-matrix Heatmap (Ports 1-4, Classical)", "Heavy", 
   Function[{m, fluxR, freqR}, QED`Plots`PlotClassicalSParameterMap[m, "Ports" -> "{1,4}", "FrequencyRange" -> freqR]]
 ];
@@ -173,6 +177,14 @@ RegisterPlot["BICCondition_1_2", "BIC Condition (Ports 1-2)", "Heavy",
 
 RegisterPlot["BICCondition_1_4", "BIC Condition (Ports 1-4)", "Heavy", 
   Function[{m, fluxR, freqR}, QED`Plots`PlotBICModes[m, "Ports" -> "{1,4}", SweepRange -> fluxR]]
+];
+
+RegisterPlot["BICOverlay_1_2", "BIC Overlay (Ports 1-2)", "Heavy", 
+  Function[{m, fluxR, freqR}, QED`Plots`PlotBICOverlayMap[m, "FrequencyRange" -> freqR]]
+];
+
+RegisterPlot["BICOverlay_1_4", "BIC Overlay (Ports 1-4)", "Heavy", 
+  Function[{m, fluxR, freqR}, QED`Plots`PlotBICOverlayMap[m, "FrequencyRange" -> freqR]]
 ];
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
@@ -545,7 +557,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     isComputing = False,
 
     globalFluxRange = {0.0, 0.5},
-    globalFreqRange = {0.0, 20.0}
+    globalFreqRange = {10.0, 15.0}
   },
   
   performUpdate = Function[{},
