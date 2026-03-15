@@ -70,7 +70,7 @@ ApplyExportPreset[g_, "Publication"] :=
                 Frame -> False, 
                 Axes -> False,
                 (* ФИКС: Прокидываем оригинальные пропорции (например, AspectRatio -> 1) *)
-                Sequence @@ FilterRules[{opts}, AspectRatio] 
+                Sequence @@ FilterRules[{opts}, {AspectRatio, PlotRange, PlotRangeClipping}]
             ], 
             "Image", RasterSize -> 1000
         ];
