@@ -180,11 +180,11 @@ RegisterPlot["BICCondition_1_4", "BIC Condition (Ports 1-4)", "Heavy",
 ];
 
 RegisterPlot["BICOverlay_1_2", "BIC Overlay (Ports 1-2)", "Heavy", 
-  Function[{m, fluxR, freqR}, QED`Plots`PlotBICOverlayMap[m, "FrequencyRange" -> freqR]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotBICOverlayMap[m, "Ports" -> "{1,2}", "FrequencyRange" -> freqR]]
 ];
 
 RegisterPlot["BICOverlay_1_4", "BIC Overlay (Ports 1-4)", "Heavy", 
-  Function[{m, fluxR, freqR}, QED`Plots`PlotBICOverlayMap[m, "FrequencyRange" -> freqR]]
+  Function[{m, fluxR, freqR}, QED`Plots`PlotBICOverlayMap[m, "Ports" -> "{1,4}", "FrequencyRange" -> freqR]]
 ];
 
 (* ╔════════════════════════════════════════════════════════════════╗ *)
@@ -557,7 +557,7 @@ QubitDashboard[modelsStack : {__Association}] := DynamicModule[
     isComputing = False,
 
     globalFluxRange = {0.0, 0.5},
-    globalFreqRange = {10.0, 15.0}
+    globalFreqRange = {9.0, 11.0}
   },
   
   performUpdate = Function[{},
