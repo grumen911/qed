@@ -228,7 +228,7 @@ Options[PlotSParameterMapCustomMesh] = {
   "FluxRange" -> {0., 0.5},
   "Measurement" -> "S21",
   "Ports" -> "{1,2}",
-  PlotPoints -> {200, 200}, (* Базовое разрешение *)
+  PlotPoints -> {100, 150}, (* Базовое разрешение *)
   "AdaptiveMesh" -> True,   (* Включает/выключает генерацию ленты вокруг резонансов *)
   ColorFunction -> "SunsetColors",
   FrameLabel -> {
@@ -1332,7 +1332,7 @@ PlotSParameterMapCustomMesh[model_Association, opts:OptionsPattern[]] :=
   baseFGrid = Subdivide[fMin, fMax, plotPoints[[2]]];
 
   (* Параметры адаптивной сетки (можно вынести в опции) *)
-  Module[{adaptiveWidth = 0.2, adaptivePoints = 51},
+  Module[{adaptiveWidth = 0.05, adaptivePoints = 21},
     
     (* 3. Вычисления с умной генерацией сетки *)
     fullDataMesh = Flatten[
@@ -1391,7 +1391,12 @@ PlotSParameterMapCustomMesh[model_Association, opts:OptionsPattern[]] :=
   (* 4. Отрисовка *)
   plot = ListDensityPlot[
       fullDataMesh, 
-      PlotRange -> {0, 1.05}, 
+      
+      (* --- ФИКС ЗДЕСЬ --- *)
+      PlotRange -> {{fluxRange[[1]], fluxRange[[2]]}, {fMin, fMax}, {0, 1.05}},
+      PlotRangePadding -> None, 
+      (* ------------------ *)
+
       ColorFunction -> colFunc,
       Frame -> True,
       FrameLabel -> OptionValue[FrameLabel],
