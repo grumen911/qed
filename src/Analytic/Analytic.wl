@@ -35,6 +35,8 @@ builds replacement rules that express effective Josephson inductances L_EJ as fu
 
 BuildZeroModeTransform::usage = "BuildZeroModeTransform[topology] generates coordinate transformation rules to eliminate zero modes.";
 
+BuildCharacteristicEquation::usage = "BuildCharacteristicEquation[capMatrix, invIndMatrix] builds the characteristic equation \
+det(L^-1 - \[Omega]^2 C) = 0 for the closed system's eigenfrequencies and extracts its coefficients.";
 
 Begin["`Private`"];
 
@@ -505,6 +507,52 @@ BuildZeroModeTransform[topology_Association] := Module[
     "ZeroModeNodes" -> zeroModeNodes,
     "FluxRules" -> fluxRules,
     "FluxDotRules" -> fluxDotRules
+  |>
+];
+
+BuildCharacteristicEquation[capMatrix_, invIndMatrix_] := Module[
+  {omegaSym, matrix, detPoly, eqCoeffs, alphaRules, charEq},
+  
+  omegaSym = Symbol["\[Omega]"];
+  
+  (* 1. Вычисляем детерминант: det(L^-1 - \[Omega]^2 * C) *)
+  matrix = invIndMatrix - omegaSym^2 * capMatrix;
+  detPoly = Simplify[Det[matrix]];
+  
+  (* 2. Извлекаем коэффициенты при степенях \[Omega] *)
+  eqCoeffs = CoefficientList[detPoly, omegaSym];
+  
+  (* 3. Распределяем коэффициенты по греческим буквам *)
+  alphaRules = <||>;
+  If[Length[eqCoeffs] > 0, alphaRules["\[Gamma]"] = Simplify[eqCoeffs[[1]]]];
+  If[Length[eqCoeffs] > 2, alphaRules["\[Alpha]"] = Simplify[-eqCoeffs[[3]]]]; (* Знак минус для формата -\[Alpha]\[Omega]^2 *)
+  If[Length[eqCoeffs] > 4, alphaRules["\[Beta]"]  = Simplify[eqCoeffs[[5]]]];
+  If[Length[eqCoeffs] > 6, alphaRules["\[Eta]"]   = Simplify[eqCoeffs[[7]]]];
+  
+  (* Автоматическая индексация для степеней выше 6 (\[Omega]^8 и т.д.) *)
+  Do[
+    If[eqCoeffs[[i]] =!= 0, alphaRules["\[Alpha]" <> ToString[i-1]] = Simplify[eqCoeffs[[i]]]],
+    {i, 9, Length[eqCoeffs], 2}
+  ];
+  
+  (* 4. Собираем красивое символьное уравнение *)
+  charEq = If[Length[eqCoeffs] > 0,
+    Sum[
+      Switch[i-1,
+        0, Symbol["\[Gamma]"],
+        2, -Symbol["\[Alpha]"] * omegaSym^2,
+        4, Symbol["\[Beta]"] * omegaSym^4,
+        6, Symbol["\[Eta]"] * omegaSym^6,
+        _, Subscript[Symbol["\[Alpha]"], i-1] * omegaSym^(i-1)
+      ],
+      {i, 1, Length[eqCoeffs], 2}
+    ] == 0,
+    True
+  ];
+  
+  <|
+    "CharacteristicEquation" -> charEq,
+    "CharacteristicCoefficients" -> alphaRules
   |>
 ];
 

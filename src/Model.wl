@@ -318,7 +318,8 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
  Module[{lagrangian, capMatrix, indMatrix, hamiltonian, harmonicHamiltonian, potential,
  		 potentialGradient, currentOp, voltageOperatorsSym, nodes, 
      scattering12, scattering14, scattering, bicCondition12, bicCondition14, 
-     dynamicInductanceRules, zeroModeData, combinedRules},
+     dynamicInductanceRules, zeroModeData, combinedRules, charEqData, inverseIndRules, 
+     cleanIndMatrix},
   
   lagrangian = BuildLagrangian[topology, primaryParams];
   zeroModeData = QED`Analytic`BuildZeroModeTransform[topology];
@@ -347,7 +348,27 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
   (* Генерируем динамические правила индуктивности *)
   dynamicInductanceRules = QED`Analytic`BuildDynamicInductanceRules[topology, primaryParams, potential];
 
-(* Вычисляем S-матрицу для портов {1, 2} (считаем, что они всегда есть) *)
+  (* Создаем обратные правила: (1 / Формула) -> (1 / L_EJ) *)
+  inverseIndRules = Map[(1 / #[[2]] -> 1 / #[[1]]) &, dynamicInductanceRules];
+  
+  (* ==================== *)
+  (* 1. Собираем все символы EJ, которые есть в модели *)
+  ejSymbols = Cases[Values[primaryParams], p_ /; KeyExistsQ[p, "EJ"] :> p["EJ"]["Symbol"]];
+  
+  (* 2. Превращаем правила в уравнения и просим Mathematica выразить EJ *)
+  inverseIndRules = Flatten @ Solve[
+      Map[#[[1]] == #[[2]] &, dynamicInductanceRules], 
+      ejSymbols
+  ];
+  
+  (* 3. Очищаем матрицу индуктивностей (теперь EJ гарантированно заменятся на L_EJ) *)
+  cleanIndMatrix = Simplify[indMatrix /. inverseIndRules];
+  
+  (* 4. Передаем ОЧИЩЕННУЮ матрицу в характеристическое уравнение *)
+  charEqData = QED`Analytic`BuildCharacteristicEquation[capMatrix, cleanIndMatrix];
+  (* ==================== *)
+
+  (* Вычисляем S-матрицу для портов {1, 2} (считаем, что они всегда есть) *)
   scattering12 = QED`Scattering`BuildSymbolicScattering[topology, primaryParams, Ports -> {1, 2}, ReferenceImpedance -> QED`$Z0];
   
   (* Безопасное вычисление S-матрицы для портов {1, 4} *)
@@ -383,9 +404,10 @@ ComputeAnalyticalParams[topology_, primaryParams_] :=
     "Hamiltonian" -> hamiltonian,
     "HarmonicHamiltonian" -> harmonicHamiltonian,
     "InductanceMatrix" -> indMatrix,
+    "CharacteristicEquation" -> charEqData,
     "PotentialGradient" -> potentialGradient,
     "Potential" -> potential,
-    "CurrentOperator" -> currentOp,
+    "CurrentOperator" -> currentOp, 
     "VoltageOperators" -> voltageOperatorsSym,
     "Scattering" -> scattering,
     "BICCondition_1_2" -> bicCondition12,
