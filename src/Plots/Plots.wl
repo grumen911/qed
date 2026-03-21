@@ -186,7 +186,7 @@ Options[PlotFrequencyResponse] = {
   "FluxRange" -> {0., 0.5}, 
   "Measurement" -> "S21", (* "S11" or "S21" *) 
   "Ports" -> "{1,2}",
-  PlotPoints -> 50
+  PlotPoints -> 500
 };
 
 Options[PlotPlasmonSpectrum] = {
