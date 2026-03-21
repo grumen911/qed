@@ -1,4 +1,4 @@
-BeginPackage["QED`Style`"];
+BeginPackage["QED`PlotStyle`"];
 
 QubitPlot::usage = "QubitPlot[expr, range] plots with default styling.";
 DefaultPlotOptions::usage = "DefaultPlotOptions[key] returns plot options.";
@@ -70,7 +70,7 @@ ApplyExportPreset[g_, "Publication"] :=
                 Frame -> False, 
                 Axes -> False,
                 (* ФИКС: Прокидываем оригинальные пропорции (например, AspectRatio -> 1) *)
-                Sequence @@ FilterRules[{opts}, AspectRatio] 
+                Sequence @@ FilterRules[{opts}, {AspectRatio, PlotRange, PlotRangeClipping}]
             ], 
             "Image", RasterSize -> 1000
         ];
@@ -96,7 +96,7 @@ ApplyExportPreset[g_, "Publication"] :=
     Show[styledG,
        (* ФИКС ОБРЕЗАННОЙ РАМКИ: Даем запас по краям (особенно справа и сверху) *)
        ImagePadding -> {{Automatic, 15}, {Automatic, 15}},
-       PlotRangeClipping -> False,
+       PlotRangeClipping -> True,
        
        BaseStyle -> {FontFamily -> fontName, FontSize -> baseFontSize},
        FrameStyle -> Directive[Black, AbsoluteThickness[1.5], FontSize -> baseFontSize],

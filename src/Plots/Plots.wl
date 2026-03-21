@@ -1,5 +1,7 @@
 BeginPackage["QED`Plots`"];
 
+(* Needs["QED`PlotStyle`"]; *)
+
 PlotSpectroscopyScanner::usage = "PlotSpectroscopyScanner[model] displays a real-time table \
 of the lowest energy levels (spectroscopy), including their frequencies and photon number assignments.";
 
@@ -116,6 +118,18 @@ Options:
 Performance:
   Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
 
+PlotSParameterMapCustomMesh::usage =
+"PlotSParameterMapCustomMesh[model, {fMin, fMax}] creates a density plot of S-parameters on a custom non-uniform mesh.
+
+Options:
+  FluxRange -> {-0.5, 0.5}
+  \"Measurement\" -> \"S21\" (default) | \"S11\"
+  PlotPoints -> {100, 400}
+  ColorFunction -> \"TemperatureMap\"
+
+Performance:
+  Pre-calculates symbolic S-matrix to enable fast flux sweeping.";
+
 PlotClassicalSParameterMap::usage = 
 "PlotClassicalSParameterMap[model, sweepParam, options] creates a density plot of S-parameters \
 while sweeping a classical component value (e.g., L or C) and frequency.";
@@ -123,18 +137,19 @@ while sweeping a classical component value (e.g., L or C) and frequency.";
 PlotBICModes::usage = "PlotBICModes[model, options] plots the dispersion curves of the two polynomial BIC conditions. \
 Intersections of these curves indicate the presence of a Bound State in the Continuum.";
 
+PlotBICOverlayMap::usage = 
+"PlotBICOverlayMap[model, {fMin, fMax}] creates a publication-quality composite figure \
+overlaying analytical BIC modes (poles and zeros) on top of the S-parameter density plot.
+
+Options are inherited from PlotSParameterMapCustomMesh.
+Zeros are plotted as Cyan solid lines, Poles as White dashed lines for high contrast on dark heatmaps.";
+
 PlotPotentialSlices3D::noequilibria = "No equilibrium points found. Cannot create visualization.";
 PlotPotentialSlices3D::dimension = "Expected 3 flux variables, got `1`. SliceContourPlot3D requires 3D potential.";
 
 
 Begin["`Private`"];
 
-
-Options[PlotBICModes] = {
-  Ports -> "{1, 2}",
-  SweepRange -> {0., 0.5},
-  SweepPoints -> 100
-};
 
 Options[PlotSParameterMap] = {
   "FrequencyRange" -> {4., 12.},
@@ -155,7 +170,7 @@ Options[PlotClassicalSParameterMap] = {
   "SweepParameter" -> Subscript[QED`$JosephsonEnergySymbol, 1],
   "FrequencyRange" -> {0.01, 20.},
   "ParameterLabel" -> Row[{Subscript["L", 1], " (nH)"}],
-  "ParameterRange" -> {0.01, 8.},
+  "ParameterRange" -> {0.01, 5.},
   "ParameterMultiplier" -> 10^-9,
   "Measurement" -> "S21",
   "Ports" -> "{1,4}",
@@ -171,7 +186,7 @@ Options[PlotFrequencyResponse] = {
   "FluxRange" -> {0., 0.5}, 
   "Measurement" -> "S21", (* "S11" or "S21" *) 
   "Ports" -> "{1,2}",
-  PlotPoints -> 50
+  PlotPoints -> 500
 };
 
 Options[PlotPlasmonSpectrum] = {
@@ -202,6 +217,31 @@ Options[PlotDephasingTime] = Join[
   {
     "LogTimeRange" -> {-6, -2}
   }
+];
+
+Options[PlotSParameterMapCustomMesh] = {
+  "FrequencyRange" -> {4., 12.},
+  "FluxRange" -> {0., 0.5},
+  "Measurement" -> "S21",
+  "Ports" -> "{1,4}",
+  PlotPoints -> {200, 250}, (* Базовое разрешение *)
+  "AdaptiveMesh" -> True,   (* Включает/выключает генерацию ленты вокруг резонансов *)
+  ColorFunction -> "SunsetColors",
+  FrameLabel -> {
+    Style[Row[{Subscript["\[CapitalPhi]", "ext"], " (", Subscript["\[CapitalPhi]", "0"], ")"}], 16],
+    Style["Frequency (GHz)", 16]
+  }
+};
+
+Options[PlotBICModes] = {
+  Ports -> "{1, 2}",
+  SweepRange -> {0., 0.5},
+  SweepPoints -> 100
+};
+
+Options[PlotBICOverlayMap] = Join[
+  Options[PlotSParameterMapCustomMesh],
+  { "SweepPoints" -> 150 } 
 ];
 
 $DebugPlotPlasmonSpectrum = False;
@@ -1186,7 +1226,6 @@ PlotFrequencyResponse[model_Association, opts:OptionsPattern[]] :=
      PlotRange -> {0, 1.02}, 
      PlotStyle -> Directive[color, Thickness[0.006]],
      GridLines -> Automatic, AspectRatio -> 0.6, ImageSize -> 600,
-     PlotLabel -> Style[label, 14],
      MaxRecursion -> 10, PlotPoints -> plotPoints
   ]
  ];
@@ -1228,7 +1267,7 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       {phi, fluxRange[[1]], fluxRange[[2]]}, 
       {f, fMin, fMax},
       
-      PlotPoints -> {100, 400}, (* {400, 1500} *)
+      PlotPoints -> {10, 40}, (* {400, 1500} *)
       Exclusions -> None,
       PerformanceGoal -> "Quality",
 
@@ -1237,10 +1276,9 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
       Frame -> True,
       FrameLabel -> OptionValue[FrameLabel],
       FrameStyle -> Directive[FontSize -> 14, Black],
-      PlotLabel -> Style[label, 16],
       PlotLegends -> None, 
       ImageSize -> 600,
-      MaxRecursion -> 2
+      MaxRecursion -> 8
   ];
 
   (* 4. Исправленная легенда без несуществующих опций *)
@@ -1255,20 +1293,144 @@ PlotSParameterMap[model_Association, opts:OptionsPattern[]] :=
   Legended[plot, Placed[legend, Right]]
 ];
 
-PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
+PlotSParameterMapCustomMesh[model_Association, opts:OptionsPattern[]] := 
   Module[{
-    fMin, fMax, paramRange, measure, plotPoints, colFunc,
-    sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
-    portsOpt, depKey, paramLabel, sweepParam, paramMultiplier
+    fMin, fMax, fluxRange, measure, plotPoints, colFunc, adaptiveQ,
+    sIndex, label, legendLabel, sweepFunc, freqSweep, plot, legend,
+    portsOpt, depKey,
+    phiGrid, baseFGrid, fullDataMesh
   },
   
+  {fMin, fMax} = OptionValue["FrequencyRange"];
+  fluxRange = OptionValue["FluxRange"];
+  measure = OptionValue["Measurement"];
+  portsOpt = OptionValue["Ports"];
+  adaptiveQ = OptionValue["AdaptiveMesh"];
+  
+  plotPoints = OptionValue[PlotPoints];
+  If[NumberQ[plotPoints], plotPoints = {plotPoints, plotPoints}];
+  
+  colFunc = OptionValue[ColorFunction];
+  
+  sIndex = If[measure === "S11", {1, 1}, {2, 1}];
+  label = If[measure === "S11", "Reflection", "Transmission"];
+  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "|"}], Row[{"|", Subscript["S", "21"], "|"}]];
+
+  (* 1. Формируем ключи JIT-конвейера *)
+  depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
+  sweepFunc = QED`Numeric`GenerateSweepPipeline[model, depKey];
+  
+  (* JIT для поиска резонансных частот (PlasmonFrequencies) *)
+  freqSweep = If[adaptiveQ, QED`Numeric`GenerateSweepPipeline[model, "PlasmonFrequencies"], $Failed];
+  
+  If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
+      Return[Graphics[{Red, Text[Style["Error: " <> depKey <> " not available", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+  ];
+
+  (* 2. Базовые сетки *)
+  phiGrid = Subdivide[fluxRange[[1]], fluxRange[[2]], plotPoints[[1]]];
+  baseFGrid = Subdivide[fMin, fMax, plotPoints[[2]]];
+
+  (* Параметры адаптивной сетки (можно вынести в опции) *)
+  Module[{adaptiveWidth = 0.05, adaptivePoints = 101},
+    
+    (* 3. Вычисления с умной генерацией сетки *)
+    fullDataMesh = Flatten[
+      Table[
+        With[{sMatFunc = sweepFunc[phiVal]},
+          Module[{currentFGrid, modes, modeFreqs, localGrids},
+            
+            (* A. Формируем список частот для данного потока *)
+            currentFGrid = baseFGrid;
+            
+            If[adaptiveQ && freqSweep =!= $Failed,
+              (* Получаем частоты (в рад/с) и переводим в ГГц *)
+              modes = freqSweep[phiVal];
+              If[ListQ[modes],
+                modeFreqs = (Re[#] / (2 Pi * 10^9)) & /@ modes;
+                
+                (* Генерируем локальные сетки вокруг частот, попадающих в окно [fMin, fMax] *)
+                localGrids = Flatten[
+                  Table[
+                    If[fMin <= fRes <= fMax, 
+                      Subdivide[fRes - adaptiveWidth, fRes + adaptiveWidth, adaptivePoints - 1],
+                      {}
+                    ],
+                    {fRes, modeFreqs}
+                  ]
+                ];
+                
+                (* Объединяем, сортируем и удаляем дубликаты *)
+                currentFGrid = DeleteDuplicates @ Sort @ Join[currentFGrid, localGrids];
+              ]
+            ];
+            
+            (* B. Прогоняем полученную сетку через JIT *)
+            Table[
+              Module[{rawResult, zVal},
+                rawResult = Quiet[ sMatFunc[fVal * 2 * Pi * 10^9] ];
+                If[ListQ[rawResult] && Length[Dimensions[rawResult]] == 2,
+                  (* zVal = Abs[ rawResult[[Sequence @@ sIndex]] ]; *)
+                  zVal = Max[-40, 20 * Log10[ Abs[ rawResult[[Sequence @@ sIndex]] ] + 10^-10 ]];
+                  If[NumericQ[zVal],
+                    {phiVal, fVal, zVal},
+                    Nothing
+                  ],
+                  Nothing
+                ]
+              ],
+              {fVal, currentFGrid}
+            ]
+          ]
+        ],
+        {phiVal, phiGrid} 
+      ],
+      1
+    ];
+  ];
+
+  (* 4. Отрисовка *)
+  plot = ListDensityPlot[
+      fullDataMesh, 
+      
+      (* --- ФИКС ЗДЕСЬ --- *)
+      PlotRange -> {{fluxRange[[1]], fluxRange[[2]]}, {fMin, fMax}, {-40, 0}},
+      PlotRangePadding -> None, 
+      (* ------------------ *)
+
+      ColorFunction -> colFunc,
+      Frame -> True,
+      FrameLabel -> OptionValue[FrameLabel],
+      FrameStyle -> Directive[FontSize -> 14, Black],
+      PlotLegends -> None, 
+      ImageSize -> 600,
+      MaxPlotPoints -> Infinity
+  ];
+
+  legend = BarLegend[
+      {colFunc, {-40, 0}},
+      LegendLabel -> Style[legendLabel, FontSize -> 16],
+      LabelStyle -> Directive[Black, 14],
+      LegendMarkerSize -> {20, 300}
+  ];
+
+  Legended[plot, Placed[legend, Right]]
+];
+
+PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
+Module[{
+  fMin, fMax, paramRange, measure, plotPoints, colFunc,
+  sIndex, label, legendLabel, sweepFunc, plotFunc, plot, legend,
+  portsOpt, depKey, paramLabel, sweepParam, paramMultiplier
+},
+
   (* Извлекаем сканируемый параметр из опций *)
   sweepParam = OptionValue["SweepParameter"];
-  
+
   (* Защита от пустого параметра *)
   If[sweepParam === None,
-      Message[PlotClassicalSParameterMap::nosweep];
-      Return[Graphics[{Red, Text[Style["Error: \"SweepParameter\" is not specified.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+    Message[PlotClassicalSParameterMap::nosweep];
+    Return[Graphics[{Red, Text[Style["Error: \"SweepParameter\" is not specified.", 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
 
   {fMin, fMax} = OptionValue["FrequencyRange"];
@@ -1282,55 +1444,58 @@ PlotClassicalSParameterMap[model_Association, opts:OptionsPattern[]] :=
   colFunc = OptionValue[ColorFunction];
 
   sIndex = If[measure === "S11", {1, 1}, {2, 1}];
-  label = label = If[measure === "S11", "Reflection", "Transmission"];
-  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "|"}], Row[{"|", Subscript["S", "21"], "|"}]];
+  label = If[measure === "S11", "Reflection", "Transmission"];
+  
+  (* ДОБАВЛЕНО: Подпись (dB) в легенде для ясности *)
+  legendLabel = If[measure === "S11", Row[{"|", Subscript["S", "11"], "| (dB)"}], Row[{"|", Subscript["S", "21"], "| (dB)"}]];
 
-  (* 1. Формируем ключ JIT-конвейера и вызываем НАШ КЛАССИЧЕСКИЙ генератор *)
+  (* 1. Формируем ключ JIT-конвейера и вызываем генератор *)
   depKey = If[portsOpt === "{1,4}", "SMatrix_1_4", "SMatrix_1_2"];
   sweepFunc = QED`Numeric`GenerateParameterSweep[
-      model, 
-      depKey, 
-      sweepParam, 
-      "ConvertFromInductance" -> OptionValue["ConvertFromInductance"],
-      "AssumeZeroFlux" -> OptionValue["AssumeZeroFlux"],
-      "IgnoreJunctionCapacitance" -> OptionValue["IgnoreJunctionCapacitance"]
+    model,
+    depKey,
+    sweepParam,
+    "ConvertFromInductance" -> OptionValue["ConvertFromInductance"],
+    "AssumeZeroFlux" -> OptionValue["AssumeZeroFlux"],
+    "IgnoreJunctionCapacitance" -> OptionValue["IgnoreJunctionCapacitance"]
   ];
-  
+
   If[sweepFunc === $Failed || Head[sweepFunc] === $Failed,
-      Return[Graphics[{Red, Text[Style["Error: Sweep generation failed for " <> ToString[sweepParam], 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
+    Return[Graphics[{Red, Text[Style["Error: Sweep generation failed for " <> ToString[sweepParam], 14], {0,0}]}, ImageSize -> 400, Frame -> True]]
   ];
 
-  (* 2. Защищенная функция: paramVal (ось X) и fGHz (ось Y) *)
-  plotFunc[paramVal_?NumericQ, fGHz_?NumericQ] := 
-    Abs[ sweepFunc[paramVal * paramMultiplier][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ];
+  (* 2. Защищенная функция: ПЕРЕВОД В ДЕЦИБЕЛЫ с отсечкой на -40 дБ *)
+  plotFunc[paramVal_?NumericQ, fGHz_?NumericQ] :=
+    Max[-40, 20 * Log10[ Abs[ sweepFunc[paramVal * paramMultiplier][fGHz * 2 * Pi * 10^9][[ Sequence @@ sIndex ]] ] + 10^-10 ]];
 
-  (* 3. Вызов DensityPlot *)
+  (* 3. Вызов DensityPlot с улучшенной сеткой *)
   plot = DensityPlot[
-      plotFunc[p, f], 
-      {p, paramRange[[1]], paramRange[[2]]}, 
-      {f, fMin, fMax},
-      
-      PlotPoints -> {100, 100}, 
-      Exclusions -> None,
-      PerformanceGoal -> "Quality",
+    plotFunc[p, f],
+    {p, paramRange[[1]], paramRange[[2]]},
+    {f, fMin, fMax},
 
-      PlotRange -> {0, 1.05}, 
-      ColorFunction -> colFunc,
-      Frame -> True,
-      FrameLabel -> {Style[paramLabel, 16], Style["Frequency (GHz)", 16]},
-      FrameStyle -> Directive[FontSize -> 14, Black],
-      PlotLabel -> Style[label, 16],
-      PlotLegends -> None, 
-      ImageSize -> 600,
-      MaxRecursion -> 4
+    (* УЛУЧШЕНА СЕТКА: 200х200 базовых точек дадут отличную детализацию *)
+    PlotPoints -> {200, 200},
+    Exclusions -> None,
+    PerformanceGoal -> "Quality",
+
+    (* ОБНОВЛЕН ДИАПАЗОН ПОД ДЕЦИБЕЛЫ *)
+    PlotRange -> {-40, 0},
+    ColorFunction -> colFunc,
+    Frame -> True,
+    FrameLabel -> {Style[paramLabel, 16], Style["Frequency (GHz)", 16]},
+    FrameStyle -> Directive[FontSize -> 14, Black],
+    PlotLegends -> None,
+    ImageSize -> 600,
+    MaxRecursion -> 4
   ];
 
-  (* 4. Легенда *)
+  (* 4. Легенда с обновленным диапазоном *)
   legend = BarLegend[
-      {colFunc, {0, 1.05}},
-      LegendLabel -> Style[legendLabel, FontSize -> 16],
-      LabelStyle -> Directive[Black, 14],
-      LegendMarkerSize -> {20, 300}
+    {colFunc, {-40, 0}},
+    LegendLabel -> Style[legendLabel, FontSize -> 16],
+    LabelStyle -> Directive[Black, 14],
+    LegendMarkerSize -> {20, 300}
   ];
 
   Legended[plot, Placed[legend, Right]]
@@ -1446,7 +1611,7 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
   
   (* 2. Внутренняя функция расчета с умным кэшем *)
   computeRoots[phi_] := Module[{res},
-    QED`Numeric`GenerateSweepPipeline[model, "SweepInit"][phi];
+    QED`Numeric`GenerateSweepPipeline[model, "SweepInit"][phi]; 
     res = sweepFunc[phi][0.0];
     If[ListQ[res], res / (2 * Pi * 10^9), {{}, {}}]
   ];
@@ -1464,14 +1629,14 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
   
   (* 3. Подготовка плоских структур для функции Plot *)
   (* ВАЖНО: Рисуем сначала полюса (eq=2), затем нули (eq=1), чтобы нули оказались на переднем плане *)
-  funcsToPlot = Flatten[Table[getEqRoot[eq, r, phi], {eq, {2, 1}}, {r, 1, maxRoots}]];
+  funcsToPlot = Flatten[Table[getEqRoot[eq, r, phi], {eq, {1, 2}}, {r, 1, maxRoots}]];
   
   plotStyles = Flatten[Table[
     If[eq == 1, 
         Directive[RGBColor[0.12, 0.47, 0.71], Thickness[0.005]],         (* Синий сплошной для Нулей *)
         Directive[RGBColor[1.0, 0.50, 0.05], Dashed, Thickness[0.005]]   (* Оранжевый пунктир для Полюсов *)
     ],
-    {eq, {2, 1}}, {r, 1, maxRoots}
+    {eq, {1, 2}}, {r, 1, maxRoots}
   ]];
   
   (* 4. Отрисовка адаптивного графика *)
@@ -1501,6 +1666,64 @@ PlotBICModes[model_Association, OptionsPattern[]] := Module[
     MaxRecursion -> 2,
     PlotPoints -> plotPts
   ]
+];
+
+PlotBICOverlayMap[model_Association, opts:OptionsPattern[]] := Module[
+  {mapLegended, linesLegended, baseMap, baseLines, barLeg, lineLeg, combinedPlot, currentPorts, explicitPorts, cleanOpts},
+
+  (* 1. Пуленепробиваемое извлечение портов (ищем и строку "Ports", и символ Ports) *)
+  explicitPorts = Cases[Flatten[{opts}], (k_ -> v_) /; MatchQ[k, "Ports" | Ports] :> v];
+  
+  (* Берем то, что передал пользователь, а если ничего - берем дефолт *)
+  currentPorts = If[Length[explicitPorts] > 0, Last[explicitPorts], OptionValue["Ports"]];
+
+  (* Очищаем пользовательские опции от портов, чтобы избежать конфликтов типов *)
+  cleanOpts = DeleteCases[Flatten[{opts}], (k_ -> _) /; MatchQ[k, "Ports" | Ports]];
+
+  (* 2. Генерируем тепловую карту (строго передаем порты как СТРОКУ) *)
+  mapLegended = PlotSParameterMapCustomMesh[model, 
+     "Ports" -> currentPorts,
+     Sequence @@ FilterRules[cleanOpts, Options[PlotSParameterMapCustomMesh]]
+  ];
+
+  (* 3. Генерируем аналитические линии (строго передаем порты как СИМВОЛ) *)
+  linesLegended = PlotBICModes[model,
+     Ports -> currentPorts,
+     SweepRange -> OptionValue["FluxRange"],
+     SweepPoints -> OptionValue["SweepPoints"]
+  ];
+
+  (* 4. Распаковываем объекты: отделяем чистую графику от легенд *)
+  baseMap = If[Head[mapLegended] === Legended, mapLegended[[1]], mapLegended];
+  barLeg = If[Head[mapLegended] === Legended, mapLegended[[2]], Placed[Point[0], None]];
+
+  baseLines = If[Head[linesLegended] === Legended, linesLegended[[1]], linesLegended];
+
+  (* 5. Умная замена цветов аналитических линий для темного фона *)
+  baseLines = baseLines /. {
+     RGBColor[r_, g_, b_] /; (Abs[r - 0.12] < 0.05) -> Darker[Cyan, 0.2],
+     RGBColor[r_, g_, b_] /; (Abs[r - 1.0] < 0.05) -> White
+  };
+
+  (* 6. Создаем высококонтрастную легенду для линий (я вернул аккуратную толщину 0.004) *)
+  lineLeg = Placed[
+     LineLegend[
+        {Directive[Darker[Cyan, 0.2], Thickness[0.01]], Directive[Black, Dashed, Thickness[0.01]]},
+        {"Poles", "Zeros"},
+        LegendFunction -> (Framed[#, Background -> White, FrameMargins -> 2, FrameStyle -> GrayLevel[0.6]] &)
+     ],
+     {Left, Bottom}
+  ];
+
+  (* 7. Накладываем графики через Show с жесткой фиксацией рамок для экспорта *)
+  combinedPlot = Show[
+     baseMap,
+     baseLines,
+     PlotRange -> {OptionValue["FluxRange"], OptionValue["FrequencyRange"]}
+  ];
+
+  (* 8. Собираем финальный объект с двумя легендами *)
+  Legended[combinedPlot, {barLeg, lineLeg}]
 ];
 
 End[];

@@ -33,6 +33,10 @@ V = dH/dq for a specific node, capturing the full capacitive coupling structure.
 BuildDynamicInductanceRules::usage = "BuildDynamicInductanceRules[topology, primaryParams, potential] \
 builds replacement rules that express effective Josephson inductances L_EJ as functions of equilibrium phases.";
 
+BuildZeroModeTransform::usage = "BuildZeroModeTransform[topology] generates coordinate transformation rules to eliminate zero modes.";
+
+BuildCharacteristicEquation::usage = "BuildCharacteristicEquation[capMatrix, invIndMatrix] builds the characteristic equation \
+det(L^-1 - \[Omega]^2 C) = 0 for the closed system's eigenfrequencies and extracts its coefficients.";
 
 Begin["`Private`"];
 
@@ -42,9 +46,17 @@ phi0 = QED`$Phi0;
 hbar = QED`$hbar;
 
 
-(* Вспомогательная функция для получения независимых узлов *)
-getIndependentNodes[topology_Association] := 
+(* Все узлы кроме земли (используются для полной матрицы емкостей) *)
+getAllIndependentNodes[topology_Association] := 
   Cases[topology["Nodes"], Except[topology["GroundNode"]]];
+
+(* Только активные узлы, без якорей нулевых мод (используются для Гамильтониана) *)
+getActiveNodes[topology_Association] := Module[{nodes, zeroModes},
+  nodes = getAllIndependentNodes[topology];
+  (* Предполагается, что CircuitTopology сохраняет список узлов-якорей *)
+  zeroModes = Lookup[topology["GraphStructure"], "ZeroModeNodes", {}];
+  Complement[nodes, zeroModes]
+];
 
 
 (* ════════════════════════════════════════════════════════════════ *)
@@ -126,16 +138,46 @@ BuildLagrangian[topology_Association, primaryParams_Association] :=
  ];
 
 
-BuildCapacitanceMatrix[lagrangian_, topology_Association] := 
- Module[{nodes, phiDotVars, capacitanceMatrix},
-  nodes = getIndependentNodes[topology];
-  phiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ nodes;
-  capacitanceMatrix = Outer[
-    D[D[lagrangian, #1], #2] &,
-    phiDotVars,
-    phiDotVars
+BuildCapacitanceMatrix[lagrangianTransformed_, topology_Association] := 
+ Module[{allNodes, activeNodes, allPhiDotVars, capMatrixFull, 
+         nonZeroIndices, capMatrixSolid, invCapMatrixSolid, invCapMatrixFull,
+         activeIndices, reducedInvCapMatrix, effCapMatrix},
+         
+  allNodes = getAllIndependentNodes[topology];
+  activeNodes = getActiveNodes[topology];
+  
+  allPhiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ allNodes;
+  
+  (* 1. Полная матрица емкостей (N x N) в новых координатах *)
+  capMatrixFull = Outer[
+    D[D[lagrangianTransformed, #1], #2] &,
+    allPhiDotVars,
+    allPhiDotVars
   ];
-  capacitanceMatrix
+  
+  (* 2. Находим узлы, у которых есть хоть какая-то емкость (диагональ != 0) *)
+  nonZeroIndices = Select[Range[Length[allNodes]], capMatrixFull[[#, #]] =!= 0 &];
+  
+  If[Length[nonZeroIndices] == 0,
+    Return[ConstantArray[0, {Length[activeNodes], Length[activeNodes]}]];
+  ];
+  
+  (* 3. Вырезаем невырожденную часть и обращаем её *)
+  capMatrixSolid = capMatrixFull[[nonZeroIndices, nonZeroIndices]];
+  invCapMatrixSolid = Inverse[capMatrixSolid];
+  
+  (* 4. Возвращаем нули на место для вырожденных (пустых) переменных *)
+  invCapMatrixFull = ConstantArray[0, Dimensions[capMatrixFull]];
+  invCapMatrixFull[[nonZeroIndices, nonZeroIndices]] = invCapMatrixSolid;
+  
+  (* 5. Выделяем блок матрицы обратных емкостей, соответствующий только активным узлам *)
+  activeIndices = Flatten[Map[FirstPosition[allNodes, #]&, activeNodes]];
+  reducedInvCapMatrix = invCapMatrixFull[[activeIndices, activeIndices]];
+  
+  (* 6. Итоговая матрица емкостей (N_act x N_act) - это обратная к редуцированной *)
+  effCapMatrix = Simplify[Inverse[reducedInvCapMatrix]];
+  
+  effCapMatrix
  ];
 
 
@@ -168,7 +210,7 @@ BuildCapacitanceMatrix[lagrangian_, topology_Association] :=
 BuildInductanceMatrix[hamiltonian_, topology_Association] := 
  Module[{nodes, phiVars, minSymbols, hessianSymbolic},
   
-  nodes = getIndependentNodes[topology];
+  nodes = getActiveNodes[topology];
   phiVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
   
@@ -183,21 +225,24 @@ BuildInductanceMatrix[hamiltonian_, topology_Association] :=
   Simplify[hessianSymbolic]
  ];
 
-
-BuildHamiltonian[lagrangian_, capMatrix_, topology_Association] := 
- Module[{nodes, phiVars, phiDotVars, qVars, kineticEnergy, potentialEnergy},
-  nodes = getIndependentNodes[topology];
-  phiVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
-  phiDotVars = Derivative[1][Subscript[QED`$FluxSymbol, #]][t] & /@ nodes;
-  qVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
+BuildHamiltonian[lagrangianTransformed_, capMatrixActive_, topology_Association] := 
+ Module[{activeNodes, activeQVars, invCapMatrixActive, 
+         kineticEnergy, potentialEnergy},
+         
+  activeNodes = getActiveNodes[topology];
+  activeQVars = Subscript[QED`$ChargeSymbol, #] & /@ activeNodes;
   
-  kineticEnergy = (1/2) * qVars . Inverse[capMatrix] . qVars;
-  potentialEnergy = -lagrangian /. Thread[phiDotVars -> 0];
+  (* 1. Обращаем матрицу емкостей (она уже правильного размера N_act x N_act) *)
+  invCapMatrixActive = Inverse[capMatrixActive];
   
-  (*Долгая операция*)
-  Collect[kineticEnergy + potentialEnergy, Join[phiVars, qVars], Simplify]
+  (* 2. Строим кинетическую энергию только для активных переменных *)
+  kineticEnergy = (1/2) * activeQVars . invCapMatrixActive . activeQVars;
+  
+  (* 3. Потенциальная энергия: УНИВЕРСАЛЬНО зануляем ЛЮБЫЕ скорости (производные) *)
+  potentialEnergy = -lagrangianTransformed /. Derivative[1][_][_] -> 0;
+  
+  Collect[kineticEnergy + potentialEnergy, Join[Subscript[QED`$FluxSymbol, #] & /@ activeNodes, activeQVars], Simplify]
  ];
-
 
 (*
   Physics: Gradient of potential energy for equilibrium conditions.
@@ -218,7 +263,7 @@ BuildHamiltonian[lagrangian_, capMatrix_, topology_Association] :=
 BuildPotentialGradient[hamiltonian_, topology_Association] := 
  Module[{nodes, fluxVars, potential, gradient},
   
-  nodes = getIndependentNodes[topology];
+  nodes = getActiveNodes[topology];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   
   (* Потенциальная энергия: U(φ) = H(q=0, φ) *)
@@ -253,7 +298,7 @@ BuildPotentialGradient[hamiltonian_, topology_Association] :=
 BuildHarmonicHamiltonian[hamiltonian_, topology_Association] := 
  Module[{nodes, fluxVars, minSymbols, deltas, t, seriesTotalDeg},
   
-  nodes = getIndependentNodes[topology];
+  nodes = getActiveNodes[topology];
   
   (* Исходные переменные потока *)
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
@@ -303,7 +348,7 @@ BuildHarmonicWavefunction[
     nDOF
 },
     (* 0. Generate variables from topology *)
-    nodes = getIndependentNodes[topology];
+    nodes = getActiveNodes[topology];
     fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
     minFluxVars = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
     nDOF = Length[nodes];
@@ -370,7 +415,7 @@ BuildCurrentOperator[hamiltonian_, topology_Association] :=
   exactCurrent = Simplify[-D[hamiltonian, QED`$PhiExt]];
   
   (* 2. Подготовка переменных для разложения *)
-  nodes = getIndependentNodes[topology];
+  nodes = getActiveNodes[topology];
   fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
   minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
   
@@ -434,6 +479,82 @@ BuildDynamicInductanceRules[topology_, primaryParams_, potential_] :=
     topology["Components"]
   ]
  ];
+
+BuildZeroModeTransform[topology_Association] := Module[
+  {islands, fluxRules, fluxDotRules, zeroModeNodes},
+  
+  islands = Lookup[topology["GraphStructure"], "FloatingIslands", {}];
+  zeroModeNodes = {};
+  fluxRules = {};
+  fluxDotRules = {};
+  
+  Do[
+    Module[{anchor = island[[1]], others = Rest[island], anchorSym, anchorDotSym},
+      anchorSym = Subscript[QED`$FluxSymbol, anchor];
+      anchorDotSym = Derivative[1][Subscript[QED`$FluxSymbol, anchor]][t];
+      
+      AppendTo[zeroModeNodes, anchor];
+      
+      (* Все остальные узлы острова выражаются через якорь (центр масс) *)
+      Do[
+        AppendTo[fluxRules, Subscript[QED`$FluxSymbol, node] -> Subscript[QED`$FluxSymbol, node] + anchorSym];
+        AppendTo[fluxDotRules, Derivative[1][Subscript[QED`$FluxSymbol, node]][t] -> Derivative[1][Subscript[QED`$FluxSymbol, node]][t] + anchorDotSym];
+      , {node, others}];
+    ]
+  , {island, islands}];
+  
+  <|
+    "ZeroModeNodes" -> zeroModeNodes,
+    "FluxRules" -> fluxRules,
+    "FluxDotRules" -> fluxDotRules
+  |>
+];
+
+BuildCharacteristicEquation[capMatrix_, invIndMatrix_] := Module[
+  {omegaSym, matrix, detPoly, eqCoeffs, alphaRules, charEq},
+  
+  omegaSym = Symbol["\[Omega]"];
+  
+  (* 1. Вычисляем детерминант: det(L^-1 - \[Omega]^2 * C) *)
+  matrix = invIndMatrix - omegaSym^2 * capMatrix;
+  detPoly = Simplify[Det[matrix]];
+  
+  (* 2. Извлекаем коэффициенты при степенях \[Omega] *)
+  eqCoeffs = CoefficientList[detPoly, omegaSym];
+  
+  (* 3. Распределяем коэффициенты по греческим буквам *)
+  alphaRules = <||>;
+  If[Length[eqCoeffs] > 0, alphaRules["\[Gamma]"] = Simplify[eqCoeffs[[1]]]];
+  If[Length[eqCoeffs] > 2, alphaRules["\[Alpha]"] = Simplify[-eqCoeffs[[3]]]]; (* Знак минус для формата -\[Alpha]\[Omega]^2 *)
+  If[Length[eqCoeffs] > 4, alphaRules["\[Beta]"]  = Simplify[eqCoeffs[[5]]]];
+  If[Length[eqCoeffs] > 6, alphaRules["\[Eta]"]   = Simplify[eqCoeffs[[7]]]];
+  
+  (* Автоматическая индексация для степеней выше 6 (\[Omega]^8 и т.д.) *)
+  Do[
+    If[eqCoeffs[[i]] =!= 0, alphaRules["\[Alpha]" <> ToString[i-1]] = Simplify[eqCoeffs[[i]]]],
+    {i, 9, Length[eqCoeffs], 2}
+  ];
+  
+  (* 4. Собираем красивое символьное уравнение *)
+  charEq = If[Length[eqCoeffs] > 0,
+    Sum[
+      Switch[i-1,
+        0, Symbol["\[Gamma]"],
+        2, -Symbol["\[Alpha]"] * omegaSym^2,
+        4, Symbol["\[Beta]"] * omegaSym^4,
+        6, Symbol["\[Eta]"] * omegaSym^6,
+        _, Subscript[Symbol["\[Alpha]"], i-1] * omegaSym^(i-1)
+      ],
+      {i, 1, Length[eqCoeffs], 2}
+    ] == 0,
+    True
+  ];
+  
+  <|
+    "CharacteristicEquation" -> charEq,
+    "CharacteristicCoefficients" -> alphaRules
+  |>
+];
 
 End[];
 EndPackage[];

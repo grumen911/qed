@@ -152,7 +152,8 @@ BuildSymbolicScattering[topology_Association, primaryParams_Association, opts : 
 
 BuildSymbolicBICCondition[sMatrixAssoc_Association, opts : OptionsPattern[]] := 
  Module[{sMat, sVar, z0Var, xVar, detS, charPoly, coeffs, processPoly, 
-         rawSystem, rules, simplifiedSystem, cond, freqX, omegaBic},
+         rawSystem, rules, simplifiedSystem, cond, freqX, omegaBic,
+         omegaSym, polyOmega, eqToProcess, eqCoeffs, alphaRules, charEq},
   
   sMat = sMatrixAssoc["SMatrix"];
   sVar = sMatrixAssoc["FrequencyVariable"];
@@ -213,6 +214,43 @@ BuildSymbolicBICCondition[sMatrixAssoc_Association, opts : OptionsPattern[]] :=
   (* Поскольку x = s^2 = -omega^2, физическая частота omega = Sqrt[-x] *)
   omegaBic = If[freqX =!= $Failed, Simplify[Sqrt[-freqX]], $Failed];
 
+  (* 9. Аналитический вид характеристического уравнения *)
+  omegaSym = Symbol["\[Omega]"];
+  eqToProcess = If[Length[simplifiedSystem] > 0, 
+                   SortBy[simplifiedSystem, Exponent[#, xVar] &][[1]], 
+                   0];
+  
+  (* Делаем замену x -> -\[Omega]^2 и извлекаем коэффициенты *)
+  polyOmega = Simplify[eqToProcess /. xVar -> -omegaSym^2];
+  eqCoeffs = CoefficientList[polyOmega, omegaSym];
+  
+  alphaRules = <||>;
+  If[Length[eqCoeffs] > 0, alphaRules["\[Gamma]"] = eqCoeffs[[1]]];
+  If[Length[eqCoeffs] > 2, alphaRules["\[Alpha]"] = -eqCoeffs[[3]]];
+  If[Length[eqCoeffs] > 4, alphaRules["\[Beta]"]  = eqCoeffs[[5]]];
+  If[Length[eqCoeffs] > 6, alphaRules["\[Eta]"]   = eqCoeffs[[7]]];
+  
+  (* Автоматическая индексация для степеней выше 6 *)
+  Do[
+    If[eqCoeffs[[i]] =!= 0, alphaRules["\[Alpha]" <> ToString[i-1]] = eqCoeffs[[i]]],
+    {i, 9, Length[eqCoeffs], 2}
+  ];
+  
+  (* Собираем красивое символьное уравнение *)
+  charEq = If[Length[eqCoeffs] > 0,
+    Sum[
+      Switch[i-1,
+        0, Symbol["\[Gamma]"],
+        2, -Symbol["\[Alpha]"] * omegaSym^2,
+        4, Symbol["\[Beta]"] * omegaSym^4,
+        6, Symbol["\[Eta]"] * omegaSym^6,
+        _, Subscript[Symbol["\[Alpha]"], i-1] * omegaSym^(i-1)
+      ],
+      {i, 1, Length[eqCoeffs], 2}
+    ] == 0,
+    True
+  ];
+
   <|
     "FullSystem" -> Thread[rawSystem == 0],         
     "SimplifiedSystem" -> Thread[simplifiedSystem == 0], 
@@ -220,7 +258,9 @@ BuildSymbolicBICCondition[sMatrixAssoc_Association, opts : OptionsPattern[]] :=
     "Condition" -> cond,                            
     "RulesApplied" -> rules,
     "FrequencySquared" -> freqX,                    (* x = s^2 *)
-    "Frequency" -> omegaBic                         (* omega = Sqrt[-x] *)
+    "Frequency" -> omegaBic,                         (* omega = Sqrt[-x] *)
+    "CharacteristicEquation" -> charEq,             
+    "CharacteristicCoefficients" -> alphaRules
   |>
  ];
 
