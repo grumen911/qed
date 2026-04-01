@@ -929,9 +929,9 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
   Module[{
     nModes, range, logRange, timeRange, channel, labelSub, 
     nodes, numNodes, fluxVars, chargeVars, hbar,
-    currentOpNum, currentGradient, voltageOpsNum, voltageOp, voltageGradient, portNode,
-    mInd, rInd, cCap, rCap,
-    sweepFunc, computeT1, lastPhi = "Init", lastRates = {}, getRate
+    voltageOpsNum, voltageOp, voltageGradient, portNode,
+    mInd, rInd, cCap, rCap, 
+    sweepFunc, opSweepFunc, computeT1, lastPhi = "Init", lastRates = {}, getRate
   },
     
     (* 1. Опции графика *)
@@ -951,7 +951,7 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
 
     (* 2. Извлекаем статические параметры и градиенты операторов (1 раз до цикла) *)
     nodes = Cases[model["Topology"]["Nodes"], Except[model["Topology"]["GroundNode"]]];
-    numNodes = Length[nodes];
+    numNodes = model["Topology"]["DegreesOfFreedom"];
     fluxVars = Subscript[QED`$FluxSymbol, #] & /@ nodes;
     chargeVars = Subscript[QED`$ChargeSymbol, #] & /@ nodes;
     hbar = QED`$hbarValue;
@@ -963,29 +963,32 @@ PlotRelaxationTime[model_Association, opts:OptionsPattern[]] :=
     rCap = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "CapacitiveLineResistance"];
     portNode = OptionValue[QED`Numeric`CalculateFermiRates, FilterRules[{opts}, Options[QED`Numeric`CalculateFermiRates]], "PortNode"];
 
-    (* Операторы *)
-    currentOpNum = QED`Model`GetNumericalQuantity[model, "CurrentOperatorNumerical"];
-    If[FailureQ[currentOpNum], currentOpNum = 0];
-    currentGradient = D[currentOpNum, {fluxVars}]; 
+
     
     voltageOpsNum = QED`Model`GetNumericalQuantity[model, "VoltageOperatorsNumerical"];
     If[FailureQ[voltageOpsNum], voltageOpsNum = <||>];
     voltageOp = If[KeyExistsQ[voltageOpsNum, portNode], voltageOpsNum[portNode], 0];
     voltageGradient = D[voltageOp, {chargeVars}];
 
-    (* 3. Создаем новый JIT-конвейер для диагонализации *)
+    (* 3. Создаем JIT-конвейеры для диагонализации и оператора тока *)
     sweepFunc = QED`Numeric`GenerateSweepPipeline[model, "HarmonicDiagonalization"];
-    If[sweepFunc === $Failed,
+    opSweepFunc = QED`Numeric`GenerateSweepPipeline[model, "CurrentOperator"];
+    
+    If[sweepFunc === $Failed || opSweepFunc === $Failed,
       Return[Graphics[{Red, Text["Error: JIT Sweep generation failed.", {0,0}]}]]
     ];
 
     (* 4. Внутренняя функция расчета T1 по свежим матрицам *)
     computeT1[phi_] := Module[
-      {diag, freqs, caps, Nmat, Mmat, rates, w, fZPF, cZPF, iElem, vElem, gInd, gCap, gTot, targetRate, ord, k},
+      {diag, currentOpNum, currentGradient, freqs, caps, Nmat, Mmat, rates, 
+       w, fZPF, cZPF, iElem, vElem, gInd, gCap, gTot, targetRate, ord, k},
       
       diag = sweepFunc[phi];
       If[FailureQ[diag], Return[ConstantArray[Null, nModes]]];
       
+      currentOpNum = opSweepFunc[phi];
+      currentGradient = D[currentOpNum, {fluxVars}];
+
       freqs = diag["NormalModeFrequencies"];
       caps = diag["EffectiveCapacitances"];
       Nmat = diag["FluxTransform"];

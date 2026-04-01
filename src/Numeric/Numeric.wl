@@ -276,6 +276,22 @@ GenerateSweepPipeline[modelAssoc_, targetQuantity_String, OptionsPattern[]] := M
             ]
           ],
 
+        "CurrentOperator",
+          Module[{currentOpSym, nodes, minSymbols, guessRules, paramRules},
+            currentOpSym = modelAssoc["Analytical"]["CurrentOperator"];
+            If[MissingQ[currentOpSym] || currentOpSym === $Failed, Return[0]];
+            
+            nodes = Cases[modelAssoc["Topology"]["Nodes"], Except[modelAssoc["Topology"]["GroundNode"]]];
+            minSymbols = Subscript[QED`$FluxSymbol, "min", #] & /@ nodes;
+            
+            (* Формируем правила для актуальной точки равновесия и актуальных параметров *)
+            guessRules = Thread[minSymbols -> currentGuess];
+            paramRules = Thread[paramSymbols -> currentParamVector];
+            
+            (* Подставляем все числа, возвращая полу-числовое выражение *)
+            currentOpSym /. guessRules /. paramRules /. {QED`$Phi0 -> QED`$Phi0Value, QED`$hbar -> QED`$hbarValue, QED`$e -> QED`$eValue}
+          ],  
+
         _, 
           $Failed
       ]
