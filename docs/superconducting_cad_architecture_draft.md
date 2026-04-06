@@ -16,14 +16,18 @@ Goal: build a standalone, highly extensible CAD-like application for modeling an
 1. **GUI layer (Qt)**
 - Responsible for windows, docking layout, editors (schematic + parameter tables), and interactive controls.
 - Does not implement physics/solvers; it only reads/writes the application state.
+- Supports state initialization via auto-loaded presets/templates upon startup.
+- Automatically handles formatting, parameter grouping, and physical dimension/unit display in editors without bleeding into the core compute logic.
 
-2. **Model / state layer (Document model)**
+1. **Model / state layer (Document model)**
 - Single source of truth: circuit graph, component parameters, analysis configuration, computed results, caches.
 - Emits change notifications (signals/slots or observer pattern) so the UI and compute scheduler react to edits.
 
-3. **Computational core (engine)**
+1. **Computational core (engine)**
 - Pure “business logic”: equation assembly, symbolic/analytic steps where relevant, numeric solvers, postprocessing.
 - No Qt dependency; designed to be unit-testable and callable from different front-ends.
+- Strict module isolation: Enforces acyclic dependencies between physical models and mathematical solvers (e.g., isolating system parameter derivation from quantum scattering calculations) to prevent cyclic import issues.
+- Caching strategy: Internal caches (for numerical quantities and rules) are strictly versioned with the Document state to prevent stale data reuse.
 
 ### Data flow (reactive but controlled)
 
@@ -31,6 +35,7 @@ Goal: build a standalone, highly extensible CAD-like application for modeling an
 - Document emits `changed(...)` → scheduler decides what becomes invalid.
 - Scheduler triggers recomputation (possibly async) → results are written back to Document.
 - Views subscribe to Document signals and update plots/tables.
+- **Dependency Graph (DAG) for evaluation:** The scheduler builds a directed acyclic graph of dependencies rather than using naive lazy evaluation. This allows explicitly separating classical (e.g., effective inductances, flux sweeps) and quantum (e.g., scattering, harmonic perturbations) calculation steps, ensuring they are only recomputed when their specific upstream dependencies change.
 
 This mimics WL-like dynamic updates, but with explicit invalidation/caching rules.
 
@@ -54,6 +59,8 @@ This mimics WL-like dynamic updates, but with explicit invalidation/caching rule
 - **ViewPlugin**
   - Adds a dockable panel (plot viewer, sweep explorer, report generator, etc.).
   - Reads results from Document and renders them.
+  - *Advanced visualization:* Supports publication-quality plot rendering with LaTeX-formatted labels.
+  - *Inspection views:* Includes debugging views (e.g., a "file manager" style hierarchical inspector for raw internal caches, parameters, and numeric quantities).
 
 ### Qt plugin mechanism (C++/Qt)
 
@@ -94,6 +101,7 @@ This mimics WL-like dynamic updates, but with explicit invalidation/caching rule
 - Deterministic runs (fixed seeds where relevant).
 - Version tag in output: core/engine/plugin versions and input hash.
 - Regression tests based on small circuits with known results.
+- Standardized logging and error reporting (no silent failures or raw `print` statements; strictly routed through a central messaging/logging system).
 
 ## Related existing tools (ecosystem survey)
 
